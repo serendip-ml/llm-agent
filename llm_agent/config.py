@@ -21,3 +21,6 @@ class AgentConfig(BaseModel):
     # RAG defaults (Phase 4)
     rag_top_k: int = 5
     rag_min_similarity: float = 0.3
+
+    # Response tracking for feedback (bounded to prevent memory leaks)
+    max_tracked_responses: int = 1000

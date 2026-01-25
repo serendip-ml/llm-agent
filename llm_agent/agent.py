@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from llm_learn import LearnClient
 from llm_learn.inference import ContextBuilder
@@ -93,7 +93,11 @@ class Agent:
             model=self._config.model,
         )
 
-        # Track response for feedback
+        # Track response for feedback (bounded to prevent memory leaks)
+        if len(self._response_contexts) >= self._config.max_tracked_responses:
+            # Evict oldest entry (dicts maintain insertion order in Python 3.7+)
+            oldest_key = next(iter(self._response_contexts))
+            del self._response_contexts[oldest_key]
         self._response_contexts[result.id] = _ResponseContext(
             system_prompt=prompt,
             query=query,
@@ -105,29 +109,18 @@ class Agent:
 
     def _build_prompt(self, base_prompt: str) -> str:
         """Build system prompt with fact injection based on config."""
-        mode = self._config.fact_injection
-
-        if mode == "none":
+        if self._config.fact_injection == "none":
             return base_prompt
 
-        if mode == "all":
-            prompt = self._context.build_system_prompt(
+        # "all" and "rag" modes both inject facts
+        # TODO(Phase 3): RAG mode should use embedder for semantic retrieval
+        return cast(
+            str,
+            self._context.build_system_prompt(
                 base_prompt=base_prompt,
                 max_facts=self._config.max_facts,
-            )
-            if not isinstance(prompt, str):
-                raise RuntimeError("ContextBuilder.build_system_prompt returned non-string")
-            return prompt
-
-        # RAG mode - validated in __init__ that embedder is present
-        # Phase 3 will implement actual RAG; for now use "all" mode semantics
-        prompt = self._context.build_system_prompt(
-            base_prompt=base_prompt,
-            max_facts=self._config.max_facts,
+            ),
         )
-        if not isinstance(prompt, str):
-            raise RuntimeError("ContextBuilder.build_system_prompt returned non-string")
-        return prompt
 
     # === Memory (delegates to llm-learn) ===
 
@@ -141,10 +134,7 @@ class Agent:
         Returns:
             Fact ID.
         """
-        fact_id = self._learn.facts.add(fact, category=category)
-        if not isinstance(fact_id, int):
-            raise RuntimeError(f"facts.add returned non-integer: {type(fact_id)}")
-        return fact_id
+        return cast(int, self._learn.facts.add(fact, category=category))
 
     def forget(self, fact_id: int) -> None:
         """Remove a stored fact.

@@ -300,3 +300,29 @@ class TestAgent:
         # Second feedback on same response should fail (context was cleaned up)
         with pytest.raises(ValueError, match="Unknown response_id"):
             agent.feedback("resp-1", "positive")
+
+    def test_response_context_evicts_oldest_when_full(self, mock_learn, mock_context_builder):
+        """Verify oldest response contexts are evicted when limit is reached."""
+        config = AgentConfig(name="test", max_tracked_responses=3)
+        llm = MagicMock()
+        agent = Agent(config=config, llm=llm, learn=mock_learn)
+
+        # Generate 4 completions with a limit of 3
+        for i in range(4):
+            llm.complete.return_value = CompletionResult(
+                id=f"resp-{i}",
+                content=f"Response {i}",
+                model="default",
+                tokens_used=10,
+                latency_ms=100,
+            )
+            agent.complete(f"Query {i}")
+
+        # resp-0 should have been evicted (oldest)
+        with pytest.raises(ValueError, match="Unknown response_id"):
+            agent.feedback("resp-0", "positive")
+
+        # resp-1, resp-2, resp-3 should still be tracked
+        agent.feedback("resp-1", "positive")
+        agent.feedback("resp-2", "positive")
+        agent.feedback("resp-3", "positive")
