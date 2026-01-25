@@ -8,6 +8,9 @@ import pytest
 from llm_agent.llm import CompletionResult, HTTPBackend, LLMError, Message
 
 
+pytestmark = pytest.mark.unit
+
+
 class TestHTTPBackend:
     """Tests for HTTPBackend."""
 

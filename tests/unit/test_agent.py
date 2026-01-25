@@ -7,6 +7,9 @@ import pytest
 from llm_agent import Agent, AgentConfig, CompletionResult
 
 
+pytestmark = pytest.mark.unit
+
+
 class TestAgentConfig:
     """Tests for AgentConfig."""
 
@@ -261,3 +264,39 @@ class TestAgent:
         agent.unload_adapter()
 
         llm.unload_adapter.assert_called_once()
+
+    def test_rag_mode_without_embedder_raises(self, mock_learn, mock_context_builder):
+        config = AgentConfig(name="test", fact_injection="rag")
+        llm = MagicMock()
+
+        with pytest.raises(ValueError, match="fact_injection='rag' requires an embedder"):
+            Agent(config=config, llm=llm, learn=mock_learn)
+
+    def test_rag_mode_with_embedder_succeeds(self, mock_learn, mock_context_builder):
+        config = AgentConfig(name="test", fact_injection="rag")
+        llm = MagicMock()
+        embedder = MagicMock()
+
+        agent = Agent(config=config, llm=llm, learn=mock_learn, embedder=embedder)
+
+        assert agent.name == "test"
+
+    def test_feedback_cleans_up_response_context(self, mock_learn, mock_context_builder):
+        """Verify feedback removes response context to prevent memory leaks."""
+        config = AgentConfig(name="test")
+        llm = MagicMock()
+        llm.complete.return_value = CompletionResult(
+            id="resp-1",
+            content="Response",
+            model="default",
+            tokens_used=10,
+            latency_ms=100,
+        )
+        agent = Agent(config=config, llm=llm, learn=mock_learn)
+
+        agent.complete("Query")
+        agent.feedback("resp-1", "positive")
+
+        # Second feedback on same response should fail (context was cleaned up)
+        with pytest.raises(ValueError, match="Unknown response_id"):
+            agent.feedback("resp-1", "positive")

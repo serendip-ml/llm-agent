@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 from llm_learn import LearnClient
 from llm_learn.inference import ContextBuilder
@@ -36,6 +36,13 @@ class Agent:
             learn: Learning client from llm-learn.
             embedder: Embedder for RAG (optional, enables semantic search).
         """
+        # Validate RAG mode configuration
+        if config.fact_injection == "rag" and embedder is None:
+            raise ValueError(
+                "fact_injection='rag' requires an embedder. "
+                "Either provide an embedder or use fact_injection='all' or 'none'."
+            )
+
         self._config = config
         self._llm = llm
         self._learn = learn
@@ -104,23 +111,23 @@ class Agent:
             return base_prompt
 
         if mode == "all":
-            return cast(
-                str,
-                self._context.build_system_prompt(
-                    base_prompt=base_prompt,
-                    max_facts=self._config.max_facts,
-                ),
-            )
-
-        # RAG mode - requires embedder (Phase 3)
-        # For now, fall back to "all" mode
-        return cast(
-            str,
-            self._context.build_system_prompt(
+            prompt = self._context.build_system_prompt(
                 base_prompt=base_prompt,
                 max_facts=self._config.max_facts,
-            ),
+            )
+            if not isinstance(prompt, str):
+                raise RuntimeError("ContextBuilder.build_system_prompt returned non-string")
+            return prompt
+
+        # RAG mode - validated in __init__ that embedder is present
+        # Phase 3 will implement actual RAG; for now use "all" mode semantics
+        prompt = self._context.build_system_prompt(
+            base_prompt=base_prompt,
+            max_facts=self._config.max_facts,
         )
+        if not isinstance(prompt, str):
+            raise RuntimeError("ContextBuilder.build_system_prompt returned non-string")
+        return prompt
 
     # === Memory (delegates to llm-learn) ===
 
@@ -134,7 +141,10 @@ class Agent:
         Returns:
             Fact ID.
         """
-        return cast(int, self._learn.facts.add(fact, category=category))
+        fact_id = self._learn.facts.add(fact, category=category)
+        if not isinstance(fact_id, int):
+            raise RuntimeError(f"facts.add returned non-integer: {type(fact_id)}")
+        return fact_id
 
     def forget(self, fact_id: int) -> None:
         """Remove a stored fact.
@@ -162,7 +172,8 @@ class Agent:
         Raises:
             ValueError: If response_id is not found.
         """
-        ctx = self._response_contexts.get(response_id)
+        # Pop to remove after use - prevents unbounded memory growth
+        ctx = self._response_contexts.pop(response_id, None)
         if ctx is None:
             raise ValueError(f"Unknown response_id: {response_id}")
 

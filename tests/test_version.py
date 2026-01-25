@@ -1,6 +1,11 @@
 """Version test."""
 
+import pytest
+
 import llm_agent
+
+
+pytestmark = pytest.mark.unit
 
 
 def test_version() -> None:
