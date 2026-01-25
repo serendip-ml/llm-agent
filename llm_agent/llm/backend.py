@@ -78,6 +78,11 @@ class HTTPBackend:
         self._timeout = timeout
         self._default_model = default_model
         self._adapter_path: str | None = None
+        self._client = httpx.Client(timeout=self._timeout)
+
+    def close(self) -> None:
+        """Close the HTTP client and release resources."""
+        self._client.close()
 
     def complete(
         self,
@@ -139,10 +144,9 @@ class HTTPBackend:
         url = f"{self._base_url}/chat/completions"
 
         try:
-            with httpx.Client(timeout=self._timeout) as client:
-                response = client.post(url, json=payload)
-                response.raise_for_status()
-                return cast(dict[str, Any], response.json())
+            response = self._client.post(url, json=payload)
+            response.raise_for_status()
+            return cast(dict[str, Any], response.json())
         except httpx.HTTPStatusError as e:
             body = e.response.text if e.response else ""
             raise LLMError(f"LLM request failed ({e.response.status_code}): {body}") from e

@@ -11,6 +11,14 @@ from llm_agent.llm import CompletionResult, HTTPBackend, LLMError, Message
 class TestHTTPBackend:
     """Tests for HTTPBackend."""
 
+    @pytest.fixture(autouse=True)
+    def mock_httpx_client(self):
+        """Mock httpx.Client for all tests to avoid real connections."""
+        with patch("llm_agent.llm.backend.httpx.Client") as mock_class:
+            self.mock_client = MagicMock()
+            mock_class.return_value = self.mock_client
+            yield mock_class
+
     def test_init_defaults(self):
         backend = HTTPBackend(base_url="http://localhost:8000/v1")
         assert backend._base_url == "http://localhost:8000/v1"
@@ -103,8 +111,7 @@ class TestHTTPBackend:
         with pytest.raises(LLMError, match="Invalid API response"):
             backend._parse_response({"invalid": "response"})
 
-    @patch("llm_agent.llm.backend.httpx.Client")
-    def test_complete_success(self, mock_client_class):
+    def test_complete_success(self):
         mock_response = MagicMock()
         mock_response.json.return_value = {
             "id": "resp-123",
@@ -112,11 +119,7 @@ class TestHTTPBackend:
             "choices": [{"message": {"content": "Hello!"}}],
             "usage": {"total_tokens": 20},
         }
-        mock_client = MagicMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client_class.return_value = mock_client
+        self.mock_client.post.return_value = mock_response
 
         backend = HTTPBackend(base_url="http://localhost:8000/v1")
         messages = [Message(role="user", content="Hi")]
@@ -130,18 +133,13 @@ class TestHTTPBackend:
         assert result.tokens_used == 20
         assert result.latency_ms >= 0
 
-    @patch("llm_agent.llm.backend.httpx.Client")
-    def test_complete_http_error(self, mock_client_class):
+    def test_complete_http_error(self):
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.text = "Internal Server Error"
-        mock_client = MagicMock()
-        mock_client.post.side_effect = httpx.HTTPStatusError(
+        self.mock_client.post.side_effect = httpx.HTTPStatusError(
             "Server Error", request=MagicMock(), response=mock_response
         )
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client_class.return_value = mock_client
 
         backend = HTTPBackend(base_url="http://localhost:8000/v1")
         messages = [Message(role="user", content="Hi")]
@@ -149,19 +147,20 @@ class TestHTTPBackend:
         with pytest.raises(LLMError, match="LLM request failed"):
             backend.complete(messages)
 
-    @patch("llm_agent.llm.backend.httpx.Client")
-    def test_complete_connection_error(self, mock_client_class):
-        mock_client = MagicMock()
-        mock_client.post.side_effect = httpx.RequestError("Connection refused")
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client_class.return_value = mock_client
+    def test_complete_connection_error(self):
+        self.mock_client.post.side_effect = httpx.RequestError("Connection refused")
 
         backend = HTTPBackend(base_url="http://localhost:8000/v1")
         messages = [Message(role="user", content="Hi")]
 
         with pytest.raises(LLMError, match="LLM connection failed"):
             backend.complete(messages)
+
+    def test_close(self):
+        backend = HTTPBackend(base_url="http://localhost:8000/v1")
+        backend.close()
+
+        self.mock_client.close.assert_called_once()
 
     def test_load_adapter(self):
         backend = HTTPBackend(base_url="http://localhost:8000/v1")
