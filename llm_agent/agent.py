@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 from llm_learn import LearnClient
 from llm_learn.inference import ContextBuilder
@@ -114,12 +114,9 @@ class Agent:
 
         # "all" and "rag" modes both inject facts
         # TODO(Phase 3): RAG mode should use embedder for semantic retrieval
-        return cast(
-            str,
-            self._context.build_system_prompt(
-                base_prompt=base_prompt,
-                max_facts=self._config.max_facts,
-            ),
+        return self._context.build_system_prompt(
+            base_prompt=base_prompt,
+            max_facts=self._config.max_facts,
         )
 
     # === Memory (delegates to llm-learn) ===
@@ -134,7 +131,7 @@ class Agent:
         Returns:
             Fact ID.
         """
-        return cast(int, self._learn.facts.add(fact, category=category))
+        return self._learn.facts.add(fact, category=category)
 
     def forget(self, fact_id: int) -> None:
         """Remove a stored fact.
