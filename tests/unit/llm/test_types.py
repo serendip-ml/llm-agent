@@ -5,6 +5,9 @@ import pytest
 from llm_agent.llm import CompletionResult, Message
 
 
+pytestmark = pytest.mark.unit
+
+
 class TestMessage:
     """Tests for Message type."""
 
