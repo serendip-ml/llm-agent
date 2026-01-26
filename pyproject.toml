@@ -41,6 +41,9 @@ Homepage = "https://github.com/serendip-ml/llm-agent"
 Documentation = "https://github.com/serendip-ml/llm-agent#readme"
 Repository = "https://github.com/serendip-ml/llm-agent"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["llm_agent"]
 
