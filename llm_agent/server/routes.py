@@ -79,12 +79,6 @@ async def _recall(body: RecallRequest, request: Request) -> RecallResponse:
 
 async def _feedback(body: FeedbackRequest, request: Request) -> FeedbackResponse:
     """Record feedback on a response."""
-    if body.signal not in ("positive", "negative"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"signal must be 'positive' or 'negative', got '{body.signal}'",
-        )
-
     response = await request.app.state.ipc_channel.submit(body.id, body)
     resp = cast(FeedbackResponse, response)
     if not resp.success:

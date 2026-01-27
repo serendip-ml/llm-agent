@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal, TypeVar
 
+from appinfra.log import Logger
 from llm_learn import LearnClient
 from llm_learn.collection import ScoredFact
 from llm_learn.inference import ContextBuilder, Embedder
@@ -29,6 +30,7 @@ class Agent:
 
     def __init__(
         self,
+        lg: Logger,
         config: AgentConfig,
         llm: LLMBackend,
         learn: LearnClient,
@@ -37,6 +39,7 @@ class Agent:
         """Initialize agent.
 
         Args:
+            lg: Logger instance.
             config: Agent configuration.
             llm: LLM backend for completions.
             learn: Learning client from llm-learn.
@@ -49,6 +52,7 @@ class Agent:
                 "Either provide an embedder or use fact_injection='all' or 'none'."
             )
 
+        self._lg = lg
         self._config = config
         self._llm = llm
         self._learn = learn
@@ -374,6 +378,7 @@ class Agent:
                 tokens_used=result.tokens_used,
             )
         except Exception as e:
+            self._lg.warning("complete request failed", extra={"exception": e})
             return CompleteResponse(
                 id=req.id,
                 success=False,
@@ -397,6 +402,7 @@ class Agent:
             fact_id = self.remember(fact=req.fact, category=req.category)
             return RememberResponse(id=req.id, fact_id=fact_id)
         except Exception as e:
+            self._lg.warning("remember request failed", extra={"exception": e})
             return RememberResponse(id=req.id, success=False, error=str(e), fact_id=-1)
 
     def _handle_forget(self, request: Request) -> Response:
@@ -410,6 +416,7 @@ class Agent:
             self.forget(fact_id=req.fact_id)
             return ForgetResponse(id=req.id)
         except Exception as e:
+            self._lg.warning("forget request failed", extra={"exception": e})
             return ForgetResponse(id=req.id, success=False, error=str(e))
 
     def _handle_recall(self, request: Request) -> Response:
@@ -437,6 +444,7 @@ class Agent:
             ]
             return RecallResponse(id=req.id, facts=facts)
         except Exception as e:
+            self._lg.warning("recall request failed", extra={"exception": e})
             return RecallResponse(id=req.id, success=False, error=str(e))
 
     def _handle_feedback(self, request: Request) -> Response:
@@ -456,6 +464,7 @@ class Agent:
             )
             return FeedbackResponse(id=req.id)
         except Exception as e:
+            self._lg.warning("feedback request failed", extra={"exception": e})
             return FeedbackResponse(id=req.id, success=False, error=str(e))
 
     # === Adapter ===

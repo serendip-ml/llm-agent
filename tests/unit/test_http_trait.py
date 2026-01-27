@@ -201,6 +201,11 @@ class TestAgentHandleRequest:
     """Tests for Agent.handle_request method."""
 
     @pytest.fixture
+    def mock_logger(self):
+        """Create mock Logger."""
+        return MagicMock()
+
+    @pytest.fixture
     def mock_learn(self):
         """Create mock LearnClient."""
         learn = MagicMock()
@@ -220,7 +225,7 @@ class TestAgentHandleRequest:
             yield mock_cls
 
     @pytest.fixture
-    def agent(self, mock_learn, mock_context_builder):
+    def agent(self, mock_logger, mock_learn, mock_context_builder):
         """Create a test agent."""
         from llm_agent import Agent, AgentConfig
 
@@ -233,7 +238,7 @@ class TestAgentHandleRequest:
             tokens_used=25,
             latency_ms=100,
         )
-        return Agent(config=config, llm=llm, learn=mock_learn)
+        return Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
     def test_handle_health_request(self, agent):
         req = HealthRequest(id="req-1")
