@@ -351,6 +351,45 @@ class TestAgentHandleRequest:
         assert resp.success is False
         assert "embedder" in resp.error.lower()
 
+    def test_handle_recall_request_success(self, mock_logger, mock_learn, mock_context_builder):
+        """Verify successful recall returns facts serialized correctly."""
+        from llm_agent import Agent, AgentConfig
+        from llm_agent.protocol.v1 import RecallResponse
+
+        # Create embedder mock
+        embedder = MagicMock()
+        embedder.model = "test-embed-model"
+        embedding_result = MagicMock()
+        embedding_result.embedding = [0.1, 0.2, 0.3]
+        embedder.embed.return_value = embedding_result
+
+        # Setup mock scored facts
+        mock_fact = MagicMock()
+        mock_fact.id = 42
+        mock_fact.content = "User prefers Python"
+        mock_fact.category = "preferences"
+        mock_scored_fact = MagicMock()
+        mock_scored_fact.fact = mock_fact
+        mock_scored_fact.similarity = 0.85
+        mock_learn.facts.search_similar.return_value = [mock_scored_fact]
+
+        # Create agent with embedder
+        config = AgentConfig(name="test-agent", fact_injection="none")
+        llm = MagicMock()
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn, embedder=embedder)
+
+        req = RecallRequest(id="req-1", query="programming")
+        resp = agent.handle_request(req)
+
+        assert isinstance(resp, RecallResponse)
+        assert resp.success is True
+        assert resp.id == "req-1"
+        assert len(resp.facts) == 1
+        assert resp.facts[0]["fact_id"] == 42
+        assert resp.facts[0]["content"] == "User prefers Python"
+        assert resp.facts[0]["category"] == "preferences"
+        assert resp.facts[0]["similarity"] == 0.85
+
     def test_handle_feedback_request_error(self, agent):
         # Feedback on unknown response_id
         req = FeedbackRequest(id="req-1", response_id="nonexistent", signal="positive")
