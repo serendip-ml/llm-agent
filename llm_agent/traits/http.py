@@ -162,6 +162,8 @@ class HTTPTrait:
             return
         self._ipc_shutdown.set()
         self._ipc_thread.join(timeout=2.0)
+        if self._ipc_thread.is_alive():
+            self.lg.warning("IPC thread did not stop within timeout, may be orphaned")
         self._ipc_thread = None
         self.lg.debug("IPC processing thread stopped")
 
@@ -200,8 +202,14 @@ class HTTPTrait:
 
     def _default_handler(self, request: Any) -> Any:
         """Default request handler when agent doesn't implement handle_request."""
+        from llm_agent.protocol.base import Response
+
         self.lg.warning(
             "No handle_request method on agent, request ignored",
             extra={"request_type": type(request).__name__},
         )
-        return None
+        return Response(
+            id=getattr(request, "id", "unknown"),
+            success=False,
+            error="Agent does not implement handle_request",
+        )

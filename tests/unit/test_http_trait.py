@@ -318,6 +318,49 @@ class TestAgentHandleRequest:
         assert resp.success is False
         assert "LLM error" in resp.error
 
+    def test_handle_remember_request_error(self, agent, mock_learn):
+        mock_learn.facts.add.side_effect = ValueError("Storage error")
+        req = RememberRequest(id="req-1", fact="test fact")
+
+        resp = agent.handle_request(req)
+
+        assert isinstance(resp, RememberResponse)
+        assert resp.success is False
+        assert "Storage error" in resp.error
+        assert resp.fact_id == -1
+
+    def test_handle_forget_request_error(self, agent, mock_learn):
+        mock_learn.facts.delete.side_effect = ValueError("Fact not found")
+        req = ForgetRequest(id="req-1", fact_id=999)
+
+        resp = agent.handle_request(req)
+
+        assert isinstance(resp, ForgetResponse)
+        assert resp.success is False
+        assert "Fact not found" in resp.error
+
+    def test_handle_recall_request_error(self, agent, mock_learn):
+        # recall() raises when embedder not configured
+        req = RecallRequest(id="req-1", query="test query")
+
+        resp = agent.handle_request(req)
+
+        from llm_agent.protocol.v1 import RecallResponse
+
+        assert isinstance(resp, RecallResponse)
+        assert resp.success is False
+        assert "embedder" in resp.error.lower()
+
+    def test_handle_feedback_request_error(self, agent):
+        # Feedback on unknown response_id
+        req = FeedbackRequest(id="req-1", response_id="nonexistent", signal="positive")
+
+        resp = agent.handle_request(req)
+
+        assert isinstance(resp, FeedbackResponse)
+        assert resp.success is False
+        assert "Unknown response_id" in resp.error
+
 
 class TestHTTPTraitLifecycle:
     """Tests for HTTPTrait on_start/on_stop lifecycle."""
@@ -397,3 +440,87 @@ class TestHTTPTraitLifecycle:
         trait.on_stop()
 
         mock_server.stop.assert_called_once()
+
+
+class TestHTTPTraitIPCLoop:
+    """Tests for IPC loop behavior."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        return MagicMock()
+
+    def test_default_handler_returns_error_response(self, mock_logger):
+        """Verify default handler returns error instead of None."""
+        trait = HTTPTrait(lg=mock_logger)
+
+        # Create a mock request
+        mock_request = MagicMock()
+        mock_request.id = "req-123"
+
+        response = trait._default_handler(mock_request)
+
+        assert response is not None
+        assert response.success is False
+        assert response.id == "req-123"
+        assert "does not implement handle_request" in response.error
+
+    def test_default_handler_handles_missing_id(self, mock_logger):
+        """Verify default handler handles request without id attribute."""
+        trait = HTTPTrait(lg=mock_logger)
+
+        # Create a mock request without id
+        mock_request = MagicMock(spec=[])  # Empty spec means no attributes
+
+        response = trait._default_handler(mock_request)
+
+        assert response is not None
+        assert response.success is False
+        assert response.id == "unknown"
+
+    def test_ipc_loop_handles_handler_exception(self, mock_logger):
+        """Verify IPC loop sends error response when handler raises."""
+        from queue import Queue
+
+        from llm_agent.protocol.v1 import HealthRequest
+
+        trait = HTTPTrait(lg=mock_logger)
+
+        # Create mock server with real queues for testing
+        mock_server = MagicMock()
+        mock_server.request_queue = Queue()
+        mock_server.response_queue = Queue()
+        trait._server = mock_server
+        trait._agent = MagicMock()
+
+        # Make handle_request raise an exception
+        def failing_handler(request):
+            raise RuntimeError("Handler crashed")
+
+        trait._agent.handle_request = failing_handler
+
+        # Put a request on the queue
+        req = HealthRequest(id="req-1")
+        mock_server.request_queue.put(req)
+
+        # Signal shutdown after processing one request
+        import threading
+
+        def shutdown_after_delay():
+            import time
+
+            time.sleep(0.2)
+            trait._ipc_shutdown.set()
+
+        shutdown_thread = threading.Thread(target=shutdown_after_delay)
+        shutdown_thread.start()
+
+        # Run the IPC loop (will process one request then exit)
+        trait._ipc_loop(poll_timeout=0.05)
+        shutdown_thread.join()
+
+        # Verify error response was sent
+        assert not mock_server.response_queue.empty()
+        response = mock_server.response_queue.get()
+        assert response.success is False
+        assert response.error == "Internal server error"
+        assert response.id == "req-1"

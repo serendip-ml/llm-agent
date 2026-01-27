@@ -87,8 +87,8 @@ class HTTPServer:
         self._router_factory = router_factory
         self._request_q: Queue[Any] = mp.Queue()
         self._response_q: Queue[Any] = mp.Queue()
-        self._server: Any = None
-        self._process: Any = None
+        self._server: Any = None  # appinfra.app.fastapi.Server (external type)
+        self._process: mp.Process | None = None
 
     @property
     def config(self) -> HTTPServerConfig:
