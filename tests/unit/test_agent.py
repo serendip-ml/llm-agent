@@ -44,6 +44,11 @@ class TestAgent:
     """Tests for Agent."""
 
     @pytest.fixture
+    def mock_logger(self):
+        """Create mock Logger."""
+        return MagicMock()
+
+    @pytest.fixture
     def mock_learn(self):
         """Create mock LearnClient."""
         learn = MagicMock()
@@ -62,16 +67,16 @@ class TestAgent:
             mock_cls.return_value = mock_builder
             yield mock_cls
 
-    def test_init(self, mock_learn, mock_context_builder):
+    def test_init(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test-agent")
         llm = MagicMock()
 
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         assert agent.name == "test-agent"
         assert agent.config == config
 
-    def test_complete_uses_default_prompt(self, mock_learn, mock_context_builder):
+    def test_complete_uses_default_prompt(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test", default_prompt="Be helpful.")
         llm = MagicMock()
         llm.complete.return_value = CompletionResult(
@@ -81,7 +86,7 @@ class TestAgent:
             tokens_used=10,
             latency_ms=100,
         )
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         result = agent.complete("Hi there")
 
@@ -97,7 +102,7 @@ class TestAgent:
         assert messages[1].role == "user"
         assert messages[1].content == "Hi there"
 
-    def test_complete_with_custom_prompt(self, mock_learn, mock_context_builder):
+    def test_complete_with_custom_prompt(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test", default_prompt="Default prompt.")
         llm = MagicMock()
         llm.complete.return_value = CompletionResult(
@@ -107,7 +112,7 @@ class TestAgent:
             tokens_used=10,
             latency_ms=100,
         )
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         agent.complete("Query", system_prompt="Custom prompt.")
 
@@ -115,7 +120,7 @@ class TestAgent:
         messages = call_args.kwargs["messages"]
         assert messages[0].content == "Custom prompt."
 
-    def test_complete_uses_config_model(self, mock_learn, mock_context_builder):
+    def test_complete_uses_config_model(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test", model="gpt-4")
         llm = MagicMock()
         llm.complete.return_value = CompletionResult(
@@ -125,14 +130,14 @@ class TestAgent:
             tokens_used=10,
             latency_ms=100,
         )
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         agent.complete("Query")
 
         call_args = llm.complete.call_args
         assert call_args.kwargs["model"] == "gpt-4"
 
-    def test_complete_returns_result(self, mock_learn, mock_context_builder):
+    def test_complete_returns_result(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test")
         llm = MagicMock()
         expected = CompletionResult(
@@ -143,7 +148,7 @@ class TestAgent:
             latency_ms=150,
         )
         llm.complete.return_value = expected
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         result = agent.complete("What is the answer?")
 
@@ -151,7 +156,7 @@ class TestAgent:
         assert result.id == "resp-123"
         assert result.content == "The answer is 42."
 
-    def test_complete_no_fact_injection(self, mock_learn, mock_context_builder):
+    def test_complete_no_fact_injection(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test", fact_injection="none")
         llm = MagicMock()
         llm.complete.return_value = CompletionResult(
@@ -161,7 +166,7 @@ class TestAgent:
             tokens_used=10,
             latency_ms=100,
         )
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         agent.complete("Query", system_prompt="Base prompt.")
 
@@ -172,27 +177,27 @@ class TestAgent:
         messages = call_args.kwargs["messages"]
         assert messages[0].content == "Base prompt."
 
-    def test_remember_delegates_to_learn(self, mock_learn, mock_context_builder):
+    def test_remember_delegates_to_learn(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test")
         llm = MagicMock()
         mock_learn.facts.add.return_value = 42
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         fact_id = agent.remember("User prefers Python", category="preferences")
 
         assert fact_id == 42
         mock_learn.facts.add.assert_called_once_with("User prefers Python", category="preferences")
 
-    def test_forget_delegates_to_learn(self, mock_learn, mock_context_builder):
+    def test_forget_delegates_to_learn(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test")
         llm = MagicMock()
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         agent.forget(42)
 
         mock_learn.facts.delete.assert_called_once_with(42)
 
-    def test_feedback_positive(self, mock_learn, mock_context_builder):
+    def test_feedback_positive(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test")
         llm = MagicMock()
         llm.complete.return_value = CompletionResult(
@@ -202,7 +207,7 @@ class TestAgent:
             tokens_used=10,
             latency_ms=100,
         )
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         # First complete a request to track the response
         agent.complete("What is Python?")
@@ -215,7 +220,7 @@ class TestAgent:
         assert call_kwargs["content_text"] == "Good response"
         assert call_kwargs["signal"] == "positive"
 
-    def test_feedback_negative_with_correction(self, mock_learn, mock_context_builder):
+    def test_feedback_negative_with_correction(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test")
         llm = MagicMock()
         llm.complete.return_value = CompletionResult(
@@ -225,7 +230,7 @@ class TestAgent:
             tokens_used=10,
             latency_ms=100,
         )
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         agent.complete("What is 2+2?")
         agent.feedback("resp-1", "negative", correction="The answer is 4")
@@ -239,49 +244,51 @@ class TestAgent:
         assert pref_kwargs["chosen"] == "The answer is 4"
         assert pref_kwargs["rejected"] == "Wrong answer"
 
-    def test_feedback_unknown_response_raises(self, mock_learn, mock_context_builder):
+    def test_feedback_unknown_response_raises(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test")
         llm = MagicMock()
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         with pytest.raises(ValueError, match="Unknown response_id"):
             agent.feedback("nonexistent", "positive")
 
-    def test_load_adapter(self, mock_learn, mock_context_builder):
+    def test_load_adapter(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test")
         llm = MagicMock()
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         agent.load_adapter("/path/to/adapter")
 
         llm.load_adapter.assert_called_once_with("/path/to/adapter")
 
-    def test_unload_adapter(self, mock_learn, mock_context_builder):
+    def test_unload_adapter(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test")
         llm = MagicMock()
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         agent.unload_adapter()
 
         llm.unload_adapter.assert_called_once()
 
-    def test_rag_mode_without_embedder_raises(self, mock_learn, mock_context_builder):
+    def test_rag_mode_without_embedder_raises(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test", fact_injection="rag")
         llm = MagicMock()
 
         with pytest.raises(ValueError, match="fact_injection='rag' requires an embedder"):
-            Agent(config=config, llm=llm, learn=mock_learn)
+            Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
-    def test_rag_mode_with_embedder_succeeds(self, mock_learn, mock_context_builder):
+    def test_rag_mode_with_embedder_succeeds(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test", fact_injection="rag")
         llm = MagicMock()
         embedder = MagicMock()
 
-        agent = Agent(config=config, llm=llm, learn=mock_learn, embedder=embedder)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn, embedder=embedder)
 
         assert agent.name == "test"
 
-    def test_feedback_cleans_up_response_context(self, mock_learn, mock_context_builder):
+    def test_feedback_cleans_up_response_context(
+        self, mock_logger, mock_learn, mock_context_builder
+    ):
         """Verify feedback removes response context to prevent memory leaks."""
         config = AgentConfig(name="test")
         llm = MagicMock()
@@ -292,7 +299,7 @@ class TestAgent:
             tokens_used=10,
             latency_ms=100,
         )
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         agent.complete("Query")
         agent.feedback("resp-1", "positive")
@@ -301,11 +308,13 @@ class TestAgent:
         with pytest.raises(ValueError, match="Unknown response_id"):
             agent.feedback("resp-1", "positive")
 
-    def test_response_context_evicts_oldest_when_full(self, mock_learn, mock_context_builder):
+    def test_response_context_evicts_oldest_when_full(
+        self, mock_logger, mock_learn, mock_context_builder
+    ):
         """Verify oldest response contexts are evicted when limit is reached."""
         config = AgentConfig(name="test", max_tracked_responses=3)
         llm = MagicMock()
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         # Generate 4 completions with a limit of 3
         for i in range(4):
@@ -330,6 +339,11 @@ class TestAgent:
 
 class TestAgentRAG:
     """Tests for RAG functionality."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create mock Logger."""
+        return MagicMock()
 
     @pytest.fixture
     def mock_learn(self):
@@ -363,7 +377,9 @@ class TestAgentRAG:
         embedder.embed.return_value = embedding_result
         return embedder
 
-    def test_recall_returns_similar_facts(self, mock_learn, mock_context_builder, mock_embedder):
+    def test_recall_returns_similar_facts(
+        self, mock_logger, mock_learn, mock_context_builder, mock_embedder
+    ):
         """Verify recall() performs semantic search and returns results."""
         config = AgentConfig(name="test", fact_injection="none")
         llm = MagicMock()
@@ -376,7 +392,9 @@ class TestAgentRAG:
         mock_scored_fact.similarity = 0.85
         mock_learn.facts.search_similar.return_value = [mock_scored_fact]
 
-        agent = Agent(config=config, llm=llm, learn=mock_learn, embedder=mock_embedder)
+        agent = Agent(
+            lg=mock_logger, config=config, llm=llm, learn=mock_learn, embedder=mock_embedder
+        )
 
         results = agent.recall("programming languages")
 
@@ -391,13 +409,17 @@ class TestAgentRAG:
             categories=None,
         )
 
-    def test_recall_with_custom_parameters(self, mock_learn, mock_context_builder, mock_embedder):
+    def test_recall_with_custom_parameters(
+        self, mock_logger, mock_learn, mock_context_builder, mock_embedder
+    ):
         """Verify recall() uses custom parameters when provided."""
         config = AgentConfig(name="test", fact_injection="none")
         llm = MagicMock()
         mock_learn.facts.search_similar.return_value = []
 
-        agent = Agent(config=config, llm=llm, learn=mock_learn, embedder=mock_embedder)
+        agent = Agent(
+            lg=mock_logger, config=config, llm=llm, learn=mock_learn, embedder=mock_embedder
+        )
 
         agent.recall("query", top_k=10, min_similarity=0.5, categories=["preferences"])
 
@@ -409,25 +431,27 @@ class TestAgentRAG:
             categories=["preferences"],
         )
 
-    def test_recall_without_embedder_raises(self, mock_learn, mock_context_builder):
+    def test_recall_without_embedder_raises(self, mock_logger, mock_learn, mock_context_builder):
         """Verify recall() raises error when embedder not configured."""
         config = AgentConfig(name="test", fact_injection="none")
         llm = MagicMock()
 
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         with pytest.raises(ValueError, match="recall\\(\\) requires an embedder"):
             agent.recall("query")
 
     def test_remember_embeds_when_embedder_available(
-        self, mock_learn, mock_context_builder, mock_embedder
+        self, mock_logger, mock_learn, mock_context_builder, mock_embedder
     ):
         """Verify remember() embeds facts when embedder is configured."""
         config = AgentConfig(name="test", fact_injection="none")
         llm = MagicMock()
         mock_learn.facts.add.return_value = 42
 
-        agent = Agent(config=config, llm=llm, learn=mock_learn, embedder=mock_embedder)
+        agent = Agent(
+            lg=mock_logger, config=config, llm=llm, learn=mock_learn, embedder=mock_embedder
+        )
 
         fact_id = agent.remember("User prefers Python", category="preferences")
 
@@ -440,13 +464,15 @@ class TestAgentRAG:
             model_name="test-embed-model",
         )
 
-    def test_remember_without_embedder_skips_embedding(self, mock_learn, mock_context_builder):
+    def test_remember_without_embedder_skips_embedding(
+        self, mock_logger, mock_learn, mock_context_builder
+    ):
         """Verify remember() skips embedding when embedder not configured."""
         config = AgentConfig(name="test", fact_injection="none")
         llm = MagicMock()
         mock_learn.facts.add.return_value = 42
 
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         fact_id = agent.remember("User prefers Python")
 
@@ -455,7 +481,7 @@ class TestAgentRAG:
         mock_learn.facts.set_embedding.assert_not_called()
 
     def test_complete_rag_mode_uses_semantic_search(
-        self, mock_learn, mock_context_builder, mock_embedder
+        self, mock_logger, mock_learn, mock_context_builder, mock_embedder
     ):
         """Verify complete() in RAG mode performs semantic search."""
         config = AgentConfig(name="test", fact_injection="rag")
@@ -474,7 +500,9 @@ class TestAgentRAG:
         mock_scored_fact.fact = mock_fact
         mock_learn.facts.search_similar.return_value = [mock_scored_fact]
 
-        agent = Agent(config=config, llm=llm, learn=mock_learn, embedder=mock_embedder)
+        agent = Agent(
+            lg=mock_logger, config=config, llm=llm, learn=mock_learn, embedder=mock_embedder
+        )
 
         agent.complete("What programming language should I use?")
 
@@ -494,7 +522,7 @@ class TestAgentRAG:
         mock_context_builder.return_value.build_system_prompt.assert_not_called()
 
     def test_complete_all_mode_does_not_use_semantic_search(
-        self, mock_learn, mock_context_builder, mock_embedder
+        self, mock_logger, mock_learn, mock_context_builder, mock_embedder
     ):
         """Verify complete() in 'all' mode does not use semantic search."""
         config = AgentConfig(name="test", fact_injection="all")
@@ -507,7 +535,9 @@ class TestAgentRAG:
             latency_ms=100,
         )
 
-        agent = Agent(config=config, llm=llm, learn=mock_learn, embedder=mock_embedder)
+        agent = Agent(
+            lg=mock_logger, config=config, llm=llm, learn=mock_learn, embedder=mock_embedder
+        )
 
         agent.complete("Query")
 

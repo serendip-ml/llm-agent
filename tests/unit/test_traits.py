@@ -62,6 +62,11 @@ class TestAgentTraits:
     """Tests for Agent trait support."""
 
     @pytest.fixture
+    def mock_logger(self):
+        """Create mock Logger."""
+        return MagicMock()
+
+    @pytest.fixture
     def mock_learn(self):
         """Create mock LearnClient."""
         learn = MagicMock()
@@ -80,10 +85,10 @@ class TestAgentTraits:
             mock_cls.return_value = mock_builder
             yield mock_cls
 
-    def test_add_trait(self, mock_learn, mock_context_builder):
+    def test_add_trait(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test")
         llm = MagicMock()
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         directive = Directive(prompt="Test directive")
         trait = DirectiveTrait(directive)
@@ -92,10 +97,10 @@ class TestAgentTraits:
         assert agent.has_trait(DirectiveTrait)
         assert agent.get_trait(DirectiveTrait) == trait
 
-    def test_add_trait_attaches(self, mock_learn, mock_context_builder):
+    def test_add_trait_attaches(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test")
         llm = MagicMock()
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         directive = Directive(prompt="Test directive")
         trait = DirectiveTrait(directive)
@@ -103,10 +108,10 @@ class TestAgentTraits:
 
         assert trait._agent == agent
 
-    def test_add_duplicate_trait_raises(self, mock_learn, mock_context_builder):
+    def test_add_duplicate_trait_raises(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test")
         llm = MagicMock()
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         directive = Directive(prompt="Test directive")
         agent.add_trait(DirectiveTrait(directive))
@@ -114,21 +119,25 @@ class TestAgentTraits:
         with pytest.raises(ValueError, match="already added"):
             agent.add_trait(DirectiveTrait(directive))
 
-    def test_get_trait_returns_none_if_not_added(self, mock_learn, mock_context_builder):
+    def test_get_trait_returns_none_if_not_added(
+        self, mock_logger, mock_learn, mock_context_builder
+    ):
         config = AgentConfig(name="test")
         llm = MagicMock()
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         assert agent.get_trait(DirectiveTrait) is None
 
-    def test_has_trait_returns_false_if_not_added(self, mock_learn, mock_context_builder):
+    def test_has_trait_returns_false_if_not_added(
+        self, mock_logger, mock_learn, mock_context_builder
+    ):
         config = AgentConfig(name="test")
         llm = MagicMock()
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         assert not agent.has_trait(DirectiveTrait)
 
-    def test_complete_with_directive_trait(self, mock_learn, mock_context_builder):
+    def test_complete_with_directive_trait(self, mock_logger, mock_learn, mock_context_builder):
         config = AgentConfig(name="test", fact_injection="none")
         llm = MagicMock()
         llm.complete.return_value = CompletionResult(
@@ -138,7 +147,7 @@ class TestAgentTraits:
             tokens_used=10,
             latency_ms=100,
         )
-        agent = Agent(config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
 
         directive = Directive(prompt="You are a helpful assistant. Be friendly.")
         agent.add_trait(DirectiveTrait(directive))

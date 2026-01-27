@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Literal, TypeVar
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Literal, TypeVar
 
+from appinfra.log import Logger
 from llm_learn import LearnClient
 from llm_learn.collection import ScoredFact
 from llm_learn.inference import ContextBuilder, Embedder
@@ -11,6 +13,10 @@ from llm_learn.inference import ContextBuilder, Embedder
 from llm_agent.config import AgentConfig
 from llm_agent.llm import CompletionResult, LLMBackend, Message
 from llm_agent.traits.base import Trait
+
+
+if TYPE_CHECKING:
+    from llm_agent.protocol.base import Request, Response
 
 
 TraitT = TypeVar("TraitT", bound=Trait)
@@ -24,6 +30,7 @@ class Agent:
 
     def __init__(
         self,
+        lg: Logger,
         config: AgentConfig,
         llm: LLMBackend,
         learn: LearnClient,
@@ -32,6 +39,7 @@ class Agent:
         """Initialize agent.
 
         Args:
+            lg: Logger instance.
             config: Agent configuration.
             llm: LLM backend for completions.
             learn: Learning client from llm-learn.
@@ -44,6 +52,7 @@ class Agent:
                 "Either provide an embedder or use fact_injection='all' or 'none'."
             )
 
+        self._lg = lg
         self._config = config
         self._llm = llm
         self._learn = learn
@@ -299,6 +308,164 @@ class Agent:
                 chosen=correction,
                 rejected=ctx.response,
             )
+
+    # === HTTP Request Handling ===
+
+    def handle_request(self, request: Request) -> Response:
+        """Handle an HTTP protocol request.
+
+        Dispatches to the appropriate handler based on message type.
+
+        Args:
+            request: Protocol request message.
+
+        Returns:
+            Protocol response message.
+        """
+        from llm_agent.protocol.v1 import (
+            CompleteRequest,
+            FeedbackRequest,
+            ForgetRequest,
+            HealthRequest,
+            RecallRequest,
+            RememberRequest,
+        )
+
+        handlers: dict[str, Callable[[Request], Response]] = {
+            HealthRequest.message_type: self._handle_health,
+            CompleteRequest.message_type: self._handle_complete,
+            RememberRequest.message_type: self._handle_remember,
+            ForgetRequest.message_type: self._handle_forget,
+            RecallRequest.message_type: self._handle_recall,
+            FeedbackRequest.message_type: self._handle_feedback,
+        }
+
+        handler = handlers.get(request.message_type)
+        if handler is None:
+            # Return generic error response
+            from llm_agent.protocol.base import Response
+
+            return Response(
+                id=request.id,
+                success=False,
+                error=f"Unknown message type: {request.message_type}",
+            )
+
+        return handler(request)
+
+    def _handle_health(self, request: Request) -> Response:
+        """Handle health check request."""
+        from llm_agent.protocol.v1 import HealthResponse
+
+        return HealthResponse(id=request.id, status="ok", agent_name=self.name)
+
+    def _handle_complete(self, request: Request) -> Response:
+        """Handle completion request."""
+        from llm_agent.protocol.v1 import CompleteRequest, CompleteResponse
+
+        req = (
+            request
+            if isinstance(request, CompleteRequest)
+            else CompleteRequest(**request.model_dump())
+        )
+        try:
+            result = self.complete(query=req.query, system_prompt=req.system_prompt)
+            return CompleteResponse(
+                id=req.id,
+                response_id=result.id,
+                content=result.content,
+                model=result.model,
+                tokens_used=result.tokens_used,
+            )
+        except Exception as e:
+            self._lg.warning("complete request failed", extra={"exception": e})
+            return CompleteResponse(
+                id=req.id,
+                success=False,
+                error=str(e),
+                response_id="",
+                content="",
+                model="",
+                tokens_used=0,
+            )
+
+    def _handle_remember(self, request: Request) -> Response:
+        """Handle remember request."""
+        from llm_agent.protocol.v1 import RememberRequest, RememberResponse
+
+        req = (
+            request
+            if isinstance(request, RememberRequest)
+            else RememberRequest(**request.model_dump())
+        )
+        try:
+            fact_id = self.remember(fact=req.fact, category=req.category)
+            return RememberResponse(id=req.id, fact_id=fact_id)
+        except Exception as e:
+            self._lg.warning("remember request failed", extra={"exception": e})
+            return RememberResponse(id=req.id, success=False, error=str(e), fact_id=-1)
+
+    def _handle_forget(self, request: Request) -> Response:
+        """Handle forget request."""
+        from llm_agent.protocol.v1 import ForgetRequest, ForgetResponse
+
+        req = (
+            request if isinstance(request, ForgetRequest) else ForgetRequest(**request.model_dump())
+        )
+        try:
+            self.forget(fact_id=req.fact_id)
+            return ForgetResponse(id=req.id)
+        except Exception as e:
+            self._lg.warning("forget request failed", extra={"exception": e})
+            return ForgetResponse(id=req.id, success=False, error=str(e))
+
+    def _handle_recall(self, request: Request) -> Response:
+        """Handle recall request."""
+        from llm_agent.protocol.v1 import RecallRequest, RecallResponse
+
+        req = (
+            request if isinstance(request, RecallRequest) else RecallRequest(**request.model_dump())
+        )
+        try:
+            scored_facts = self.recall(
+                query=req.query,
+                top_k=req.top_k,
+                min_similarity=req.min_similarity,
+                categories=req.categories,
+            )
+            facts = [
+                {
+                    "fact_id": sf.fact.id,
+                    "content": sf.fact.content,
+                    "category": sf.fact.category,
+                    "similarity": sf.similarity,
+                }
+                for sf in scored_facts
+            ]
+            return RecallResponse(id=req.id, facts=facts)
+        except Exception as e:
+            self._lg.warning("recall request failed", extra={"exception": e})
+            return RecallResponse(id=req.id, success=False, error=str(e))
+
+    def _handle_feedback(self, request: Request) -> Response:
+        """Handle feedback request."""
+        from llm_agent.protocol.v1 import FeedbackRequest, FeedbackResponse
+
+        req = (
+            request
+            if isinstance(request, FeedbackRequest)
+            else FeedbackRequest(**request.model_dump())
+        )
+        try:
+            self.feedback(
+                response_id=req.response_id,
+                signal=req.signal,
+                correction=req.correction,
+            )
+            return FeedbackResponse(id=req.id)
+        except Exception as e:
+            self._lg.warning("feedback request failed", extra={"exception": e})
+            return FeedbackResponse(id=req.id, success=False, error=str(e))
 
     # === Adapter ===
 
