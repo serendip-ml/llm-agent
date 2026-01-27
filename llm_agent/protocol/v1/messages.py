@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from pydantic import Field
 
@@ -100,17 +100,6 @@ class ForgetResponse(Response):
 # =============================================================================
 
 
-class ScoredFact(Request):
-    """A fact with similarity score."""
-
-    message_type: ClassVar[str] = "scored_fact"
-
-    fact_id: int = Field(description="Fact ID")
-    content: str = Field(description="Fact content")
-    category: str = Field(description="Fact category")
-    similarity: float = Field(description="Similarity score")
-
-
 class RecallRequest(Request):
     """Semantic search request."""
 
@@ -141,7 +130,7 @@ class FeedbackRequest(Request):
     message_type: ClassVar[str] = "feedback_request"
 
     response_id: str = Field(description="ID from CompleteResponse")
-    signal: str = Field(description="'positive' or 'negative'")
+    signal: Literal["positive", "negative"] = Field(description="Feedback signal")
     correction: str | None = Field(default=None, description="Corrected response if negative")
 
 

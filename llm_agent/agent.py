@@ -451,7 +451,7 @@ class Agent:
         try:
             self.feedback(
                 response_id=req.response_id,
-                signal=req.signal,  # type: ignore[arg-type]
+                signal=req.signal,
                 correction=req.correction,
             )
             return FeedbackResponse(id=req.id)

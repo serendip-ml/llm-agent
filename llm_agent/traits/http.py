@@ -177,6 +177,7 @@ class HTTPTrait:
         )
 
         while not self._ipc_shutdown.is_set():
+            request = None
             try:
                 request = self._server.request_queue.get(timeout=poll_timeout)
                 response = handle_request(request)
@@ -186,6 +187,16 @@ class HTTPTrait:
                 pass
             except Exception:
                 self.lg.exception("IPC processing error")
+                # Send error response to prevent client timeout
+                if request is not None:
+                    from llm_agent.protocol.base import Response
+
+                    error_resp = Response(
+                        id=getattr(request, "id", "unknown"),
+                        success=False,
+                        error="Internal server error",
+                    )
+                    self._server.response_queue.put(error_resp)
 
     def _default_handler(self, request: Any) -> Any:
         """Default request handler when agent doesn't implement handle_request."""

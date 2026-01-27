@@ -14,7 +14,6 @@ from llm_agent.protocol.v1.messages import (
     RecallResponse,
     RememberRequest,
     RememberResponse,
-    ScoredFact,
 )
 
 
@@ -32,5 +31,4 @@ __all__ = [
     "RecallResponse",
     "RememberRequest",
     "RememberResponse",
-    "ScoredFact",
 ]
