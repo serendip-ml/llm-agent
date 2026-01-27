@@ -3,7 +3,7 @@ infra := $(shell appinfra scripts-path)
 
 # Configuration
 INFRA_DEV_PKG_NAME := llm_agent
-INFRA_PYTEST_COVERAGE_THRESHOLD := 0
+INFRA_PYTEST_COVERAGE_THRESHOLD := 75
 
 # Code quality strictness
 # - true: Fail on any code quality violations (CI mode)

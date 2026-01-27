@@ -5,7 +5,7 @@ from llm_learn.collection import ScoredFact
 from llm_agent.agent import Agent
 from llm_agent.config import AgentConfig
 from llm_agent.llm import CompletionResult, HTTPBackend, LLMBackend, LLMError, Message
-from llm_agent.traits import Directive, DirectiveTrait, Trait
+from llm_agent.traits import Directive, DirectiveTrait, HTTPConfig, HTTPTrait, Trait
 
 
 __version__ = "0.0.0"
@@ -17,6 +17,8 @@ __all__ = [
     "Directive",
     "DirectiveTrait",
     "HTTPBackend",
+    "HTTPConfig",
+    "HTTPTrait",
     "LLMBackend",
     "LLMError",
     "Message",
