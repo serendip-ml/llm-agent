@@ -93,12 +93,12 @@ class ToolExecutor:
         for iteration in range(max_iterations):
             result = self._call_llm(working_messages, temperature, tools)
             total_tokens += result.tokens_used
-            tool_calls = self._extract_tool_calls(result)
+            tool_calls, parse_errors = self._extract_tool_calls(result)
 
             if not tool_calls:
                 return self._build_final_result(result, all_tool_calls, iteration + 1, total_tokens)
 
-            tool_results = self._execute_tool_calls(tool_calls)
+            tool_results = self._execute_tool_calls(tool_calls, parse_errors)
             all_tool_calls.extend(tool_results)
             self._append_tool_messages(working_messages, result, tool_calls, tool_results)
 
@@ -169,19 +169,34 @@ class ToolExecutor:
             tool_call_id=tool_result.call_id,
         )
 
-    def _extract_tool_calls(self, result: CompletionResult) -> list[ToolCall]:
-        """Extract tool calls from LLM response."""
-        if not result.tool_calls:
-            return []
-        calls = []
-        for tc in result.tool_calls:
-            parsed = self._parse_tool_call(tc)
-            if parsed:
-                calls.append(parsed)
-        return calls
+    def _extract_tool_calls(
+        self, result: CompletionResult
+    ) -> tuple[list[ToolCall], dict[str, str]]:
+        """Extract tool calls from LLM response.
 
-    def _parse_tool_call(self, tc: Any) -> ToolCall | None:
-        """Parse a single tool call from API response."""
+        Returns:
+            Tuple of (tool_calls, parse_errors). Parse errors are keyed by
+            call_id so they can be reported back to the LLM for specific calls.
+        """
+        if not result.tool_calls:
+            return [], {}
+        calls = []
+        errors: dict[str, str] = {}
+        for tc in result.tool_calls:
+            parsed, error = self._parse_tool_call(tc)
+            if parsed.name:  # Only include if we got a valid name
+                calls.append(parsed)
+                if error:
+                    errors[parsed.id] = error
+        return calls, errors
+
+    def _parse_tool_call(self, tc: Any) -> tuple[ToolCall, str | None]:
+        """Parse a single tool call from API response.
+
+        Returns:
+            Tuple of (ToolCall, error_message). If parsing failed, error_message
+            describes the issue (arguments will be empty dict in this case).
+        """
         if isinstance(tc, dict):
             call_id = tc.get("id", "")
             function = tc.get("function", {})
@@ -191,23 +206,38 @@ class ToolExecutor:
             call_id = getattr(tc, "id", "")
             function = getattr(tc, "function", None)
             if not function:
-                return None
+                return ToolCall(id=call_id, name="", arguments={}), "Missing function in tool call"
             name = getattr(function, "name", "")
             args_str = getattr(function, "arguments", "{}")
 
+        parse_error: str | None = None
         try:
             arguments = json.loads(args_str) if args_str else {}
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             arguments = {}
+            parse_error = f"Failed to parse arguments for tool '{name}': {e}"
 
-        return ToolCall(id=call_id, name=name, arguments=arguments)
+        return ToolCall(id=call_id, name=name, arguments=arguments), parse_error
 
-    def _execute_tool_calls(self, calls: list[ToolCall]) -> list[ToolCallResult]:
-        """Execute a list of tool calls."""
-        return [
-            ToolCallResult(call_id=call.id, name=call.name, result=self._execute_single_tool(call))
-            for call in calls
-        ]
+    def _execute_tool_calls(
+        self, calls: list[ToolCall], parse_errors: dict[str, str]
+    ) -> list[ToolCallResult]:
+        """Execute a list of tool calls.
+
+        Args:
+            calls: Tool calls to execute.
+            parse_errors: Dict mapping call_id to parse error message. If a call
+                has a parse error, return the error instead of executing.
+        """
+        results = []
+        for call in calls:
+            if call.id in parse_errors:
+                # Arguments couldn't be parsed - return error to LLM
+                result = ToolResult(success=False, output="", error=parse_errors[call.id])
+            else:
+                result = self._execute_single_tool(call)
+            results.append(ToolCallResult(call_id=call.id, name=call.name, result=result))
+        return results
 
     def _execute_single_tool(self, call: ToolCall) -> ToolResult:
         """Execute a single tool call."""

@@ -203,6 +203,44 @@ class TestShellTool:
         assert result.success is False
         assert "not in allowed list" in result.error
 
+    def test_shell_metacharacters_blocked_with_allowlist(self):
+        """Shell metacharacters are blocked when allowlist is enabled to prevent bypass."""
+        tool = ShellTool(allowed_commands=["echo", "ls"])
+
+        # Command chaining with semicolon
+        result = tool.execute(command="echo hello; rm -rf /")
+        assert result.success is False
+        assert "metacharacters" in result.error
+
+        # Command chaining with &&
+        result = tool.execute(command="echo hello && cat /etc/passwd")
+        assert result.success is False
+        assert "metacharacters" in result.error
+
+        # Pipe
+        result = tool.execute(command="ls | grep secret")
+        assert result.success is False
+        assert "metacharacters" in result.error
+
+        # Command substitution
+        result = tool.execute(command="echo $(whoami)")
+        assert result.success is False
+        assert "metacharacters" in result.error
+
+        # Backticks
+        result = tool.execute(command="echo `id`")
+        assert result.success is False
+        assert "metacharacters" in result.error
+
+    def test_shell_metacharacters_allowed_without_allowlist(self):
+        """Shell metacharacters work normally when no allowlist is configured."""
+        tool = ShellTool()
+
+        # Pipe should work
+        result = tool.execute(command="echo hello | cat")
+        assert result.success is True
+        assert "hello" in result.output
+
     def test_output_truncation(self):
         tool = ShellTool(max_output_chars=50)
         result = tool.execute(command="echo " + "x" * 100)
@@ -403,3 +441,41 @@ class TestToolExecutor:
 
         assert result.tool_calls[0].result.success is False
         assert "Tool exploded" in result.tool_calls[0].result.error
+
+    def test_run_malformed_json_arguments(self, mock_llm, registry_with_shell):
+        """Malformed JSON arguments return parse error to LLM instead of silently failing."""
+        mock_llm.complete.side_effect = [
+            CompletionResult(
+                id="resp-1",
+                content="",
+                model="test",
+                tokens_used=10,
+                latency_ms=100,
+                tool_calls=[
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "shell",
+                            "arguments": "{invalid json",  # Malformed JSON
+                        },
+                    }
+                ],
+            ),
+            CompletionResult(
+                id="resp-2",
+                content="Got parse error, will try differently",
+                model="test",
+                tokens_used=10,
+                latency_ms=100,
+                tool_calls=None,
+            ),
+        ]
+
+        executor = ToolExecutor(mock_llm, registry_with_shell)
+        result = executor.run(messages=[Message(role="user", content="Run command")])
+
+        # The parse error should be returned as a tool error
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].result.success is False
+        assert "Failed to parse arguments" in result.tool_calls[0].result.error

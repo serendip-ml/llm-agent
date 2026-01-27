@@ -2,10 +2,27 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from typing import Any
 
 from llm_agent.tools.base import BaseTool, ToolResult
+
+
+# Shell metacharacters that enable command chaining/injection
+_SHELL_METACHAR_PATTERN = re.compile(
+    r"""
+    ;           |  # command separator
+    &&          |  # AND operator
+    \|\|        |  # OR operator
+    \|          |  # pipe
+    \$\(        |  # command substitution $(...)
+    `           |  # backtick command substitution
+    \n          |  # newline (command separator)
+    &\s*$          # background execution at end
+    """,
+    re.VERBOSE,
+)
 
 
 class ShellTool(BaseTool):
@@ -85,6 +102,15 @@ class ShellTool(BaseTool):
         """Check if command is in allowed list. Returns error result if not allowed."""
         if not self._allowed_commands:
             return None
+
+        # Reject commands with shell metacharacters that could bypass allowlist
+        if _SHELL_METACHAR_PATTERN.search(command):
+            return ToolResult(
+                success=False,
+                output="",
+                error="Command contains shell metacharacters (;, &&, ||, |, $(), `) "
+                "which are not allowed when command allowlist is enabled",
+            )
 
         cmd_prefix = command.split()[0] if command.split() else ""
         if cmd_prefix not in self._allowed_commands:
