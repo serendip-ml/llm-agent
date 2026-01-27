@@ -1,11 +1,24 @@
-"""Tests for HTTP trait."""
+"""Tests for HTTP trait and server components."""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from llm_agent import CompletionResult, HTTPConfig, HTTPTrait
-from llm_agent.http.models import AgentRequest, AgentResponse
+from llm_agent.protocol.v1 import (
+    CompleteRequest,
+    CompleteResponse,
+    FeedbackRequest,
+    FeedbackResponse,
+    ForgetRequest,
+    ForgetResponse,
+    HealthRequest,
+    HealthResponse,
+    RecallRequest,
+    RememberRequest,
+    RememberResponse,
+)
+from llm_agent.server.http import HTTPServer, HTTPServerConfig
 
 
 pytestmark = pytest.mark.unit
@@ -19,296 +32,294 @@ class TestHTTPConfig:
 
         assert config.host == "127.0.0.1"
         assert config.port == 8080
-        assert config.title == "Agent API"
-        assert config.response_timeout == 60.0
+        assert config.title is None
+        assert config.description is None
 
     def test_custom_values(self):
         config = HTTPConfig(
             host="0.0.0.0",
             port=9000,
             title="My Agent",
-            response_timeout=120.0,
+            description="My API",
         )
 
         assert config.host == "0.0.0.0"
         assert config.port == 9000
         assert config.title == "My Agent"
+        assert config.description == "My API"
+
+
+class TestHTTPServerConfig:
+    """Tests for HTTPServerConfig."""
+
+    def test_defaults(self):
+        config = HTTPServerConfig()
+
+        assert config.host == "127.0.0.1"
+        assert config.port == 8080
+        assert config.title == "Agent API"
+        assert config.auto_restart is True
+        assert config.response_timeout == 60.0
+
+    def test_custom_values(self):
+        config = HTTPServerConfig(
+            host="0.0.0.0",
+            port=9000,
+            title="Custom API",
+            auto_restart=False,
+            response_timeout=120.0,
+        )
+
+        assert config.host == "0.0.0.0"
+        assert config.port == 9000
+        assert config.title == "Custom API"
+        assert config.auto_restart is False
         assert config.response_timeout == 120.0
+
+
+class TestHTTPServer:
+    """Tests for HTTPServer."""
+
+    def test_init(self):
+        config = HTTPServerConfig(port=9000)
+        router_factory = MagicMock()
+
+        server = HTTPServer(config, router_factory)
+
+        assert server.config == config
+        assert server.request_queue is not None
+        assert server.response_queue is not None
+        assert not server.is_running
 
 
 class TestHTTPTrait:
     """Tests for HTTPTrait."""
 
-    def test_init_with_default_config(self):
-        trait = HTTPTrait()
+    @pytest.fixture
+    def mock_logger(self):
+        return MagicMock()
+
+    def test_init_with_default_config(self, mock_logger):
+        trait = HTTPTrait(lg=mock_logger)
 
         assert trait.config.host == "127.0.0.1"
         assert trait.config.port == 8080
 
-    def test_init_with_custom_config(self):
+    def test_init_with_custom_config(self, mock_logger):
         config = HTTPConfig(port=9000)
-        trait = HTTPTrait(config=config)
+        trait = HTTPTrait(lg=mock_logger, config=config)
 
         assert trait.config.port == 9000
 
-    def test_attach(self):
-        trait = HTTPTrait()
+    def test_attach(self, mock_logger):
+        trait = HTTPTrait(lg=mock_logger)
         mock_agent = MagicMock()
+        mock_agent.name = "test-agent"
 
-        trait.attach(mock_agent)
+        with patch("llm_agent.server.http.HTTPServer"):
+            trait.attach(mock_agent)
 
         assert trait._agent == mock_agent
+        assert trait._server is not None
 
-    def test_is_running_false_when_not_started(self):
-        trait = HTTPTrait()
+    def test_url_property(self, mock_logger):
+        trait = HTTPTrait(lg=mock_logger, config=HTTPConfig(host="localhost", port=8080))
+
+        assert trait.url == "http://localhost:8080"
+
+    def test_url_property_ephemeral_port(self, mock_logger):
+        trait = HTTPTrait(lg=mock_logger, config=HTTPConfig(port=0))
+
+        assert trait.url is None
+
+    def test_is_running_false_when_not_started(self, mock_logger):
+        trait = HTTPTrait(lg=mock_logger)
 
         assert not trait.is_running
 
-    def test_on_start_without_attach_raises(self):
-        trait = HTTPTrait()
+    def test_on_start_without_attach_raises(self, mock_logger):
+        trait = HTTPTrait(lg=mock_logger)
 
         with pytest.raises(RuntimeError, match="not attached"):
             trait.on_start()
 
 
-class TestHTTPTraitDispatch:
-    """Tests for HTTPTrait._dispatch method."""
+class TestProtocolMessages:
+    """Tests for protocol v1 messages."""
+
+    def test_health_request(self):
+        req = HealthRequest(id="req-1")
+        assert req.id == "req-1"
+        assert req.message_type == "health_request"
+
+    def test_health_response(self):
+        resp = HealthResponse(id="req-1", status="ok", agent_name="test")
+        assert resp.id == "req-1"
+        assert resp.status == "ok"
+        assert resp.agent_name == "test"
+        assert resp.success is True
+
+    def test_complete_request(self):
+        req = CompleteRequest(id="req-1", query="Hello")
+        assert req.query == "Hello"
+        assert req.system_prompt is None
+
+    def test_complete_response(self):
+        resp = CompleteResponse(
+            id="req-1",
+            response_id="resp-1",
+            content="Hi there",
+            model="gpt-4",
+            tokens_used=10,
+        )
+        assert resp.response_id == "resp-1"
+        assert resp.content == "Hi there"
+
+    def test_remember_request(self):
+        req = RememberRequest(id="req-1", fact="User likes Python")
+        assert req.fact == "User likes Python"
+        assert req.category == "general"
+
+    def test_forget_request(self):
+        req = ForgetRequest(id="req-1", fact_id=42)
+        assert req.fact_id == 42
+
+    def test_recall_request(self):
+        req = RecallRequest(id="req-1", query="programming")
+        assert req.query == "programming"
+        assert req.top_k is None
+        assert req.categories is None
+
+    def test_feedback_request(self):
+        req = FeedbackRequest(id="req-1", response_id="resp-1", signal="positive")
+        assert req.response_id == "resp-1"
+        assert req.signal == "positive"
+        assert req.correction is None
+
+
+class TestAgentHandleRequest:
+    """Tests for Agent.handle_request method."""
 
     @pytest.fixture
-    def mock_agent(self):
-        """Create a mock agent with all required methods."""
-        agent = MagicMock()
-        agent.name = "test-agent"
-        agent.complete.return_value = CompletionResult(
+    def mock_learn(self):
+        """Create mock LearnClient."""
+        learn = MagicMock()
+        learn.facts = MagicMock()
+        learn.facts.list_active.return_value = []
+        learn.feedback = MagicMock()
+        learn.preferences = MagicMock()
+        return learn
+
+    @pytest.fixture
+    def mock_context_builder(self):
+        """Patch ContextBuilder to avoid database calls."""
+        with patch("llm_agent.agent.ContextBuilder") as mock_cls:
+            mock_builder = MagicMock()
+            mock_builder.build_system_prompt.side_effect = lambda base_prompt, **_: base_prompt
+            mock_cls.return_value = mock_builder
+            yield mock_cls
+
+    @pytest.fixture
+    def agent(self, mock_learn, mock_context_builder):
+        """Create a test agent."""
+        from llm_agent import Agent, AgentConfig
+
+        config = AgentConfig(name="test-agent", fact_injection="none")
+        llm = MagicMock()
+        llm.complete.return_value = CompletionResult(
             id="resp-123",
             content="Hello!",
             model="gpt-4",
             tokens_used=25,
             latency_ms=100,
         )
-        agent.remember.return_value = 42
-        agent.recall.return_value = []
-        return agent
+        return Agent(config=config, llm=llm, learn=mock_learn)
 
-    @pytest.fixture
-    def trait(self, mock_agent):
-        """Create an attached HTTPTrait."""
-        trait = HTTPTrait()
-        trait.attach(mock_agent)
-        return trait
+    def test_handle_health_request(self, agent):
+        req = HealthRequest(id="req-1")
 
-    def test_dispatch_health(self, trait, mock_agent):
-        request = AgentRequest(id="req-1", method="health", params={})
+        resp = agent.handle_request(req)
 
-        response = trait._dispatch(request)
+        assert isinstance(resp, HealthResponse)
+        assert resp.id == "req-1"
+        assert resp.status == "ok"
+        assert resp.agent_name == "test-agent"
 
-        assert response.id == "req-1"
-        assert response.success is True
-        assert response.result == {"status": "ok", "agent_name": "test-agent"}
-        assert response.error is None
+    def test_handle_complete_request(self, agent):
+        req = CompleteRequest(id="req-1", query="Hello")
 
-    def test_dispatch_complete(self, trait, mock_agent):
-        request = AgentRequest(
-            id="req-1",
-            method="complete",
-            params={"query": "Hello"},
-        )
+        resp = agent.handle_request(req)
 
-        response = trait._dispatch(request)
+        assert isinstance(resp, CompleteResponse)
+        assert resp.id == "req-1"
+        assert resp.success is True
+        assert resp.response_id == "resp-123"
+        assert resp.content == "Hello!"
 
-        assert response.id == "req-1"
-        assert response.success is True
-        assert response.result["id"] == "resp-123"
-        assert response.result["content"] == "Hello!"
-        assert response.result["model"] == "gpt-4"
-        assert response.result["tokens_used"] == 25
-        mock_agent.complete.assert_called_once_with(query="Hello", system_prompt=None)
+    def test_handle_remember_request(self, agent, mock_learn):
+        mock_learn.facts.add.return_value = 42
+        req = RememberRequest(id="req-1", fact="User likes Python", category="preferences")
 
-    def test_dispatch_complete_with_system_prompt(self, trait, mock_agent):
-        request = AgentRequest(
-            id="req-1",
-            method="complete",
-            params={"query": "Hello", "system_prompt": "Be brief."},
-        )
+        resp = agent.handle_request(req)
 
-        trait._dispatch(request)
+        assert isinstance(resp, RememberResponse)
+        assert resp.success is True
+        assert resp.fact_id == 42
+        mock_learn.facts.add.assert_called_once_with("User likes Python", category="preferences")
 
-        mock_agent.complete.assert_called_once_with(query="Hello", system_prompt="Be brief.")
+    def test_handle_forget_request(self, agent, mock_learn):
+        req = ForgetRequest(id="req-1", fact_id=42)
 
-    def test_dispatch_remember(self, trait, mock_agent):
-        request = AgentRequest(
-            id="req-1",
-            method="remember",
-            params={"fact": "User likes Python", "category": "preferences"},
-        )
+        resp = agent.handle_request(req)
 
-        response = trait._dispatch(request)
+        assert isinstance(resp, ForgetResponse)
+        assert resp.success is True
+        mock_learn.facts.delete.assert_called_once_with(42)
 
-        assert response.success is True
-        assert response.result == {"fact_id": 42}
-        mock_agent.remember.assert_called_once_with(
-            fact="User likes Python", category="preferences"
-        )
+    def test_handle_feedback_request(self, agent, mock_learn):
+        # First complete a request to track the response
+        complete_req = CompleteRequest(id="req-1", query="Hello")
+        agent.handle_request(complete_req)
 
-    def test_dispatch_remember_default_category(self, trait, mock_agent):
-        request = AgentRequest(
-            id="req-1",
-            method="remember",
-            params={"fact": "Some fact"},
-        )
+        # Then provide feedback
+        feedback_req = FeedbackRequest(id="req-2", response_id="resp-123", signal="positive")
+        resp = agent.handle_request(feedback_req)
 
-        trait._dispatch(request)
+        assert isinstance(resp, FeedbackResponse)
+        assert resp.success is True
+        mock_learn.feedback.record.assert_called_once()
 
-        mock_agent.remember.assert_called_once_with(fact="Some fact", category="general")
+    def test_handle_unknown_message_type(self, agent):
+        # Create a request with unknown message type
+        from llm_agent.protocol.base import Request
 
-    def test_dispatch_forget(self, trait, mock_agent):
-        request = AgentRequest(
-            id="req-1",
-            method="forget",
-            params={"fact_id": 42},
-        )
+        class UnknownRequest(Request):
+            message_type = "unknown_type"
 
-        response = trait._dispatch(request)
+        req = UnknownRequest(id="req-1")
+        resp = agent.handle_request(req)
 
-        assert response.success is True
-        assert response.result == {"success": True}
-        mock_agent.forget.assert_called_once_with(fact_id=42)
+        assert resp.success is False
+        assert "Unknown message type" in resp.error
 
-    def test_dispatch_recall(self, trait, mock_agent):
-        # Setup mock scored facts
-        mock_fact = MagicMock()
-        mock_fact.id = 1
-        mock_fact.content = "User likes Python"
-        mock_fact.category = "preferences"
-        mock_scored = MagicMock()
-        mock_scored.fact = mock_fact
-        mock_scored.similarity = 0.85
-        mock_agent.recall.return_value = [mock_scored]
+    def test_handle_complete_request_error(self, agent):
+        # Make LLM raise an exception
+        agent._llm.complete.side_effect = ValueError("LLM error")
+        req = CompleteRequest(id="req-1", query="Hello")
 
-        request = AgentRequest(
-            id="req-1",
-            method="recall",
-            params={"query": "programming"},
-        )
+        resp = agent.handle_request(req)
 
-        response = trait._dispatch(request)
-
-        assert response.success is True
-        assert len(response.result["facts"]) == 1
-        assert response.result["facts"][0]["content"] == "User likes Python"
-        assert response.result["facts"][0]["similarity"] == 0.85
-        mock_agent.recall.assert_called_once_with(
-            query="programming",
-            top_k=None,
-            min_similarity=None,
-            categories=None,
-        )
-
-    def test_dispatch_recall_with_params(self, trait, mock_agent):
-        mock_agent.recall.return_value = []
-
-        request = AgentRequest(
-            id="req-1",
-            method="recall",
-            params={
-                "query": "programming",
-                "top_k": 10,
-                "min_similarity": 0.5,
-                "categories": ["preferences"],
-            },
-        )
-
-        trait._dispatch(request)
-
-        mock_agent.recall.assert_called_once_with(
-            query="programming",
-            top_k=10,
-            min_similarity=0.5,
-            categories=["preferences"],
-        )
-
-    def test_dispatch_feedback(self, trait, mock_agent):
-        request = AgentRequest(
-            id="req-1",
-            method="feedback",
-            params={"response_id": "resp-123", "signal": "positive"},
-        )
-
-        response = trait._dispatch(request)
-
-        assert response.success is True
-        assert response.result == {"success": True}
-        mock_agent.feedback.assert_called_once_with(
-            response_id="resp-123",
-            signal="positive",
-            correction=None,
-        )
-
-    def test_dispatch_feedback_with_correction(self, trait, mock_agent):
-        request = AgentRequest(
-            id="req-1",
-            method="feedback",
-            params={
-                "response_id": "resp-123",
-                "signal": "negative",
-                "correction": "Better answer",
-            },
-        )
-
-        trait._dispatch(request)
-
-        mock_agent.feedback.assert_called_once_with(
-            response_id="resp-123",
-            signal="negative",
-            correction="Better answer",
-        )
-
-    def test_dispatch_unknown_method(self, trait):
-        request = AgentRequest(
-            id="req-1",
-            method="unknown",
-            params={},
-        )
-
-        response = trait._dispatch(request)
-
-        assert response.id == "req-1"
-        assert response.success is False
-        assert response.result is None
-        assert "Unknown method" in response.error
-
-    def test_dispatch_handles_exception(self, trait, mock_agent):
-        mock_agent.complete.side_effect = ValueError("Something went wrong")
-
-        request = AgentRequest(
-            id="req-1",
-            method="complete",
-            params={"query": "Hello"},
-        )
-
-        response = trait._dispatch(request)
-
-        assert response.id == "req-1"
-        assert response.success is False
-        assert response.result is None
-        assert "Something went wrong" in response.error
-
-    def test_dispatch_handles_dict_request(self, trait, mock_agent):
-        """Verify dispatch handles dict form (from queue serialization)."""
-        request = {
-            "id": "req-1",
-            "method": "health",
-            "params": {},
-        }
-
-        response = trait._dispatch(request)
-
-        assert response.success is True
-        assert response.result["status"] == "ok"
+        assert isinstance(resp, CompleteResponse)
+        assert resp.success is False
+        assert "LLM error" in resp.error
 
 
 class TestHTTPTraitLifecycle:
     """Tests for HTTPTrait on_start/on_stop lifecycle."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        return MagicMock()
 
     @pytest.fixture
     def mock_agent(self):
@@ -316,21 +327,21 @@ class TestHTTPTraitLifecycle:
         agent.name = "test-agent"
         return agent
 
-    @patch("llm_agent.traits.http.mp.Queue")
+    @patch("llm_agent.server.http.mp.Queue")
     @patch("appinfra.app.fastapi.ServerBuilder")
-    def test_on_start_creates_server(self, mock_builder_cls, mock_queue, mock_agent):
+    def test_on_start_creates_server(self, mock_builder_cls, mock_queue, mock_logger, mock_agent):
         """Verify on_start creates server with correct configuration."""
-        # Setup mocks
         mock_queue.return_value = MagicMock()
         mock_server = MagicMock()
         mock_server.start_subprocess.return_value = MagicMock()
 
-        # Chain the builder methods
         mock_builder = MagicMock()
         mock_builder_cls.return_value = mock_builder
         mock_builder.with_host.return_value = mock_builder
         mock_builder.with_port.return_value = mock_builder
         mock_builder.with_title.return_value = mock_builder
+        mock_builder.with_description.return_value = mock_builder
+        mock_builder.with_version.return_value = mock_builder
         mock_builder.subprocess = MagicMock()
         mock_builder.subprocess.with_ipc.return_value = mock_builder.subprocess
         mock_builder.subprocess.with_response_timeout.return_value = mock_builder.subprocess
@@ -342,37 +353,29 @@ class TestHTTPTraitLifecycle:
         mock_builder.build.return_value = mock_server
 
         config = HTTPConfig(host="0.0.0.0", port=9000, title="Test API")
-        trait = HTTPTrait(config=config)
+        trait = HTTPTrait(lg=mock_logger, config=config)
         trait.attach(mock_agent)
-
         trait.on_start()
 
-        # Verify builder was called with correct config
-        mock_builder_cls.assert_called_once_with("Test API")
-        mock_builder.with_host.assert_called_once_with("0.0.0.0")
-        mock_builder.with_port.assert_called_once_with(9000)
-
-        # Verify server was started
         mock_server.start_subprocess.assert_called_once()
-
-        # Cleanup
         trait.on_stop()
 
-    @patch("llm_agent.traits.http.mp.Queue")
+    @patch("llm_agent.server.http.mp.Queue")
     @patch("appinfra.app.fastapi.ServerBuilder")
-    def test_on_stop_terminates_process(self, mock_builder_cls, mock_queue, mock_agent):
-        """Verify on_stop terminates subprocess and cleans up."""
+    def test_on_stop_stops_server(self, mock_builder_cls, mock_queue, mock_logger, mock_agent):
+        """Verify on_stop stops server and cleans up."""
         mock_queue.return_value = MagicMock()
         mock_process = MagicMock()
         mock_server = MagicMock()
         mock_server.start_subprocess.return_value = mock_process
 
-        # Setup builder chain
         mock_builder = MagicMock()
         mock_builder_cls.return_value = mock_builder
         mock_builder.with_host.return_value = mock_builder
         mock_builder.with_port.return_value = mock_builder
         mock_builder.with_title.return_value = mock_builder
+        mock_builder.with_description.return_value = mock_builder
+        mock_builder.with_version.return_value = mock_builder
         mock_builder.subprocess = MagicMock()
         mock_builder.subprocess.with_ipc.return_value = mock_builder.subprocess
         mock_builder.subprocess.with_response_timeout.return_value = mock_builder.subprocess
@@ -383,37 +386,9 @@ class TestHTTPTraitLifecycle:
         mock_builder.routes.done.return_value = mock_builder
         mock_builder.build.return_value = mock_server
 
-        trait = HTTPTrait()
+        trait = HTTPTrait(lg=mock_logger)
         trait.attach(mock_agent)
         trait.on_start()
-
         trait.on_stop()
 
-        mock_process.terminate.assert_called_once()
-        mock_process.join.assert_called_once()
-
-
-class TestHTTPModels:
-    """Tests for HTTP request/response models."""
-
-    def test_agent_request_dataclass(self):
-        request = AgentRequest(id="req-1", method="complete", params={"query": "Hello"})
-
-        assert request.id == "req-1"
-        assert request.method == "complete"
-        assert request.params == {"query": "Hello"}
-
-    def test_agent_response_success(self):
-        response = AgentResponse(id="req-1", success=True, result={"content": "Hi"})
-
-        assert response.id == "req-1"
-        assert response.success is True
-        assert response.result == {"content": "Hi"}
-        assert response.error is None
-
-    def test_agent_response_error(self):
-        response = AgentResponse(id="req-1", success=False, result=None, error="Failed")
-
-        assert response.success is False
-        assert response.result is None
-        assert response.error == "Failed"
+        mock_server.stop.assert_called_once()

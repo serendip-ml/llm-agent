@@ -1,41 +1,36 @@
-"""HTTP API models and routes for llm-agent."""
+"""Protocol v1 messages for learning agent API."""
 
-from llm_agent.http.models import (
-    AgentRequest,
-    AgentResponse,
+from llm_agent.protocol.v1.messages import (
+    MESSAGE_REGISTRY,
     CompleteRequest,
     CompleteResponse,
-    ErrorResponse,
     FeedbackRequest,
     FeedbackResponse,
+    ForgetRequest,
     ForgetResponse,
+    HealthRequest,
     HealthResponse,
     RecallRequest,
     RecallResponse,
     RememberRequest,
     RememberResponse,
-    ScoredFactResponse,
+    ScoredFact,
 )
-from llm_agent.http.routes import router
 
 
 __all__ = [
-    # IPC types
-    "AgentRequest",
-    "AgentResponse",
-    # HTTP models
     "CompleteRequest",
     "CompleteResponse",
-    "ErrorResponse",
     "FeedbackRequest",
     "FeedbackResponse",
+    "ForgetRequest",
     "ForgetResponse",
+    "HealthRequest",
     "HealthResponse",
+    "MESSAGE_REGISTRY",
     "RecallRequest",
     "RecallResponse",
     "RememberRequest",
     "RememberResponse",
-    "ScoredFactResponse",
-    # Router
-    "router",
+    "ScoredFact",
 ]
