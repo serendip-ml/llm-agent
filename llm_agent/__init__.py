@@ -1,5 +1,7 @@
 """Agent framework with learning capabilities."""
 
+from llm_learn.collection import ScoredFact
+
 from llm_agent.agent import Agent
 from llm_agent.config import AgentConfig
 from llm_agent.llm import CompletionResult, HTTPBackend, LLMBackend, LLMError, Message
@@ -18,5 +20,6 @@ __all__ = [
     "LLMBackend",
     "LLMError",
     "Message",
+    "ScoredFact",
     "Trait",
 ]

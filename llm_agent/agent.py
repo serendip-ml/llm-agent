@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, TypeVar
+from typing import Literal, TypeVar
 
 from llm_learn import LearnClient
-from llm_learn.inference import ContextBuilder
+from llm_learn.collection import ScoredFact
+from llm_learn.inference import ContextBuilder, Embedder
 
 from llm_agent.config import AgentConfig
 from llm_agent.llm import CompletionResult, LLMBackend, Message
 from llm_agent.traits.base import Trait
 
-
-if TYPE_CHECKING:
-    from llm_learn.inference import Embedder
 
 TraitT = TypeVar("TraitT", bound=Trait)
 
@@ -125,8 +123,8 @@ class Agent:
         """
         base_prompt = system_prompt or self._config.default_prompt
 
-        # Build prompt with fact injection
-        prompt = self._build_prompt(base_prompt)
+        # Build prompt with fact injection (pass query for RAG mode)
+        prompt = self._build_prompt(base_prompt, query=query)
 
         messages = [
             Message(role="system", content=prompt),
@@ -152,7 +150,7 @@ class Agent:
 
         return result
 
-    def _build_prompt(self, base_prompt: str) -> str:
+    def _build_prompt(self, base_prompt: str, query: str | None = None) -> str:
         """Build system prompt with directive and fact injection."""
         from llm_agent.traits.directive import DirectiveTrait
 
@@ -164,20 +162,74 @@ class Agent:
             prompt = directive_trait.build_prompt(prompt)
 
         # Inject facts based on config
-        if self._config.fact_injection != "none":
-            # "all" and "rag" modes both inject facts
-            # TODO(Phase 3): RAG mode should use embedder for semantic retrieval
+        if self._config.fact_injection == "rag":
+            prompt = self._inject_rag_facts(prompt, query)
+        elif self._config.fact_injection == "all":
             prompt = self._context.build_system_prompt(
                 base_prompt=prompt,
                 max_facts=self._config.max_facts,
             )
+        # "none" mode: no fact injection
 
         return prompt
+
+    def _inject_rag_facts(self, prompt: str, query: str | None) -> str:
+        """Inject semantically relevant facts into prompt using RAG."""
+        if query is None or self._embedder is None:
+            raise ValueError("RAG mode requires query and embedder")
+
+        embedding = self._embedder.embed(query)
+        scored_facts = self._learn.facts.search_similar(
+            embedding=embedding.embedding,
+            model_name=self._embedder.model,
+            top_k=self._config.rag_top_k,
+            min_similarity=self._config.rag_min_similarity,
+        )
+        facts = [sf.fact for sf in scored_facts]
+        return self._context.build_system_prompt_from_facts(
+            base_prompt=prompt,
+            facts=facts,
+        )
+
+    def recall(
+        self,
+        query: str,
+        top_k: int | None = None,
+        min_similarity: float | None = None,
+        categories: list[str] | None = None,
+    ) -> list[ScoredFact]:
+        """Search facts by semantic similarity to query.
+
+        Args:
+            query: Text to search for similar facts.
+            top_k: Max results (defaults to config.rag_top_k).
+            min_similarity: Minimum similarity threshold (defaults to config.rag_min_similarity).
+            categories: Filter to these categories.
+
+        Returns:
+            List of ScoredFact sorted by similarity (highest first).
+
+        Raises:
+            ValueError: If embedder not configured.
+        """
+        if self._embedder is None:
+            raise ValueError("recall() requires an embedder")
+
+        embedding = self._embedder.embed(query)
+        return self._learn.facts.search_similar(
+            embedding=embedding.embedding,
+            model_name=self._embedder.model,
+            top_k=top_k or self._config.rag_top_k,
+            min_similarity=min_similarity or self._config.rag_min_similarity,
+            categories=categories,
+        )
 
     # === Memory (delegates to llm-learn) ===
 
     def remember(self, fact: str, category: str = "general") -> int:
         """Store a fact about the user.
+
+        If an embedder is configured, the fact is also embedded for semantic search.
 
         Args:
             fact: The fact to store.
@@ -186,7 +238,18 @@ class Agent:
         Returns:
             Fact ID.
         """
-        return self._learn.facts.add(fact, category=category)
+        fact_id = self._learn.facts.add(fact, category=category)
+
+        # Embed for semantic search if embedder available
+        if self._embedder is not None:
+            embedding = self._embedder.embed(fact)
+            self._learn.facts.set_embedding(
+                fact_id=fact_id,
+                embedding=embedding.embedding,
+                model_name=self._embedder.model,
+            )
+
+        return fact_id
 
     def forget(self, fact_id: int) -> None:
         """Remove a stored fact.

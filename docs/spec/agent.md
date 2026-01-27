@@ -368,12 +368,12 @@ agent.load_adapter("/models/adapters/my-adapter")
 - [x] Implement `feedback()` delegating to `learn.feedback` / `learn.preferences`
 - [x] Wire `ContextBuilder` for fact injection in `complete()`
 
-### Phase 3: RAG Support
+### Phase 3: RAG Support (Done)
 
-- [ ] Add optional `Embedder` to Agent
-- [ ] Implement `recall()` using `learn.facts.search_similar()`
-- [ ] Support `RAGArgs` in `complete()` for semantic fact retrieval
-- [ ] Embed facts on `remember()` when embedder is available
+- [x] Add optional `Embedder` to Agent
+- [x] Implement `recall()` using `learn.facts.search_similar()`
+- [x] Support RAG mode in `complete()` for semantic fact retrieval
+- [x] Embed facts on `remember()` when embedder is available
 
 ### Phase 4: Training Integration
 

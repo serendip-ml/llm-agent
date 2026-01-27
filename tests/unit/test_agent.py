@@ -326,3 +326,195 @@ class TestAgent:
         agent.feedback("resp-1", "positive")
         agent.feedback("resp-2", "positive")
         agent.feedback("resp-3", "positive")
+
+
+class TestAgentRAG:
+    """Tests for RAG functionality."""
+
+    @pytest.fixture
+    def mock_learn(self):
+        """Create mock LearnClient."""
+        learn = MagicMock()
+        learn.facts = MagicMock()
+        learn.facts.list_active.return_value = []
+        learn.feedback = MagicMock()
+        learn.preferences = MagicMock()
+        return learn
+
+    @pytest.fixture
+    def mock_context_builder(self):
+        """Patch ContextBuilder to avoid database calls."""
+        with patch("llm_agent.agent.ContextBuilder") as mock_cls:
+            mock_builder = MagicMock()
+            mock_builder.build_system_prompt.side_effect = lambda base_prompt, **_: base_prompt
+            mock_builder.build_system_prompt_from_facts.side_effect = (
+                lambda base_prompt, **_: base_prompt
+            )
+            mock_cls.return_value = mock_builder
+            yield mock_cls
+
+    @pytest.fixture
+    def mock_embedder(self):
+        """Create mock embedder with standard return values."""
+        embedder = MagicMock()
+        embedder.model = "test-embed-model"
+        embedding_result = MagicMock()
+        embedding_result.embedding = [0.1, 0.2, 0.3]
+        embedder.embed.return_value = embedding_result
+        return embedder
+
+    def test_recall_returns_similar_facts(self, mock_learn, mock_context_builder, mock_embedder):
+        """Verify recall() performs semantic search and returns results."""
+        config = AgentConfig(name="test", fact_injection="none")
+        llm = MagicMock()
+
+        # Setup mock scored facts
+        mock_fact = MagicMock()
+        mock_fact.content = "User prefers Python"
+        mock_scored_fact = MagicMock()
+        mock_scored_fact.fact = mock_fact
+        mock_scored_fact.similarity = 0.85
+        mock_learn.facts.search_similar.return_value = [mock_scored_fact]
+
+        agent = Agent(config=config, llm=llm, learn=mock_learn, embedder=mock_embedder)
+
+        results = agent.recall("programming languages")
+
+        assert len(results) == 1
+        assert results[0].fact.content == "User prefers Python"
+        mock_embedder.embed.assert_called_once_with("programming languages")
+        mock_learn.facts.search_similar.assert_called_once_with(
+            embedding=[0.1, 0.2, 0.3],
+            model_name="test-embed-model",
+            top_k=5,  # default rag_top_k
+            min_similarity=0.3,  # default rag_min_similarity
+            categories=None,
+        )
+
+    def test_recall_with_custom_parameters(self, mock_learn, mock_context_builder, mock_embedder):
+        """Verify recall() uses custom parameters when provided."""
+        config = AgentConfig(name="test", fact_injection="none")
+        llm = MagicMock()
+        mock_learn.facts.search_similar.return_value = []
+
+        agent = Agent(config=config, llm=llm, learn=mock_learn, embedder=mock_embedder)
+
+        agent.recall("query", top_k=10, min_similarity=0.5, categories=["preferences"])
+
+        mock_learn.facts.search_similar.assert_called_once_with(
+            embedding=[0.1, 0.2, 0.3],
+            model_name="test-embed-model",
+            top_k=10,
+            min_similarity=0.5,
+            categories=["preferences"],
+        )
+
+    def test_recall_without_embedder_raises(self, mock_learn, mock_context_builder):
+        """Verify recall() raises error when embedder not configured."""
+        config = AgentConfig(name="test", fact_injection="none")
+        llm = MagicMock()
+
+        agent = Agent(config=config, llm=llm, learn=mock_learn)
+
+        with pytest.raises(ValueError, match="recall\\(\\) requires an embedder"):
+            agent.recall("query")
+
+    def test_remember_embeds_when_embedder_available(
+        self, mock_learn, mock_context_builder, mock_embedder
+    ):
+        """Verify remember() embeds facts when embedder is configured."""
+        config = AgentConfig(name="test", fact_injection="none")
+        llm = MagicMock()
+        mock_learn.facts.add.return_value = 42
+
+        agent = Agent(config=config, llm=llm, learn=mock_learn, embedder=mock_embedder)
+
+        fact_id = agent.remember("User prefers Python", category="preferences")
+
+        assert fact_id == 42
+        mock_learn.facts.add.assert_called_once_with("User prefers Python", category="preferences")
+        mock_embedder.embed.assert_called_once_with("User prefers Python")
+        mock_learn.facts.set_embedding.assert_called_once_with(
+            fact_id=42,
+            embedding=[0.1, 0.2, 0.3],
+            model_name="test-embed-model",
+        )
+
+    def test_remember_without_embedder_skips_embedding(self, mock_learn, mock_context_builder):
+        """Verify remember() skips embedding when embedder not configured."""
+        config = AgentConfig(name="test", fact_injection="none")
+        llm = MagicMock()
+        mock_learn.facts.add.return_value = 42
+
+        agent = Agent(config=config, llm=llm, learn=mock_learn)
+
+        fact_id = agent.remember("User prefers Python")
+
+        assert fact_id == 42
+        mock_learn.facts.add.assert_called_once()
+        mock_learn.facts.set_embedding.assert_not_called()
+
+    def test_complete_rag_mode_uses_semantic_search(
+        self, mock_learn, mock_context_builder, mock_embedder
+    ):
+        """Verify complete() in RAG mode performs semantic search."""
+        config = AgentConfig(name="test", fact_injection="rag")
+        llm = MagicMock()
+        llm.complete.return_value = CompletionResult(
+            id="resp-1",
+            content="Response",
+            model="default",
+            tokens_used=10,
+            latency_ms=100,
+        )
+
+        # Setup mock scored facts
+        mock_fact = MagicMock()
+        mock_scored_fact = MagicMock()
+        mock_scored_fact.fact = mock_fact
+        mock_learn.facts.search_similar.return_value = [mock_scored_fact]
+
+        agent = Agent(config=config, llm=llm, learn=mock_learn, embedder=mock_embedder)
+
+        agent.complete("What programming language should I use?")
+
+        # Verify embedding was created for the query
+        mock_embedder.embed.assert_called_once_with("What programming language should I use?")
+
+        # Verify semantic search was performed
+        mock_learn.facts.search_similar.assert_called_once_with(
+            embedding=[0.1, 0.2, 0.3],
+            model_name="test-embed-model",
+            top_k=5,
+            min_similarity=0.3,
+        )
+
+        # Verify build_system_prompt_from_facts was called (not build_system_prompt)
+        mock_context_builder.return_value.build_system_prompt_from_facts.assert_called_once()
+        mock_context_builder.return_value.build_system_prompt.assert_not_called()
+
+    def test_complete_all_mode_does_not_use_semantic_search(
+        self, mock_learn, mock_context_builder, mock_embedder
+    ):
+        """Verify complete() in 'all' mode does not use semantic search."""
+        config = AgentConfig(name="test", fact_injection="all")
+        llm = MagicMock()
+        llm.complete.return_value = CompletionResult(
+            id="resp-1",
+            content="Response",
+            model="default",
+            tokens_used=10,
+            latency_ms=100,
+        )
+
+        agent = Agent(config=config, llm=llm, learn=mock_learn, embedder=mock_embedder)
+
+        agent.complete("Query")
+
+        # Embedder should not be called for fact retrieval
+        mock_embedder.embed.assert_not_called()
+        mock_learn.facts.search_similar.assert_not_called()
+
+        # build_system_prompt should be called (not from_facts)
+        mock_context_builder.return_value.build_system_prompt.assert_called_once()
+        mock_context_builder.return_value.build_system_prompt_from_facts.assert_not_called()
