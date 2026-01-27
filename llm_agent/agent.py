@@ -163,6 +163,7 @@ class Agent:
 
         # Inject facts based on config
         if self._config.fact_injection == "rag":
+            assert query is not None  # RAG mode only called from complete() which provides query
             prompt = self._inject_rag_facts(prompt, query)
         elif self._config.fact_injection == "all":
             prompt = self._context.build_system_prompt(
@@ -173,10 +174,9 @@ class Agent:
 
         return prompt
 
-    def _inject_rag_facts(self, prompt: str, query: str | None) -> str:
+    def _inject_rag_facts(self, prompt: str, query: str) -> str:
         """Inject semantically relevant facts into prompt using RAG."""
-        if query is None or self._embedder is None:
-            raise ValueError("RAG mode requires query and embedder")
+        assert self._embedder is not None  # Validated at __init__
 
         embedding = self._embedder.embed(query)
         scored_facts = self._learn.facts.search_similar(
@@ -219,8 +219,10 @@ class Agent:
         return self._learn.facts.search_similar(
             embedding=embedding.embedding,
             model_name=self._embedder.model,
-            top_k=top_k or self._config.rag_top_k,
-            min_similarity=min_similarity or self._config.rag_min_similarity,
+            top_k=self._config.rag_top_k if top_k is None else top_k,
+            min_similarity=self._config.rag_min_similarity
+            if min_similarity is None
+            else min_similarity,
             categories=categories,
         )
 
