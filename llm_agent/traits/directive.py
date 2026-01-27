@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel
 
-
-if TYPE_CHECKING:
-    from llm_agent.agent import Agent
+from llm_agent.traits.base import BaseTrait
 
 
 class Directive(BaseModel):
@@ -38,7 +36,7 @@ class Directive(BaseModel):
     """Reserved for future structured constraints/signals."""
 
 
-class DirectiveTrait:
+class DirectiveTrait(BaseTrait):
     """Trait for agents that have a directive.
 
     Holds the agent's directive and injects it into prompts.
@@ -58,29 +56,13 @@ class DirectiveTrait:
         Args:
             directive: The agent's directive.
         """
+        super().__init__()
         self._directive = directive
-        self._agent: Agent | None = None
 
     @property
     def directive(self) -> Directive:
         """The agent's directive."""
         return self._directive
-
-    def attach(self, agent: Agent) -> None:
-        """Attach trait to agent.
-
-        Args:
-            agent: The agent this trait is attached to.
-        """
-        self._agent = agent
-
-    def on_start(self) -> None:
-        """Called when agent starts."""
-        pass
-
-    def on_stop(self) -> None:
-        """Called when agent stops."""
-        pass
 
     def build_prompt(self, base_prompt: str) -> str:
         """Build system prompt with directive injected.

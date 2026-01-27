@@ -4,10 +4,67 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from llm_agent import Agent, AgentConfig, CompletionResult, Directive, DirectiveTrait
+from llm_agent import Agent, AgentConfig, BaseTrait, CompletionResult, Directive, DirectiveTrait
 
 
 pytestmark = pytest.mark.unit
+
+
+class TestBaseTrait:
+    """Tests for BaseTrait."""
+
+    def test_init(self):
+        trait = BaseTrait()
+
+        assert trait._agent is None
+
+    def test_agent_property_raises_if_not_attached(self):
+        trait = BaseTrait()
+
+        with pytest.raises(RuntimeError, match="not attached to agent"):
+            _ = trait.agent
+
+    def test_attach(self):
+        trait = BaseTrait()
+        mock_agent = MagicMock()
+
+        trait.attach(mock_agent)
+
+        assert trait._agent == mock_agent
+
+    def test_agent_property_returns_agent_after_attach(self):
+        trait = BaseTrait()
+        mock_agent = MagicMock()
+        trait.attach(mock_agent)
+
+        assert trait.agent == mock_agent
+
+    def test_lifecycle_methods_exist(self):
+        trait = BaseTrait()
+
+        # Should not raise - these are no-op by default
+        trait.on_start()
+        trait.on_stop()
+
+
+class TestCustomTrait:
+    """Tests for custom traits using BaseTrait."""
+
+    def test_custom_trait_inherits_behavior(self):
+        class MyTrait(BaseTrait):
+            def __init__(self, value: str) -> None:
+                super().__init__()
+                self.value = value
+
+            def get_value(self) -> str:
+                return f"{self.agent.name}: {self.value}"
+
+        trait = MyTrait("test")
+        mock_agent = MagicMock()
+        mock_agent.name = "test-agent"
+        trait.attach(mock_agent)
+
+        assert trait.get_value() == "test-agent: test"
 
 
 class TestDirective:
