@@ -18,8 +18,11 @@ class Trait(Protocol):
     lifecycle:
 
     - attach(agent): Called during agent setup to get agent reference
-    - on_start(): Called when agent starts
-    - on_stop(): Called when agent stops
+    - on_start(): Called when agent starts (not yet implemented)
+    - on_stop(): Called when agent stops (not yet implemented)
+
+    Note: on_start/on_stop are defined for future use when Agent gains
+    explicit lifecycle management. Currently only attach() is called.
 
     Traits can depend on other traits. Use agent.get_trait() in attach()
     to get references to required traits.

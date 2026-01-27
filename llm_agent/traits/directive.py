@@ -46,9 +46,7 @@ class DirectiveTrait:
 
     Usage:
         directive = Directive(
-            goal="Review code thoroughly",
-            persona="Critical, evidence-based",
-            constraints=["No false positives"],
+            prompt="You are a code reviewer. Be critical and evidence-based."
         )
         trait = DirectiveTrait(directive)
         agent.add_trait(trait)
