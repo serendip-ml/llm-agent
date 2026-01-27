@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from llm_learn import LearnClient
 from llm_learn.inference import ContextBuilder
 
 from llm_agent.config import AgentConfig
 from llm_agent.llm import CompletionResult, LLMBackend, Message
+from llm_agent.traits.base import Trait
 
 
 if TYPE_CHECKING:
     from llm_learn.inference import Embedder
+
+TraitT = TypeVar("TraitT", bound=Trait)
 
 
 class Agent:
@@ -49,6 +52,7 @@ class Agent:
         self._embedder = embedder
         self._context = ContextBuilder(learn.facts)
         self._response_contexts: dict[str, _ResponseContext] = {}
+        self._traits: dict[type[Trait], Trait] = {}
 
     @property
     def name(self) -> str:
@@ -59,6 +63,47 @@ class Agent:
     def config(self) -> AgentConfig:
         """Agent configuration."""
         return self._config
+
+    # === Traits ===
+
+    def add_trait(self, trait: Trait) -> None:
+        """Add a trait to this agent.
+
+        Traits are attached immediately upon adding.
+
+        Args:
+            trait: The trait instance to add.
+
+        Raises:
+            ValueError: If a trait of this type is already added.
+        """
+        trait_type = type(trait)
+        if trait_type in self._traits:
+            raise ValueError(f"Trait {trait_type.__name__} already added")
+        self._traits[trait_type] = trait
+        trait.attach(self)
+
+    def get_trait(self, trait_type: type[TraitT]) -> TraitT | None:
+        """Get an attached trait by its type.
+
+        Args:
+            trait_type: The trait class to look up.
+
+        Returns:
+            The trait instance, or None if not attached.
+        """
+        return self._traits.get(trait_type)  # type: ignore[return-value]
+
+    def has_trait(self, trait_type: type[Trait]) -> bool:
+        """Check if a trait is attached.
+
+        Args:
+            trait_type: The trait class to check.
+
+        Returns:
+            True if the trait is attached.
+        """
+        return trait_type in self._traits
 
     # === Core operations ===
 
@@ -108,16 +153,26 @@ class Agent:
         return result
 
     def _build_prompt(self, base_prompt: str) -> str:
-        """Build system prompt with fact injection based on config."""
-        if self._config.fact_injection == "none":
-            return base_prompt
+        """Build system prompt with directive and fact injection."""
+        from llm_agent.traits.directive import DirectiveTrait
 
-        # "all" and "rag" modes both inject facts
-        # TODO(Phase 3): RAG mode should use embedder for semantic retrieval
-        return self._context.build_system_prompt(
-            base_prompt=base_prompt,
-            max_facts=self._config.max_facts,
-        )
+        prompt = base_prompt
+
+        # Inject directive if DirectiveTrait is attached
+        directive_trait = self.get_trait(DirectiveTrait)
+        if directive_trait is not None:
+            prompt = directive_trait.build_prompt(prompt)
+
+        # Inject facts based on config
+        if self._config.fact_injection != "none":
+            # "all" and "rag" modes both inject facts
+            # TODO(Phase 3): RAG mode should use embedder for semantic retrieval
+            prompt = self._context.build_system_prompt(
+                base_prompt=prompt,
+                max_facts=self._config.max_facts,
+            )
+
+        return prompt
 
     # === Memory (delegates to llm-learn) ===
 

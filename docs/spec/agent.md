@@ -360,13 +360,13 @@ agent.load_adapter("/models/adapters/my-adapter")
 - [x] `Message`, `CompletionResult` types
 - [x] Basic completion flow (no facts, no feedback)
 
-### Phase 2: llm-learn Integration
+### Phase 2: llm-learn Integration (Done)
 
-- [ ] Add `llm-learn` as dependency
-- [ ] Update `Agent.__init__` to take `LearnClient`
-- [ ] Implement `remember()` / `forget()` delegating to `learn.facts`
-- [ ] Implement `feedback()` delegating to `learn.feedback` / `learn.preferences`
-- [ ] Wire `ContextBuilder` for fact injection in `complete()`
+- [x] Add `llm-learn` as dependency
+- [x] Update `Agent.__init__` to take `LearnClient`
+- [x] Implement `remember()` / `forget()` delegating to `learn.facts`
+- [x] Implement `feedback()` delegating to `learn.feedback` / `learn.preferences`
+- [x] Wire `ContextBuilder` for fact injection in `complete()`
 
 ### Phase 3: RAG Support
 
