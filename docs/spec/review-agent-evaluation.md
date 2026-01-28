@@ -213,7 +213,7 @@ The `/pr` skill tracks the complete PR lifecycle with explicit state transitions
 | `/pr start <base>` | Create PR record, set base branch |
 | `/pr review` | Run code review, log as iteration |
 | `/pr commit` | Commit changes (after fixing issues) |
-| `/pr push` | Push branch, create GitHub PR |
+| `/pr submit` | Push branch, create GitHub PR |
 | `/pr merge` | Mark PR complete |
 
 **Log structure:**
@@ -230,7 +230,7 @@ The `/pr` skill tracks the complete PR lifecycle with explicit state transitions
     {"type": "review", "ts": "2026-01-28T10:30:00Z", "commit": "a1b2c3d", "findings": [...], "latency_s": 4.2},
     {"type": "commit", "ts": "2026-01-28T11:00:00Z", "commit": "b2c3d4e", "message": "Fix null check"},
     {"type": "review", "ts": "2026-01-28T11:15:00Z", "commit": "b2c3d4e", "findings": [...], "latency_s": 3.8},
-    {"type": "push", "ts": "2026-01-28T11:30:00Z", "commit": "b2c3d4e", "pr_url": "https://github.com/..."},
+    {"type": "submit", "ts": "2026-01-28T11:30:00Z", "commit": "b2c3d4e", "pr_url": "https://github.com/..."},
     {"type": "merge", "ts": "2026-01-28T14:00:00Z", "commit": "b2c3d4e"}
   ],
   "iterations": 2,
@@ -245,7 +245,7 @@ The `/pr` skill tracks the complete PR lifecycle with explicit state transitions
 | `start` | `ts`, `commit`, `base_commit` | PR cycle begins |
 | `review` | `ts`, `commit`, `findings`, `latency_s` | Code review iteration |
 | `commit` | `ts`, `commit`, `message` | Fix committed |
-| `push` | `ts`, `commit`, `pr_url` | Branch pushed, PR created |
+| `submit` | `ts`, `commit`, `pr_url` | Branch pushed, PR created |
 | `merge` | `ts`, `commit` | PR merged, cycle complete |
 
 **Finding structure:**
@@ -404,7 +404,7 @@ For variants with learning (3, 4), track improvement over time:
 ┌─────────────────────────────────────────────────────────┐
 │                    Claude Code Skill                     │
 │                        /pr                               │
-│         (start, review, commit, push, merge)             │
+│         (start, review, commit, submit, merge)             │
 └─────────────────────────┬───────────────────────────────┘
                           │ HTTP (for variants 2-4)
                           ▼
@@ -434,7 +434,7 @@ For variants with learning (3, 4), track improvement over time:
 3. User: (fixes issues)
 4. User: /pr commit            → Commits fix, logs commit event
 5. User: /pr review            → Another review iteration
-6. User: /pr push              → Pushes, creates GitHub PR, logs
+6. User: /pr submit              → Pushes, creates GitHub PR, logs
 7. User: /pr merge             → Marks complete, logs final state
 ```
 
