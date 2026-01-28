@@ -232,6 +232,55 @@ class TestShellTool:
         assert result.success is False
         assert "metacharacters" in result.error
 
+        # Variable expansion with braces ${VAR}
+        result = tool.execute(command="echo ${PATH}")
+        assert result.success is False
+        assert "metacharacters" in result.error
+
+        # Variable reference $VAR
+        result = tool.execute(command="echo $HOME")
+        assert result.success is False
+        assert "metacharacters" in result.error
+
+        # Output redirection
+        result = tool.execute(command="echo x > /tmp/test")
+        assert result.success is False
+        assert "metacharacters" in result.error
+
+        # Append redirection
+        result = tool.execute(command="echo x >> /tmp/test")
+        assert result.success is False
+        assert "metacharacters" in result.error
+
+        # Input redirection
+        result = tool.execute(command="cat < /etc/passwd")
+        assert result.success is False
+        assert "metacharacters" in result.error
+
+        # Heredoc
+        result = tool.execute(command="cat << EOF")
+        assert result.success is False
+        assert "metacharacters" in result.error
+
+    def test_invalid_command_type(self):
+        """Non-string command argument is rejected."""
+        tool = ShellTool()
+
+        # Integer instead of string
+        result = tool.execute(command=123)
+        assert result.success is False
+        assert "invalid" in result.error.lower()
+
+        # None
+        result = tool.execute(command=None)
+        assert result.success is False
+        assert "invalid" in result.error.lower()
+
+        # List
+        result = tool.execute(command=["echo", "hello"])
+        assert result.success is False
+        assert "invalid" in result.error.lower()
+
     def test_shell_metacharacters_allowed_without_allowlist(self):
         """Shell metacharacters work normally when no allowlist is configured."""
         tool = ShellTool()

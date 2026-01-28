@@ -16,10 +16,13 @@ _SHELL_METACHAR_PATTERN = re.compile(
     &&          |  # AND operator
     \|\|        |  # OR operator
     \|          |  # pipe
-    \$\(        |  # command substitution $(...)
+    \$[\(\{]    |  # command/variable substitution $() or ${}
+    \$[A-Za-z_] |  # variable reference $VAR
     `           |  # backtick command substitution
     \n          |  # newline (command separator)
-    &\s*$          # background execution at end
+    &\s*$       |  # background execution at end
+    >           |  # output redirection (includes >>)
+    <              # input redirection (includes << heredoc)
     """,
     re.VERBOSE,
 )
@@ -89,9 +92,11 @@ class ShellTool(BaseTool):
         Returns:
             ToolResult with command output or error.
         """
-        command = kwargs.get("command", "")
-        if not command:
-            return ToolResult(success=False, output="", error="Missing 'command' argument")
+        command = kwargs.get("command")
+        if not isinstance(command, str) or not command:
+            return ToolResult(
+                success=False, output="", error="Missing or invalid 'command' argument"
+            )
 
         if error := self._check_allowed(command):
             return error
