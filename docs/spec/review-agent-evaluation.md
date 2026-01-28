@@ -8,8 +8,7 @@
 ## Hypothesis
 
 **Specialization beats generalization.** A LoRA fine-tuned medium-sized model (7B-70B) specialized
-for
-code review can match or outperform Claude without fine-tuning.
+for code review can match a static prompt-driven agent running on a commercial model (Claude).
 
 ---
 
@@ -256,6 +255,9 @@ The `/pr` skill tracks the complete PR lifecycle with explicit state transitions
 | Implicit TP | Findings that disappear between reviews (fixed) |
 | Implicit FP | Findings that persist across all reviews (ignored) |
 
+*Note: Implicit TP/FP are approximations useful for automated analysis. Expert annotation provides
+definitive classification, as users may fix disagreed findings or defer valid ones.*
+
 ### Evaluation Data Recording
 
 Each review session records (after expert annotation):
@@ -309,9 +311,9 @@ Each review session records (after expert annotation):
 
 ### Statistical Significance
 
-**Minimum sample size:** 30 PRs per comparison
-**Significance test:** Paired t-test or Wilcoxon signed-rank (non-parametric)
-**Significance threshold:** p < 0.05
+- **Minimum sample size:** 30 PRs per comparison
+- **Significance test:** Paired t-test or Wilcoxon signed-rank (non-parametric)
+- **Significance threshold:** p < 0.05
 
 **Comparison protocol:**
 1. Calculate metric (e.g., F1) for each variant on each PR
@@ -440,6 +442,8 @@ Variants 2-4 (Local):
 ---
 
 ## Open Questions
+
+Decisions needed before Phase 2 implementation.
 
 | Question | Options | Decision |
 |----------|---------|----------|
