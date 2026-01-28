@@ -8,7 +8,7 @@
 ## Hypothesis
 
 **Specialization beats generalization.** A LoRA fine-tuned medium-sized model (7B-70B) specialized
-for code review can match a static prompt-driven agent running on a commercial model (Claude).
+for code review can match a prompt-driven agent running on a commercial model (Claude).
 
 ---
 
@@ -140,6 +140,10 @@ Ground truth is established through **expert annotation** after each review:
 - Issues found later in production (if tracked)
 - Other variant's findings (if validated as TP)
 
+**Limitation:** Single-rater evaluation introduces potential bias. If resources permit, use multiple
+raters on a subset (e.g., 10%) and measure inter-rater reliability (Cohen's kappa ≥ 0.7 target).
+For this experiment, single-rater is acceptable given the evaluator is also the primary user.
+
 ### Evaluation Protocol
 
 **Blind evaluation:**
@@ -186,6 +190,10 @@ Not all issues are equal. Weighted scoring:
 | Important | 2 | Real problems - should catch |
 | Minor | 1 | Quality improvements - nice to catch |
 | Nitpick | 0.5 | Observations - optional |
+
+*Note: The review-code skill uses "Tier 0/1/2/3" terminology. Mapping: Tier 0/1 → Critical,
+Tier 2 → Important/Minor, Tier 3 → Nitpick. All variants must normalize to the above categories
+for consistent evaluation.*
 
 **Weighted precision:** Σ(TP × weight) / Σ(flagged × weight)
 **Weighted recall:** Σ(TP × weight) / Σ(actual × weight)
@@ -405,6 +413,7 @@ For variants with learning (3, 4), track improvement over time:
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
 │  │ HTTPTrait   │  │ DirectiveTrait│  │ LearnTrait     │  │
 │  │ /v1/review  │  │ (review prompt)│ │ (feedback)     │  │
+│  │ (exists)    │  │ (planned)     │ │ (planned)      │  │
 │  └─────────────┘  └─────────────┘  └─────────────────┘  │
 └─────────────────────────┬───────────────────────────────┘
                           │
