@@ -203,6 +203,15 @@ class TestShellTool:
         assert result.success is False
         assert "not in allowed list" in result.error
 
+    def test_empty_command_with_allowlist(self):
+        """Empty or whitespace-only commands return clear error."""
+        tool = ShellTool(allowed_commands=["echo", "ls"])
+
+        # Whitespace-only command gets clear error (empty string caught earlier)
+        result = tool.execute(command="   ")
+        assert result.success is False
+        assert "Empty command" in result.error
+
     def test_shell_metacharacters_blocked_with_allowlist(self):
         """Shell metacharacters are blocked when allowlist is enabled to prevent bypass."""
         tool = ShellTool(allowed_commands=["echo", "ls"])

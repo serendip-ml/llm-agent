@@ -117,7 +117,10 @@ class ShellTool(BaseTool):
                 "which are not allowed when command allowlist is enabled",
             )
 
-        cmd_prefix = command.split()[0] if command.split() else ""
+        parts = command.split()
+        if not parts:
+            return ToolResult(success=False, output="", error="Empty command")
+        cmd_prefix = parts[0]
         if cmd_prefix not in self._allowed_commands:
             return ToolResult(
                 success=False,
