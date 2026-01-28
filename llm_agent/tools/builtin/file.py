@@ -354,13 +354,21 @@ class FileWriteTool(_FileToolBase):
             )
 
         mode_arg = kwargs.get("mode", "overwrite")
-        mode: Literal["overwrite", "append"] = (
-            mode_arg if mode_arg in ("overwrite", "append") else "overwrite"
-        )
+        if mode_arg not in ("overwrite", "append"):
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Invalid mode '{mode_arg}'. Must be 'overwrite' or 'append'.",
+            )
+        mode: Literal["overwrite", "append"] = mode_arg
 
         create_dirs = kwargs.get("create_dirs", True)
         if not isinstance(create_dirs, bool):
-            create_dirs = True
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Invalid create_dirs '{create_dirs}'. Must be a boolean.",
+            )
 
         return path_arg, content, mode, create_dirs
 

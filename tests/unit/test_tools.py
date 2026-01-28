@@ -789,6 +789,25 @@ class TestFileWriteTool:
         assert "path" in func["function"]["parameters"]["properties"]
         assert "content" in func["function"]["parameters"]["properties"]
 
+    def test_write_invalid_mode(self, tmp_path):
+        """Fail when mode is invalid."""
+        tool = FileWriteTool(working_dir=str(tmp_path))
+
+        result = tool.execute(path="test.txt", content="content", mode="invalid")
+        assert result.success is False
+        assert "invalid mode" in result.error.lower()
+        assert "overwrite" in result.error.lower()
+        assert "append" in result.error.lower()
+
+    def test_write_invalid_create_dirs(self, tmp_path):
+        """Fail when create_dirs is not a boolean."""
+        tool = FileWriteTool(working_dir=str(tmp_path))
+
+        result = tool.execute(path="test.txt", content="content", create_dirs="yes")
+        assert result.success is False
+        assert "create_dirs" in result.error.lower()
+        assert "boolean" in result.error.lower()
+
 
 class TestToolExecutor:
     """Tests for ToolExecutor."""
