@@ -7,6 +7,7 @@ from llm_agent.config import AgentConfig
 from llm_agent.llm import CompletionResult, HTTPBackend, LLMBackend, LLMError, Message
 from llm_agent.tools import (
     BaseTool,
+    FileReadTool,
     ShellTool,
     Tool,
     ToolCall,
@@ -29,6 +30,7 @@ __all__ = [
     "CompletionResult",
     "Directive",
     "DirectiveTrait",
+    "FileReadTool",
     "HTTPBackend",
     "HTTPConfig",
     "HTTPTrait",

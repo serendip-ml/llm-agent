@@ -8,6 +8,7 @@ import pytest
 from llm_agent import (
     BaseTool,
     CompletionResult,
+    FileReadTool,
     Message,
     ShellTool,
     Tool,
@@ -313,6 +314,225 @@ class TestShellTool:
         assert "command" in tool.description.lower()
         assert tool.parameters["type"] == "object"
         assert "command" in tool.parameters["properties"]
+
+
+class TestFileReadTool:
+    """Tests for FileReadTool."""
+
+    def test_read_file_success(self, tmp_path):
+        """Read a simple file successfully."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("line 1\nline 2\nline 3")
+
+        tool = FileReadTool(working_dir=str(tmp_path))
+        result = tool.execute(path="test.txt")
+
+        assert result.success is True
+        assert "line 1" in result.output
+        assert "line 2" in result.output
+        assert "line 3" in result.output
+
+    def test_read_file_with_line_numbers(self, tmp_path):
+        """Output includes line numbers."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("first\nsecond\nthird")
+
+        tool = FileReadTool(working_dir=str(tmp_path))
+        result = tool.execute(path="test.txt")
+
+        assert result.success is True
+        assert "1│" in result.output or "1|" in result.output
+        assert "2│" in result.output or "2|" in result.output
+        assert "3│" in result.output or "3|" in result.output
+
+    def test_read_file_absolute_path(self, tmp_path):
+        """Read file using absolute path."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content here")
+
+        tool = FileReadTool()
+        result = tool.execute(path=str(test_file))
+
+        assert result.success is True
+        assert "content here" in result.output
+
+    def test_read_file_not_found(self, tmp_path):
+        """Return error when file doesn't exist."""
+        tool = FileReadTool(working_dir=str(tmp_path))
+        result = tool.execute(path="nonexistent.txt")
+
+        assert result.success is False
+        assert "not found" in result.error.lower()
+
+    def test_read_directory_fails(self, tmp_path):
+        """Return error when path is a directory."""
+        subdir = tmp_path / "subdir"
+        subdir.mkdir()
+
+        tool = FileReadTool(working_dir=str(tmp_path))
+        result = tool.execute(path="subdir")
+
+        assert result.success is False
+        assert "not a file" in result.error.lower()
+
+    def test_read_with_offset(self, tmp_path):
+        """Read from specific line offset."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("line 1\nline 2\nline 3\nline 4\nline 5")
+
+        tool = FileReadTool(working_dir=str(tmp_path))
+        result = tool.execute(path="test.txt", offset=3)
+
+        assert result.success is True
+        assert "line 3" in result.output
+        assert "line 4" in result.output
+        assert "line 5" in result.output
+        assert "line 1" not in result.output
+        assert "line 2" not in result.output
+
+    def test_read_with_limit(self, tmp_path):
+        """Read limited number of lines."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("line 1\nline 2\nline 3\nline 4\nline 5")
+
+        tool = FileReadTool(working_dir=str(tmp_path))
+        result = tool.execute(path="test.txt", limit=2)
+
+        assert result.success is True
+        assert "line 1" in result.output
+        assert "line 2" in result.output
+        assert "line 3" not in result.output
+
+    def test_read_with_offset_and_limit(self, tmp_path):
+        """Read specific range of lines."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("line 1\nline 2\nline 3\nline 4\nline 5")
+
+        tool = FileReadTool(working_dir=str(tmp_path))
+        result = tool.execute(path="test.txt", offset=2, limit=2)
+
+        assert result.success is True
+        assert "line 2" in result.output
+        assert "line 3" in result.output
+        assert "line 1" not in result.output
+        assert "line 4" not in result.output
+
+    def test_read_offset_past_end(self, tmp_path):
+        """Handle offset past end of file."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("line 1\nline 2")
+
+        tool = FileReadTool(working_dir=str(tmp_path))
+        result = tool.execute(path="test.txt", offset=100)
+
+        assert result.success is True
+        assert "past end" in result.output.lower() or "2 lines" in result.output.lower()
+
+    def test_read_empty_file(self, tmp_path):
+        """Handle empty file."""
+        test_file = tmp_path / "empty.txt"
+        test_file.write_text("")
+
+        tool = FileReadTool(working_dir=str(tmp_path))
+        result = tool.execute(path="empty.txt")
+
+        assert result.success is True
+        assert "0 lines" in result.output.lower()
+
+    def test_max_lines_truncation(self, tmp_path):
+        """Truncate output when exceeding max_lines."""
+        test_file = tmp_path / "big.txt"
+        test_file.write_text("\n".join(f"line {i}" for i in range(100)))
+
+        tool = FileReadTool(working_dir=str(tmp_path), max_lines=10)
+        result = tool.execute(path="big.txt")
+
+        assert result.success is True
+        assert "line 0" in result.output
+        assert "line 9" in result.output
+        assert "more lines" in result.output.lower()
+
+    def test_max_chars_truncation(self, tmp_path):
+        """Truncate output when exceeding max_chars."""
+        test_file = tmp_path / "big.txt"
+        test_file.write_text("x" * 1000)
+
+        tool = FileReadTool(working_dir=str(tmp_path), max_chars=100)
+        result = tool.execute(path="big.txt")
+
+        assert result.success is True
+        assert "truncated" in result.output.lower()
+
+    def test_allowed_paths_success(self, tmp_path):
+        """Allow reading from allowed paths."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("allowed content")
+
+        tool = FileReadTool(allowed_paths=[str(tmp_path)])
+        result = tool.execute(path=str(test_file))
+
+        assert result.success is True
+        assert "allowed content" in result.output
+
+    def test_allowed_paths_blocked(self, tmp_path):
+        """Block reading from paths outside allowed list."""
+        allowed_dir = tmp_path / "allowed"
+        allowed_dir.mkdir()
+
+        blocked_dir = tmp_path / "blocked"
+        blocked_dir.mkdir()
+        blocked_file = blocked_dir / "secret.txt"
+        blocked_file.write_text("secret content")
+
+        tool = FileReadTool(allowed_paths=[str(allowed_dir)])
+        result = tool.execute(path=str(blocked_file))
+
+        assert result.success is False
+        assert "not under allowed" in result.error.lower()
+
+    def test_missing_path_argument(self):
+        """Return error when path argument is missing."""
+        tool = FileReadTool()
+
+        result = tool.execute()
+        assert result.success is False
+        assert "missing" in result.error.lower()
+
+        result = tool.execute(path="")
+        assert result.success is False
+        assert "missing" in result.error.lower() or "invalid" in result.error.lower()
+
+    def test_invalid_path_type(self):
+        """Return error when path is not a string."""
+        tool = FileReadTool()
+
+        result = tool.execute(path=123)
+        assert result.success is False
+        assert "invalid" in result.error.lower()
+
+        result = tool.execute(path=None)
+        assert result.success is False
+        assert "invalid" in result.error.lower()
+
+    def test_tool_properties(self):
+        """Tool has correct properties."""
+        tool = FileReadTool()
+
+        assert tool.name == "read_file"
+        assert "file" in tool.description.lower()
+        assert tool.parameters["type"] == "object"
+        assert "path" in tool.parameters["properties"]
+        assert "offset" in tool.parameters["properties"]
+        assert "limit" in tool.parameters["properties"]
+
+    def test_to_openai_function(self):
+        """Converts to OpenAI function format."""
+        tool = FileReadTool()
+        func = tool.to_openai_function()
+
+        assert func["type"] == "function"
+        assert func["function"]["name"] == "read_file"
+        assert "path" in func["function"]["parameters"]["properties"]
 
 
 class TestToolExecutor:
