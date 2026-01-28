@@ -1,14 +1,65 @@
-"""File reading tool."""
+"""File operations tools."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from llm_agent.tools.base import BaseTool, ToolResult
 
 
-class FileReadTool(BaseTool):
+class _FileToolBase(BaseTool):
+    """Base class for file tools with shared path handling logic."""
+
+    # Subclasses must define these
+    name: str
+    description: str
+    parameters: dict[str, Any]
+
+    def __init__(
+        self,
+        working_dir: str | None = None,
+        allowed_paths: list[str] | None = None,
+    ) -> None:
+        """Initialize file tool base.
+
+        Args:
+            working_dir: Base directory for relative paths. Defaults to current dir.
+            allowed_paths: If set, only files under these paths can be accessed.
+                          Paths are resolved to absolute paths for comparison.
+                          Symlinks are resolved before checking, so a symlink inside
+                          an allowed directory pointing outside will be blocked.
+        """
+        self._working_dir = Path(working_dir) if working_dir else Path.cwd()
+        self._allowed_paths = [Path(p).resolve() for p in allowed_paths] if allowed_paths else None
+
+    def _resolve_path(self, path_arg: str) -> Path:
+        """Resolve path argument to absolute path."""
+        path = Path(path_arg)
+        if not path.is_absolute():
+            path = self._working_dir / path
+        return path.resolve()
+
+    def _check_allowed(self, path: Path) -> ToolResult | None:
+        """Check if path is within allowed paths. Returns error if not allowed."""
+        if not self._allowed_paths:
+            return None
+
+        for allowed in self._allowed_paths:
+            try:
+                path.relative_to(allowed)
+                return None  # Path is under an allowed path
+            except ValueError:
+                continue
+
+        return ToolResult(
+            success=False,
+            output="",
+            error=f"Path '{path}' is not under allowed paths: {self._allowed_paths}",
+        )
+
+
+class FileReadTool(_FileToolBase):
     """Tool for reading file contents.
 
     Allows the agent to read files from the filesystem. Supports reading
@@ -69,10 +120,9 @@ class FileReadTool(BaseTool):
                           Symlinks are resolved before checking, so a symlink inside
                           an allowed directory pointing outside will be blocked.
         """
-        self._working_dir = Path(working_dir) if working_dir else Path.cwd()
+        super().__init__(working_dir=working_dir, allowed_paths=allowed_paths)
         self._max_chars = max_chars
         self._max_lines = max_lines
-        self._allowed_paths = [Path(p).resolve() for p in allowed_paths] if allowed_paths else None
 
     def execute(self, **kwargs: Any) -> ToolResult:
         """Read a file's contents.
@@ -104,31 +154,6 @@ class FileReadTool(BaseTool):
 
         # Read file
         return self._read_file(path, offset, limit)
-
-    def _resolve_path(self, path_arg: str) -> Path:
-        """Resolve path argument to absolute path."""
-        path = Path(path_arg)
-        if not path.is_absolute():
-            path = self._working_dir / path
-        return path.resolve()
-
-    def _check_allowed(self, path: Path) -> ToolResult | None:
-        """Check if path is within allowed paths. Returns error if not allowed."""
-        if not self._allowed_paths:
-            return None
-
-        for allowed in self._allowed_paths:
-            try:
-                path.relative_to(allowed)
-                return None  # Path is under an allowed path
-            except ValueError:
-                continue
-
-        return ToolResult(
-            success=False,
-            output="",
-            error=f"Path '{path}' is not under allowed paths: {self._allowed_paths}",
-        )
 
     def _read_file(self, path: Path, offset: int, limit: int | None) -> ToolResult:
         """Read file contents with line numbers."""
@@ -211,3 +236,207 @@ class FileReadTool(BaseTool):
         if len(output) <= self._max_chars:
             return output
         return output[: self._max_chars] + f"\n... (truncated, {len(output)} total chars)"
+
+
+class FileWriteTool(_FileToolBase):
+    """Tool for writing file contents.
+
+    Allows the agent to write files to the filesystem. Supports both
+    overwriting existing files and appending to them.
+
+    Security Note:
+        This tool writes files to the filesystem. Consider restricting
+        access to specific directories in production environments using
+        the allowed_paths parameter.
+
+    Example:
+        tool = FileWriteTool(allowed_paths=["/path/to/repo"])
+        result = tool.execute(
+            path="/path/to/repo/output.txt",
+            content="Hello, world!",
+        )
+        print(result.output)
+    """
+
+    name = "write_file"
+    description = (
+        "Write content to a file. "
+        "Use for: creating new files, updating existing files, saving output. "
+        "By default overwrites the file. Use mode='append' to append instead. "
+        "Parent directories are created automatically if create_dirs is true."
+    )
+    parameters: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path to the file to write (absolute or relative to working directory)",
+            },
+            "content": {
+                "type": "string",
+                "description": "Content to write to the file",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["overwrite", "append"],
+                "description": "Write mode: 'overwrite' replaces file contents, 'append' adds to end (default: overwrite)",
+            },
+            "create_dirs": {
+                "type": "boolean",
+                "description": "Create parent directories if they don't exist (default: true)",
+            },
+        },
+        "required": ["path", "content"],
+    }
+
+    def __init__(
+        self,
+        working_dir: str | None = None,
+        allowed_paths: list[str] | None = None,
+        max_write_size: int = 1000000,
+    ) -> None:
+        """Initialize file write tool.
+
+        Args:
+            working_dir: Base directory for relative paths. Defaults to current dir.
+            allowed_paths: If set, only files under these paths can be written.
+                          Paths are resolved to absolute paths for comparison.
+                          Symlinks are resolved before checking, so a symlink inside
+                          an allowed directory pointing outside will be blocked.
+            max_write_size: Maximum bytes to write in a single operation. Defaults to 1MB.
+        """
+        super().__init__(working_dir=working_dir, allowed_paths=allowed_paths)
+        self._max_write_size = max_write_size
+
+    def execute(self, **kwargs: Any) -> ToolResult:
+        """Write content to a file.
+
+        Args:
+            **kwargs: Must contain 'path' and 'content'.
+                      Optional: 'mode' (overwrite/append), 'create_dirs' (bool).
+
+        Returns:
+            ToolResult with success message or error.
+        """
+        # Parse and validate arguments
+        args_or_error = self._parse_args(kwargs)
+        if isinstance(args_or_error, ToolResult):
+            return args_or_error
+        path_arg, content, mode, create_dirs = args_or_error
+
+        # Check content size
+        if len(content.encode("utf-8")) > self._max_write_size:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Content exceeds maximum write size of {self._max_write_size} bytes",
+            )
+
+        # Resolve path and check security
+        path = self._resolve_path(path_arg)
+        if error := self._check_allowed(path):
+            return error
+
+        return self._write_file(path, content, mode, create_dirs)
+
+    def _parse_args(
+        self, kwargs: dict[str, Any]
+    ) -> tuple[str, str, Literal["overwrite", "append"], bool] | ToolResult:
+        """Parse and validate execute() arguments. Returns tuple or error."""
+        path_arg = kwargs.get("path")
+        if not isinstance(path_arg, str) or not path_arg:
+            return ToolResult(success=False, output="", error="Missing or invalid 'path' argument")
+
+        content = kwargs.get("content")
+        if not isinstance(content, str):
+            return ToolResult(
+                success=False, output="", error="Missing or invalid 'content' argument"
+            )
+
+        mode_arg = kwargs.get("mode", "overwrite")
+        mode: Literal["overwrite", "append"] = (
+            mode_arg if mode_arg in ("overwrite", "append") else "overwrite"
+        )
+
+        create_dirs = kwargs.get("create_dirs", True)
+        if not isinstance(create_dirs, bool):
+            create_dirs = True
+
+        return path_arg, content, mode, create_dirs
+
+    def _write_file(
+        self,
+        path: Path,
+        content: str,
+        mode: Literal["overwrite", "append"],
+        create_dirs: bool,
+    ) -> ToolResult:
+        """Write content to file."""
+        # Validate path is not a directory
+        try:
+            if path.exists() and not path.is_file():
+                return ToolResult(
+                    success=False, output="", error=f"Path exists but is not a file: {path}"
+                )
+        except PermissionError:
+            return ToolResult(success=False, output="", error=f"Permission denied: {path}")
+
+        # Create parent directories if needed
+        if create_dirs:
+            if error := self._ensure_parent_dirs(path):
+                return error
+        elif not path.parent.exists():
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Parent directory does not exist: {path.parent}",
+            )
+
+        # Write the file
+        return self._do_write(path, content, mode)
+
+    def _ensure_parent_dirs(self, path: Path) -> ToolResult | None:
+        """Create parent directories if they don't exist. Returns error or None."""
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return None
+        except PermissionError:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Permission denied creating directories: {path.parent}",
+            )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Failed to create directories: {e}",
+            )
+
+    def _do_write(
+        self,
+        path: Path,
+        content: str,
+        mode: Literal["overwrite", "append"],
+    ) -> ToolResult:
+        """Perform the actual file write."""
+        try:
+            file_existed = path.exists()
+            if mode == "append":
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(content)
+                action = "Appended to"
+            else:
+                path.write_text(content, encoding="utf-8")
+                action = "Updated" if file_existed else "Created"
+
+            line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
+            byte_count = len(content.encode("utf-8"))
+            return ToolResult(
+                success=True,
+                output=f"{action} {path} ({line_count} lines, {byte_count} bytes)",
+            )
+        except PermissionError:
+            return ToolResult(success=False, output="", error=f"Permission denied: {path}")
+        except Exception as e:
+            return ToolResult(success=False, output="", error=f"Failed to write file: {e}")
