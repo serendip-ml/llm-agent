@@ -23,6 +23,7 @@ class LLMBackend(Protocol):
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResult:
         """Generate a completion.
 
@@ -31,9 +32,12 @@ class LLMBackend(Protocol):
             model: Model identifier (uses default if None).
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
+            tools: Tool definitions in OpenAI format (optional).
 
         Returns:
             CompletionResult with generated content and metadata.
+            If tools were provided and LLM wants to call them,
+            result.tool_calls will be populated.
         """
         ...
 
@@ -90,11 +94,12 @@ class HTTPBackend:
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResult:
         """Generate a completion using the HTTP API."""
         start_time = time.monotonic()
 
-        payload = self._build_payload(messages, model, temperature, max_tokens)
+        payload = self._build_payload(messages, model, temperature, max_tokens, tools)
         response = self._send_request(payload)
         result = self._parse_response(response)
 
@@ -105,6 +110,7 @@ class HTTPBackend:
             model=result["model"],
             tokens_used=result["tokens_used"],
             latency_ms=latency_ms,
+            tool_calls=result.get("tool_calls"),
         )
 
     def load_adapter(self, adapter_path: str) -> None:
@@ -125,17 +131,31 @@ class HTTPBackend:
         model: str | None,
         temperature: float,
         max_tokens: int | None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Build the request payload."""
+        # Convert messages to API format
+        api_messages = []
+        for m in messages:
+            msg: dict[str, Any] = {"role": m.role, "content": m.content}
+            if m.tool_calls:
+                msg["tool_calls"] = m.tool_calls
+            if m.tool_call_id:
+                msg["tool_call_id"] = m.tool_call_id
+            api_messages.append(msg)
+
         payload: dict[str, Any] = {
             "model": model or self._default_model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": api_messages,
             "temperature": temperature,
             "stream": False,
         }
 
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+
+        if tools:
+            payload["tools"] = tools
 
         return payload
 
@@ -163,12 +183,16 @@ class HTTPBackend:
             # Generate ID if not provided (some APIs don't include it)
             response_id = response.get("id") or str(uuid.uuid4())
 
+            # Extract tool calls if present
+            tool_calls = message.get("tool_calls")
+
             return {
                 "id": response_id,
-                "content": message.get("content", ""),
+                "content": message.get("content") or "",
                 "model": response.get("model", self._default_model),
                 "tokens_used": usage.get("total_tokens", 0)
                 or (usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)),
+                "tool_calls": tool_calls,
             }
         except (KeyError, IndexError) as e:
             raise LLMError(f"Invalid API response: {e}") from e
