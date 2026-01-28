@@ -66,6 +66,8 @@ class FileReadTool(BaseTool):
             max_lines: Maximum lines to return when no limit specified. Defaults to 2000.
             allowed_paths: If set, only files under these paths can be read.
                           Paths are resolved to absolute paths for comparison.
+                          Symlinks are resolved before checking, so a symlink inside
+                          an allowed directory pointing outside will be blocked.
         """
         self._working_dir = Path(working_dir) if working_dir else Path.cwd()
         self._max_chars = max_chars
@@ -167,6 +169,10 @@ class FileReadTool(BaseTool):
         lines = content.splitlines()
         total_lines = len(lines)
 
+        # Handle empty file
+        if total_lines == 0:
+            return ToolResult(success=True, output="(Empty file)")
+
         # Apply offset (1-indexed)
         start_idx = offset - 1
         if start_idx >= total_lines:
@@ -189,9 +195,6 @@ class FileReadTool(BaseTool):
 
     def _format_with_line_numbers(self, lines: list[str], start_line: int) -> str:
         """Format lines with line numbers."""
-        if not lines:
-            return "(empty file)"
-
         # Calculate width for line numbers
         max_line_num = start_line + len(lines) - 1
         width = len(str(max_line_num))

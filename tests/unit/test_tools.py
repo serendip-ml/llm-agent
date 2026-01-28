@@ -437,7 +437,7 @@ class TestFileReadTool:
         result = tool.execute(path="empty.txt")
 
         assert result.success is True
-        assert "0 lines" in result.output.lower()
+        assert "Empty file" in result.output
 
     def test_max_lines_truncation(self, tmp_path):
         """Truncate output when exceeding max_lines."""
@@ -489,6 +489,54 @@ class TestFileReadTool:
 
         assert result.success is False
         assert "not under allowed" in result.error.lower()
+
+    def test_symlink_escape_blocked(self, tmp_path):
+        """Block symlinks that point outside allowed paths."""
+        allowed_dir = tmp_path / "allowed"
+        allowed_dir.mkdir()
+
+        secret_dir = tmp_path / "secret"
+        secret_dir.mkdir()
+        secret_file = secret_dir / "password.txt"
+        secret_file.write_text("SECRET")
+
+        # Create symlink inside allowed dir pointing to secret file
+        symlink = allowed_dir / "link"
+        symlink.symlink_to(secret_file)
+
+        tool = FileReadTool(allowed_paths=[str(allowed_dir)])
+        result = tool.execute(path=str(symlink))
+
+        assert result.success is False
+        assert "not under allowed" in result.error.lower()
+
+    def test_permission_denied(self, tmp_path):
+        """Return error when file is not readable."""
+        import os
+
+        test_file = tmp_path / "noperm.txt"
+        test_file.write_text("content")
+        os.chmod(test_file, 0o000)
+
+        try:
+            tool = FileReadTool(working_dir=str(tmp_path))
+            result = tool.execute(path="noperm.txt")
+
+            assert result.success is False
+            assert "permission denied" in result.error.lower()
+        finally:
+            os.chmod(test_file, 0o644)  # Restore for cleanup
+
+    def test_binary_file_error(self, tmp_path):
+        """Return error when file contains non-UTF-8 content."""
+        test_file = tmp_path / "binary.bin"
+        test_file.write_bytes(b"\x80\x81\x82\xff\xfe")
+
+        tool = FileReadTool(working_dir=str(tmp_path))
+        result = tool.execute(path="binary.bin")
+
+        assert result.success is False
+        assert "utf-8" in result.error.lower() or "binary" in result.error.lower()
 
     def test_missing_path_argument(self):
         """Return error when path argument is missing."""
