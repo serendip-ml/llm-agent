@@ -1,8 +1,9 @@
 """Tests for tool use infrastructure."""
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from llm_agent import (
@@ -10,6 +11,7 @@ from llm_agent import (
     CompletionResult,
     FileReadTool,
     FileWriteTool,
+    HTTPFetchTool,
     Message,
     ShellTool,
     Tool,
@@ -807,6 +809,300 @@ class TestFileWriteTool:
         assert result.success is False
         assert "create_dirs" in result.error.lower()
         assert "boolean" in result.error.lower()
+
+
+class TestHTTPFetchTool:
+    """Tests for HTTPFetchTool."""
+
+    def _mock_response(
+        self,
+        status_code: int = 200,
+        text: str = "response body",
+        headers: dict | None = None,
+        reason_phrase: str = "OK",
+    ) -> MagicMock:
+        """Create a mock httpx.Response."""
+        response = MagicMock(spec=httpx.Response)
+        response.status_code = status_code
+        response.text = text
+        response.headers = headers or {}
+        response.reason_phrase = reason_phrase
+        response.is_success = 200 <= status_code < 300
+        return response
+
+    def test_fetch_success(self):
+        """Fetch URL successfully."""
+        tool = HTTPFetchTool()
+        mock_response = self._mock_response(text="Hello, World!")
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+            result = tool.execute(url="https://example.com")
+
+        assert result.success is True
+        assert "Hello, World!" in result.output
+
+    def test_fetch_with_headers(self):
+        """Fetch with custom headers."""
+        tool = HTTPFetchTool()
+        mock_response = self._mock_response(text="authenticated response")
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_instance = mock_client.return_value.__enter__.return_value
+            mock_instance.get.return_value = mock_response
+
+            result = tool.execute(
+                url="https://api.example.com/data",
+                headers={"Authorization": "Bearer token123"},
+            )
+
+            # Verify headers were passed
+            call_args = mock_instance.get.call_args
+            assert "Authorization" in call_args.kwargs["headers"]
+            assert call_args.kwargs["headers"]["Authorization"] == "Bearer token123"
+
+        assert result.success is True
+
+    def test_fetch_with_default_headers(self):
+        """Default headers are included in requests."""
+        tool = HTTPFetchTool(default_headers={"User-Agent": "TestBot/1.0"})
+        mock_response = self._mock_response()
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_instance = mock_client.return_value.__enter__.return_value
+            mock_instance.get.return_value = mock_response
+
+            tool.execute(url="https://example.com")
+
+            call_args = mock_instance.get.call_args
+            assert call_args.kwargs["headers"]["User-Agent"] == "TestBot/1.0"
+
+    def test_fetch_http_error(self):
+        """Handle HTTP error responses."""
+        tool = HTTPFetchTool()
+        mock_response = self._mock_response(
+            status_code=404,
+            text="Not Found",
+            reason_phrase="Not Found",
+        )
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+            result = tool.execute(url="https://example.com/missing")
+
+        assert result.success is False
+        assert "404" in result.error
+        assert "Not Found" in result.output
+
+    def test_fetch_timeout(self):
+        """Handle request timeout."""
+        tool = HTTPFetchTool(timeout=5.0)
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.side_effect = (
+                httpx.TimeoutException("timed out")
+            )
+            result = tool.execute(url="https://slow.example.com")
+
+        assert result.success is False
+        assert "timed out" in result.error.lower()
+
+    def test_fetch_connection_error(self):
+        """Handle connection errors."""
+        tool = HTTPFetchTool()
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.side_effect = httpx.ConnectError(
+                "Connection refused"
+            )
+            result = tool.execute(url="https://unreachable.example.com")
+
+        assert result.success is False
+        assert "connection" in result.error.lower()
+
+    def test_fetch_too_many_redirects(self):
+        """Handle redirect loops."""
+        tool = HTTPFetchTool()
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.side_effect = (
+                httpx.TooManyRedirects("Too many redirects")
+            )
+            result = tool.execute(url="https://redirect-loop.example.com")
+
+        assert result.success is False
+        assert "redirect" in result.error.lower()
+
+    def test_fetch_response_too_large_header(self):
+        """Reject responses that exceed max size (from Content-Length header)."""
+        tool = HTTPFetchTool(max_response_size=1000)
+        mock_response = self._mock_response(
+            text="x" * 100,
+            headers={"content-length": "2000"},
+        )
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+            result = tool.execute(url="https://example.com/large")
+
+        assert result.success is False
+        assert "too large" in result.error.lower()
+
+    def test_fetch_response_truncated(self):
+        """Truncate responses that exceed max size."""
+        tool = HTTPFetchTool(max_response_size=100)
+        mock_response = self._mock_response(text="x" * 200)
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+            result = tool.execute(url="https://example.com")
+
+        assert result.success is True
+        assert len(result.output) < 200
+        assert "truncated" in result.output.lower()
+
+    def test_allowed_domains_success(self):
+        """Allow requests to allowed domains."""
+        tool = HTTPFetchTool(allowed_domains=["api.github.com"])
+        mock_response = self._mock_response(text="github data")
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+            result = tool.execute(url="https://api.github.com/repos")
+
+        assert result.success is True
+
+    def test_allowed_domains_blocked(self):
+        """Block requests to non-allowed domains."""
+        tool = HTTPFetchTool(allowed_domains=["api.github.com"])
+
+        result = tool.execute(url="https://evil.com/steal-data")
+
+        assert result.success is False
+        assert "not in allowed" in result.error.lower()
+
+    def test_allowed_domains_subdomain(self):
+        """Subdomains of allowed domains are permitted."""
+        tool = HTTPFetchTool(allowed_domains=["github.com"])
+        mock_response = self._mock_response()
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+            result = tool.execute(url="https://api.github.com/repos")
+
+        assert result.success is True
+
+    def test_blocked_domains(self):
+        """Block requests to blocked domains."""
+        tool = HTTPFetchTool(blocked_domains=["evil.com", "malware.org"])
+
+        result = tool.execute(url="https://evil.com/bad")
+
+        assert result.success is False
+        assert "blocked" in result.error.lower()
+
+    def test_blocked_domains_subdomain(self):
+        """Subdomains of blocked domains are also blocked."""
+        tool = HTTPFetchTool(blocked_domains=["evil.com"])
+
+        result = tool.execute(url="https://api.evil.com/endpoint")
+
+        assert result.success is False
+        assert "blocked" in result.error.lower()
+
+    def test_blocked_domains_allowed(self):
+        """Non-blocked domains are allowed."""
+        tool = HTTPFetchTool(blocked_domains=["evil.com"])
+        mock_response = self._mock_response()
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+            result = tool.execute(url="https://good.com/api")
+
+        assert result.success is True
+
+    def test_invalid_url_scheme(self):
+        """Reject non-HTTP schemes."""
+        tool = HTTPFetchTool()
+
+        result = tool.execute(url="ftp://files.example.com/data.txt")
+
+        assert result.success is False
+        assert "scheme" in result.error.lower()
+
+    def test_invalid_url_missing_domain(self):
+        """Reject URLs without domain."""
+        tool = HTTPFetchTool()
+
+        result = tool.execute(url="https:///path/only")
+
+        assert result.success is False
+        assert "domain" in result.error.lower() or "invalid" in result.error.lower()
+
+    def test_missing_url_argument(self):
+        """Fail when URL argument is missing."""
+        tool = HTTPFetchTool()
+
+        result = tool.execute()
+        assert result.success is False
+        assert "missing" in result.error.lower()
+
+        result = tool.execute(url="")
+        assert result.success is False
+
+    def test_invalid_url_type(self):
+        """Fail when URL is not a string."""
+        tool = HTTPFetchTool()
+
+        result = tool.execute(url=123)
+        assert result.success is False
+        assert "invalid" in result.error.lower()
+
+    def test_invalid_headers_type(self):
+        """Fail when headers is not a dict."""
+        tool = HTTPFetchTool()
+
+        result = tool.execute(url="https://example.com", headers="not-a-dict")
+        assert result.success is False
+        assert "headers" in result.error.lower()
+
+    def test_invalid_header_values(self):
+        """Fail when header values are not strings."""
+        tool = HTTPFetchTool()
+
+        result = tool.execute(url="https://example.com", headers={"count": 123})
+        assert result.success is False
+        assert "string" in result.error.lower()
+
+    def test_tool_properties(self):
+        """Tool has correct properties."""
+        tool = HTTPFetchTool()
+
+        assert tool.name == "http_fetch"
+        assert "url" in tool.description.lower() or "http" in tool.description.lower()
+        assert tool.parameters["type"] == "object"
+        assert "url" in tool.parameters["properties"]
+        assert "headers" in tool.parameters["properties"]
+
+    def test_to_openai_function(self):
+        """Converts to OpenAI function format."""
+        tool = HTTPFetchTool()
+        func = tool.to_openai_function()
+
+        assert func["type"] == "function"
+        assert func["function"]["name"] == "http_fetch"
+        assert "url" in func["function"]["parameters"]["properties"]
+
+    def test_domain_with_port(self):
+        """Handle domains with port numbers."""
+        tool = HTTPFetchTool(allowed_domains=["localhost"])
+        mock_response = self._mock_response()
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+            result = tool.execute(url="http://localhost:8080/api")
+
+        assert result.success is True
 
 
 class TestToolExecutor:
