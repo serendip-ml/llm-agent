@@ -948,6 +948,22 @@ class TestHTTPFetchTool:
         assert result.success is False
         assert "too large" in result.error.lower()
 
+    def test_fetch_invalid_content_length_header(self):
+        """Handle malformed Content-Length header gracefully."""
+        tool = HTTPFetchTool(max_response_size=1000)
+        mock_response = self._mock_response(
+            text="valid response",
+            headers={"content-length": "not-a-number"},
+        )
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+            result = tool.execute(url="https://example.com")
+
+        # Should succeed - invalid Content-Length is ignored, response is read normally
+        assert result.success is True
+        assert "valid response" in result.output
+
     def test_fetch_response_truncated(self):
         """Truncate responses that exceed max size."""
         tool = HTTPFetchTool(max_response_size=100)

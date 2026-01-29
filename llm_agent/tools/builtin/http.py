@@ -231,12 +231,16 @@ class HTTPFetchTool(BaseTool):
     def _check_content_length(self, response: httpx.Response) -> ToolResult | None:
         """Check if Content-Length exceeds limit. Returns error or None."""
         content_length = response.headers.get("content-length")
-        if content_length and int(content_length) > self._max_response_size:
-            return ToolResult(
-                success=False,
-                output="",
-                error=f"Response too large: {content_length} bytes (max {self._max_response_size})",
-            )
+        if content_length:
+            try:
+                if int(content_length) > self._max_response_size:
+                    return ToolResult(
+                        success=False,
+                        output="",
+                        error=f"Response too large: {content_length} bytes (max {self._max_response_size})",
+                    )
+            except ValueError:
+                pass  # Invalid Content-Length header, proceed to read and truncate if needed
         return None
 
     def _read_response_content(self, response: httpx.Response) -> tuple[str, bool] | ToolResult:
