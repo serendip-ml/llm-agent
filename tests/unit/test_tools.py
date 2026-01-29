@@ -830,12 +830,28 @@ class TestHTTPFetchTool:
         response.is_success = 200 <= status_code < 300
         return response
 
+    def _mock_dns_public(self, ip: str = "1.2.3.4"):
+        """Create a mock for socket.getaddrinfo returning a public IP."""
+        import socket
+
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+    def _mock_dns_private(self, ip: str = "192.168.1.1"):
+        """Create a mock for socket.getaddrinfo returning a private IP."""
+        import socket
+
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
     def test_fetch_success(self):
         """Fetch URL successfully."""
         tool = HTTPFetchTool()
         mock_response = self._mock_response(text="Hello, World!")
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
             result = tool.execute(url="https://example.com")
 
@@ -847,7 +863,11 @@ class TestHTTPFetchTool:
         tool = HTTPFetchTool()
         mock_response = self._mock_response(text="authenticated response")
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_instance = mock_client.return_value.__enter__.return_value
             mock_instance.get.return_value = mock_response
 
@@ -868,7 +888,11 @@ class TestHTTPFetchTool:
         tool = HTTPFetchTool(default_headers={"User-Agent": "TestBot/1.0"})
         mock_response = self._mock_response()
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_instance = mock_client.return_value.__enter__.return_value
             mock_instance.get.return_value = mock_response
 
@@ -886,7 +910,11 @@ class TestHTTPFetchTool:
             reason_phrase="Not Found",
         )
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
             result = tool.execute(url="https://example.com/missing")
 
@@ -898,7 +926,11 @@ class TestHTTPFetchTool:
         """Handle request timeout."""
         tool = HTTPFetchTool(timeout=5.0)
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.side_effect = (
                 httpx.TimeoutException("timed out")
             )
@@ -911,7 +943,11 @@ class TestHTTPFetchTool:
         """Handle connection errors."""
         tool = HTTPFetchTool()
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.side_effect = httpx.ConnectError(
                 "Connection refused"
             )
@@ -924,7 +960,11 @@ class TestHTTPFetchTool:
         """Handle redirect loops."""
         tool = HTTPFetchTool()
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.side_effect = (
                 httpx.TooManyRedirects("Too many redirects")
             )
@@ -941,7 +981,11 @@ class TestHTTPFetchTool:
             headers={"content-length": "2000"},
         )
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
             result = tool.execute(url="https://example.com/large")
 
@@ -956,7 +1000,11 @@ class TestHTTPFetchTool:
             headers={"content-length": "not-a-number"},
         )
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
             result = tool.execute(url="https://example.com")
 
@@ -969,7 +1017,11 @@ class TestHTTPFetchTool:
         tool = HTTPFetchTool(max_response_size=100)
         mock_response = self._mock_response(text="x" * 200)
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
             result = tool.execute(url="https://example.com")
 
@@ -982,7 +1034,11 @@ class TestHTTPFetchTool:
         tool = HTTPFetchTool(allowed_domains=["api.github.com"])
         mock_response = self._mock_response(text="github data")
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
             result = tool.execute(url="https://api.github.com/repos")
 
@@ -1002,7 +1058,11 @@ class TestHTTPFetchTool:
         tool = HTTPFetchTool(allowed_domains=["github.com"])
         mock_response = self._mock_response()
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
             result = tool.execute(url="https://api.github.com/repos")
 
@@ -1031,7 +1091,11 @@ class TestHTTPFetchTool:
         tool = HTTPFetchTool(blocked_domains=["evil.com"])
         mock_response = self._mock_response()
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
             result = tool.execute(url="https://good.com/api")
 
@@ -1111,7 +1175,8 @@ class TestHTTPFetchTool:
 
     def test_domain_with_port(self):
         """Handle domains with port numbers."""
-        tool = HTTPFetchTool(allowed_domains=["localhost"])
+        # Use block_private_ips=False since this test is about port handling, not SSRF
+        tool = HTTPFetchTool(allowed_domains=["localhost"], block_private_ips=False)
         mock_response = self._mock_response()
 
         with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
@@ -1119,6 +1184,115 @@ class TestHTTPFetchTool:
             result = tool.execute(url="http://localhost:8080/api")
 
         assert result.success is True
+
+    # SSRF Protection Tests
+
+    def test_ssrf_blocks_localhost(self):
+        """Block requests to localhost (loopback)."""
+        tool = HTTPFetchTool()
+
+        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+            mock_dns.return_value = self._mock_dns_private("127.0.0.1")
+            result = tool.execute(url="http://localhost/admin")
+
+        assert result.success is False
+        assert "private" in result.error.lower() or "blocked" in result.error.lower()
+
+    def test_ssrf_blocks_private_ip_10(self):
+        """Block requests to 10.x.x.x private network."""
+        tool = HTTPFetchTool()
+
+        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+            mock_dns.return_value = self._mock_dns_private("10.0.0.1")
+            result = tool.execute(url="http://internal-server/api")
+
+        assert result.success is False
+        assert "private" in result.error.lower() or "blocked" in result.error.lower()
+
+    def test_ssrf_blocks_private_ip_172(self):
+        """Block requests to 172.16.x.x private network."""
+        tool = HTTPFetchTool()
+
+        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+            mock_dns.return_value = self._mock_dns_private("172.16.0.1")
+            result = tool.execute(url="http://internal-server/api")
+
+        assert result.success is False
+        assert "private" in result.error.lower() or "blocked" in result.error.lower()
+
+    def test_ssrf_blocks_private_ip_192(self):
+        """Block requests to 192.168.x.x private network."""
+        tool = HTTPFetchTool()
+
+        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+            mock_dns.return_value = self._mock_dns_private("192.168.1.1")
+            result = tool.execute(url="http://router.local/admin")
+
+        assert result.success is False
+        assert "private" in result.error.lower() or "blocked" in result.error.lower()
+
+    def test_ssrf_blocks_link_local(self):
+        """Block requests to link-local addresses (169.254.x.x) including cloud metadata."""
+        tool = HTTPFetchTool()
+
+        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+            mock_dns.return_value = self._mock_dns_private("169.254.169.254")
+            result = tool.execute(url="http://169.254.169.254/latest/meta-data/")
+
+        assert result.success is False
+        assert "private" in result.error.lower() or "blocked" in result.error.lower()
+
+    def test_ssrf_blocks_ipv6_loopback(self):
+        """Block requests to IPv6 loopback (::1)."""
+        import socket
+
+        tool = HTTPFetchTool()
+
+        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+            mock_dns.return_value = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 0, 0, 0))]
+            result = tool.execute(url="http://localhost/admin")
+
+        assert result.success is False
+        assert "private" in result.error.lower() or "blocked" in result.error.lower()
+
+    def test_ssrf_allows_public_ip(self):
+        """Allow requests to public IP addresses."""
+        tool = HTTPFetchTool()
+        mock_response = self._mock_response(text="public content")
+
+        with (
+            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+        ):
+            mock_dns.return_value = self._mock_dns_public()
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+            result = tool.execute(url="https://example.com")
+
+        assert result.success is True
+
+    def test_ssrf_protection_disabled(self):
+        """Allow private IPs when block_private_ips=False."""
+        tool = HTTPFetchTool(block_private_ips=False)
+        mock_response = self._mock_response(text="internal content")
+
+        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+            result = tool.execute(url="http://localhost/internal")
+
+        assert result.success is True
+
+    def test_ssrf_dns_resolution_failure(self):
+        """Handle DNS resolution failures gracefully."""
+        import socket
+
+        tool = HTTPFetchTool()
+
+        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+            mock_dns.side_effect = socket.gaierror(8, "Name does not resolve")
+            result = tool.execute(url="http://nonexistent.invalid/api")
+
+        assert result.success is False
+        assert "dns" in result.error.lower() or "resolution" in result.error.lower()
 
 
 class TestToolExecutor:

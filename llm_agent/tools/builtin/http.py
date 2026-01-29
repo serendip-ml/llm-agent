@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 from typing import Any
 from urllib.parse import ParseResult, urlparse
 
@@ -16,9 +18,11 @@ class HTTPFetchTool(BaseTool):
     Allows the agent to retrieve content from HTTP/HTTPS URLs. Useful for
     fetching API responses, web pages, or other remote content.
 
-    Security Note:
-        This tool makes HTTP requests to external URLs. Consider restricting
-        access using allowed_domains or blocked_domains in production.
+    Security Features:
+        - SSRF protection: By default, blocks requests to private/internal IPs
+          (localhost, RFC 1918 ranges, link-local, cloud metadata endpoints).
+        - Domain restrictions: Use allowed_domains or blocked_domains to control
+          which domains can be accessed.
 
     Example:
         tool = HTTPFetchTool(allowed_domains=["api.github.com"])
@@ -56,6 +60,7 @@ class HTTPFetchTool(BaseTool):
         allowed_domains: list[str] | None = None,
         blocked_domains: list[str] | None = None,
         default_headers: dict[str, str] | None = None,
+        block_private_ips: bool = True,
     ) -> None:
         """Initialize HTTP fetch tool.
 
@@ -67,12 +72,19 @@ class HTTPFetchTool(BaseTool):
             blocked_domains: If set, these domains are blocked.
                             Ignored if allowed_domains is set.
             default_headers: Headers to include in all requests.
+            block_private_ips: If True (default), blocks requests to private/internal
+                              IP addresses to prevent SSRF attacks. This includes:
+                              - Loopback (127.0.0.0/8, ::1)
+                              - Private networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+                              - Link-local (169.254.0.0/16, fe80::/10) - includes cloud metadata
+                              - Other non-routable addresses
         """
         self._timeout = timeout
         self._max_response_size = max_response_size
         self._allowed_domains = set(allowed_domains) if allowed_domains else None
         self._blocked_domains = set(blocked_domains) if blocked_domains else None
         self._default_headers = default_headers or {}
+        self._block_private_ips = block_private_ips
 
     def execute(self, **kwargs: Any) -> ToolResult:
         """Fetch content from a URL.
@@ -95,6 +107,10 @@ class HTTPFetchTool(BaseTool):
 
         # Check domain restrictions
         if error := self._check_domain(parsed.netloc):
+            return error
+
+        # Check for private/internal IPs (SSRF protection)
+        if error := self._check_private_ip(parsed.netloc):
             return error
 
         # Validate headers
@@ -159,6 +175,58 @@ class HTTPFetchTool(BaseTool):
             if domain.endswith("." + allowed_lower):
                 return True
         return False
+
+    def _check_private_ip(self, netloc: str) -> ToolResult | None:
+        """Check if host resolves to a private IP. Returns error if blocked."""
+        if not self._block_private_ips:
+            return None
+
+        hostname = netloc.split(":")[0]
+        resolved = self._resolve_hostname(hostname)
+        if isinstance(resolved, ToolResult):
+            return resolved
+
+        for ip_str in resolved:
+            try:
+                ip = ipaddress.ip_address(ip_str)
+            except ValueError:
+                continue
+            if self._is_blocked_ip(ip):
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Blocked: '{hostname}' resolves to private/internal IP ({ip_str})",
+                )
+        return None
+
+    def _resolve_hostname(self, hostname: str) -> list[str] | ToolResult:
+        """Resolve hostname to IP addresses. Returns list of IPs or error."""
+        try:
+            addr_info = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            return [str(sockaddr[0]) for _family, _, _, _, sockaddr in addr_info]
+        except socket.gaierror as e:
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"DNS resolution failed for '{hostname}': {e}",
+            )
+
+    def _is_blocked_ip(self, ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        """Check if an IP address should be blocked (private, loopback, etc.)."""
+        # Check common properties that indicate non-public addresses
+        if ip.is_private:
+            return True
+        if ip.is_loopback:
+            return True
+        if ip.is_link_local:
+            return True
+        if ip.is_reserved:
+            return True
+        if ip.is_multicast:
+            return True
+
+        # IPv4-specific: block 0.0.0.0/8 (current network)
+        return isinstance(ip, ipaddress.IPv4Address) and ip in ipaddress.IPv4Network("0.0.0.0/8")
 
     def _build_headers(self, custom_headers: Any) -> dict[str, str] | ToolResult:
         """Build request headers. Returns headers dict or error."""
