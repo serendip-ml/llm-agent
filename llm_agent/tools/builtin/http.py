@@ -4,12 +4,121 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import ssl
+from collections.abc import Iterable
 from typing import Any
 from urllib.parse import ParseResult, urlparse
 
+import httpcore
 import httpx
+from httpcore._backends.base import SOCKET_OPTION
 
 from llm_agent.tools.base import BaseTool, ToolResult
+
+
+class _PinnedIPBackend(httpcore.SyncBackend):
+    """Network backend that connects to a pre-validated IP address.
+
+    This prevents DNS rebinding attacks by ensuring the connection uses
+    the same IP that was validated during the SSRF check, rather than
+    resolving DNS again (which could return a different IP).
+
+    TLS handshake still uses the original hostname for SNI and certificate
+    verification, so HTTPS works correctly.
+    """
+
+    def __init__(self, pinned_ip: str) -> None:
+        self._pinned_ip = pinned_ip
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[SOCKET_OPTION] | None = None,
+    ) -> httpcore.NetworkStream:
+        """Connect to the pinned IP instead of resolving 'host' via DNS."""
+        backend = httpcore.SyncBackend()
+        return backend.connect_tcp(self._pinned_ip, port, timeout, local_address, socket_options)
+
+
+class _PinnedIPTransport(httpx.BaseTransport):
+    """Custom httpx transport that pins connections to a pre-validated IP.
+
+    This transport uses httpcore with a custom network backend to ensure
+    all connections go to the specified IP address, preventing DNS rebinding.
+    """
+
+    def __init__(
+        self,
+        pinned_ip: str,
+        timeout: float,
+        verify: bool = True,
+    ) -> None:
+        self._pinned_ip = pinned_ip
+        self._timeout = timeout
+        self._verify = verify
+        self._pool: httpcore.ConnectionPool | None = None
+
+    def _get_pool(self) -> httpcore.ConnectionPool:
+        """Get or create the connection pool."""
+        if self._pool is None:
+            backend = _PinnedIPBackend(self._pinned_ip)
+            ssl_context = ssl.create_default_context() if self._verify else None
+            self._pool = httpcore.ConnectionPool(
+                network_backend=backend,
+                ssl_context=ssl_context,
+            )
+        return self._pool
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        """Send request using the pinned IP connection pool."""
+        pool = self._get_pool()
+        core_request = self._build_core_request(request)
+        core_response = pool.handle_request(core_request)
+        return self._build_httpx_response(core_response, request)
+
+    def _build_core_request(self, request: httpx.Request) -> httpcore.Request:
+        """Convert httpx Request to httpcore Request."""
+        timeout_dict = {
+            "connect": self._timeout,
+            "read": self._timeout,
+            "write": self._timeout,
+            "pool": self._timeout,
+        }
+        return httpcore.Request(
+            method=request.method.encode() if isinstance(request.method, str) else request.method,
+            url=httpcore.URL(
+                scheme=request.url.scheme.encode(),
+                host=request.url.host.encode() if request.url.host else b"",
+                port=request.url.port,
+                target=request.url.raw_path,
+            ),
+            headers=[
+                (k.encode() if isinstance(k, str) else k, v.encode() if isinstance(v, str) else v)
+                for k, v in request.headers.raw
+            ],
+            content=request.content,
+            extensions={"timeout": timeout_dict},
+        )
+
+    def _build_httpx_response(
+        self, core_response: httpcore.Response, request: httpx.Request
+    ) -> httpx.Response:
+        """Convert httpcore Response to httpx Response."""
+        return httpx.Response(
+            status_code=core_response.status,
+            headers=core_response.headers,
+            stream=httpx.ByteStream(core_response.content),
+            request=request,
+        )
+
+    def close(self) -> None:
+        """Close the connection pool."""
+        if self._pool is not None:
+            self._pool.close()
+            self._pool = None
 
 
 class HTTPFetchTool(BaseTool):
@@ -109,17 +218,20 @@ class HTTPFetchTool(BaseTool):
         if error := self._check_domain(parsed.netloc):
             return error
 
-        # Check for private/internal IPs (SSRF protection)
-        if error := self._check_private_ip(parsed.netloc):
-            return error
+        # Resolve and validate IPs (SSRF protection)
+        # Returns the validated IP to pin the connection to, preventing DNS rebinding
+        ip_result = self._resolve_and_validate_ip(parsed.netloc)
+        if isinstance(ip_result, ToolResult):
+            return ip_result
+        pinned_ip = ip_result  # IP to use for the actual connection
 
         # Validate headers
         headers = self._build_headers(kwargs.get("headers"))
         if isinstance(headers, ToolResult):
             return headers
 
-        # Make the request
-        return self._fetch(url, headers)
+        # Make the request using the pre-validated IP
+        return self._fetch(url, headers, pinned_ip)
 
     def _parse_url(self, url: str) -> ParseResult | ToolResult:
         """Parse and validate URL. Returns ParseResult or error."""
@@ -176,28 +288,51 @@ class HTTPFetchTool(BaseTool):
                 return True
         return False
 
-    def _check_private_ip(self, netloc: str) -> ToolResult | None:
-        """Check if host resolves to a private IP. Returns error if blocked."""
-        if not self._block_private_ips:
-            return None
+    def _resolve_and_validate_ip(self, netloc: str) -> str | ToolResult:
+        """Resolve hostname and validate IPs. Returns first valid IP or error.
 
+        This method resolves DNS once and returns a validated IP address to use
+        for the actual HTTP connection. This prevents DNS rebinding attacks where
+        an attacker's DNS could return a public IP during validation but a private
+        IP during the actual request.
+
+        Args:
+            netloc: The network location (hostname:port or just hostname).
+
+        Returns:
+            The first non-blocked IP address to use for the connection,
+            or a ToolResult error if all IPs are blocked or resolution fails.
+        """
         hostname = netloc.split(":")[0]
         resolved = self._resolve_hostname(hostname)
         if isinstance(resolved, ToolResult):
             return resolved
 
+        if not self._block_private_ips:
+            # Return first resolved IP without validation
+            if resolved:
+                return resolved[0]
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"No IP addresses found for '{hostname}'",
+            )
+
+        # Find first non-blocked IP
         for ip_str in resolved:
             try:
                 ip = ipaddress.ip_address(ip_str)
             except ValueError:
                 continue
-            if self._is_blocked_ip(ip):
-                return ToolResult(
-                    success=False,
-                    output="",
-                    error=f"Blocked: '{hostname}' resolves to private/internal IP ({ip_str})",
-                )
-        return None
+            if not self._is_blocked_ip(ip):
+                return ip_str
+
+        # All IPs are blocked
+        return ToolResult(
+            success=False,
+            output="",
+            error=f"Blocked: '{hostname}' resolves only to private/internal IPs",
+        )
 
     def _resolve_hostname(self, hostname: str) -> list[str] | ToolResult:
         """Resolve hostname to IP addresses. Returns list of IPs or error."""
@@ -253,36 +388,30 @@ class HTTPFetchTool(BaseTool):
 
         return headers
 
-    def _fetch(self, url: str, headers: dict[str, str]) -> ToolResult:
-        """Perform the HTTP request."""
+    def _fetch(self, url: str, headers: dict[str, str], pinned_ip: str | None) -> ToolResult:
+        """Perform HTTP request using a pre-validated IP to prevent DNS rebinding."""
         try:
-            with httpx.Client(timeout=self._timeout) as client:
-                response = client.get(url, headers=headers)
-                return self._build_response(response)
-        except httpx.TimeoutException:
+            response = self._execute_request(url, headers, pinned_ip)
+            return self._build_response(response)
+        except (httpx.TimeoutException, httpcore.TimeoutException):
             return ToolResult(
-                success=False,
-                output="",
-                error=f"Request timed out after {self._timeout} seconds",
+                success=False, output="", error=f"Request timed out after {self._timeout} seconds"
             )
-        except httpx.ConnectError as e:
-            return ToolResult(
-                success=False,
-                output="",
-                error=f"Connection failed: {e}",
-            )
-        except httpx.TooManyRedirects:
-            return ToolResult(
-                success=False,
-                output="",
-                error="Too many redirects",
-            )
+        except (httpx.ConnectError, httpcore.ConnectError) as e:
+            return ToolResult(success=False, output="", error=f"Connection failed: {e}")
         except Exception as e:
-            return ToolResult(
-                success=False,
-                output="",
-                error=f"Request failed: {e}",
-            )
+            return ToolResult(success=False, output="", error=f"Request failed: {e}")
+
+    def _execute_request(
+        self, url: str, headers: dict[str, str], pinned_ip: str | None
+    ) -> httpx.Response:
+        """Execute the HTTP GET request with optional IP pinning."""
+        if pinned_ip:
+            transport = _PinnedIPTransport(pinned_ip, self._timeout)
+            with httpx.Client(transport=transport) as client:
+                return client.get(url, headers=headers)
+        with httpx.Client(timeout=self._timeout) as client:
+            return client.get(url, headers=headers)
 
     def _build_response(self, response: httpx.Response) -> ToolResult:
         """Build ToolResult from HTTP response."""

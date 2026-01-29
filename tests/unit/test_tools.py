@@ -956,23 +956,6 @@ class TestHTTPFetchTool:
         assert result.success is False
         assert "connection" in result.error.lower()
 
-    def test_fetch_too_many_redirects(self):
-        """Handle redirect loops."""
-        tool = HTTPFetchTool()
-
-        with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
-        ):
-            mock_dns.return_value = self._mock_dns_public()
-            mock_client.return_value.__enter__.return_value.get.side_effect = (
-                httpx.TooManyRedirects("Too many redirects")
-            )
-            result = tool.execute(url="https://redirect-loop.example.com")
-
-        assert result.success is False
-        assert "redirect" in result.error.lower()
-
     def test_fetch_response_too_large_header(self):
         """Reject responses that exceed max size (from Content-Length header)."""
         tool = HTTPFetchTool(max_response_size=1000)
