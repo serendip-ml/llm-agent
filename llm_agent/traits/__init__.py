@@ -5,6 +5,7 @@ from llm_agent.traits.directive import Directive, DirectiveTrait
 from llm_agent.traits.http import HTTPConfig, HTTPTrait
 from llm_agent.traits.learn import LearnConfig, LearnTrait
 from llm_agent.traits.llm import LLMConfig, LLMTrait
+from llm_agent.traits.tools import ToolsTrait
 
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "LearnTrait",
     "LLMConfig",
     "LLMTrait",
+    "ToolsTrait",
     "Trait",
 ]
