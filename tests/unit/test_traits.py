@@ -1,6 +1,6 @@
 """Tests for traits."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -123,29 +123,9 @@ class TestAgentTraits:
         """Create mock Logger."""
         return MagicMock()
 
-    @pytest.fixture
-    def mock_learn(self):
-        """Create mock LearnClient."""
-        learn = MagicMock()
-        learn.facts = MagicMock()
-        learn.facts.list_active.return_value = []
-        learn.feedback = MagicMock()
-        learn.preferences = MagicMock()
-        return learn
-
-    @pytest.fixture
-    def mock_context_builder(self):
-        """Patch ContextBuilder to avoid database calls."""
-        with patch("llm_agent.agent.ContextBuilder") as mock_cls:
-            mock_builder = MagicMock()
-            mock_builder.build_system_prompt.side_effect = lambda base_prompt, **_: base_prompt
-            mock_cls.return_value = mock_builder
-            yield mock_cls
-
-    def test_add_trait(self, mock_logger, mock_learn, mock_context_builder):
+    def test_add_trait(self, mock_logger):
         config = AgentConfig(name="test")
-        llm = MagicMock()
-        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config)
 
         directive = Directive(prompt="Test directive")
         trait = DirectiveTrait(directive)
@@ -154,10 +134,9 @@ class TestAgentTraits:
         assert agent.has_trait(DirectiveTrait)
         assert agent.get_trait(DirectiveTrait) == trait
 
-    def test_add_trait_attaches(self, mock_logger, mock_learn, mock_context_builder):
+    def test_add_trait_attaches(self, mock_logger):
         config = AgentConfig(name="test")
-        llm = MagicMock()
-        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config)
 
         directive = Directive(prompt="Test directive")
         trait = DirectiveTrait(directive)
@@ -165,10 +144,9 @@ class TestAgentTraits:
 
         assert trait._agent == agent
 
-    def test_add_duplicate_trait_raises(self, mock_logger, mock_learn, mock_context_builder):
+    def test_add_duplicate_trait_raises(self, mock_logger):
         config = AgentConfig(name="test")
-        llm = MagicMock()
-        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config)
 
         directive = Directive(prompt="Test directive")
         agent.add_trait(DirectiveTrait(directive))
@@ -176,43 +154,43 @@ class TestAgentTraits:
         with pytest.raises(ValueError, match="already added"):
             agent.add_trait(DirectiveTrait(directive))
 
-    def test_get_trait_returns_none_if_not_added(
-        self, mock_logger, mock_learn, mock_context_builder
-    ):
+    def test_get_trait_returns_none_if_not_added(self, mock_logger):
         config = AgentConfig(name="test")
-        llm = MagicMock()
-        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config)
 
         assert agent.get_trait(DirectiveTrait) is None
 
-    def test_has_trait_returns_false_if_not_added(
-        self, mock_logger, mock_learn, mock_context_builder
-    ):
+    def test_has_trait_returns_false_if_not_added(self, mock_logger):
         config = AgentConfig(name="test")
-        llm = MagicMock()
-        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
+        agent = Agent(lg=mock_logger, config=config)
 
         assert not agent.has_trait(DirectiveTrait)
 
-    def test_complete_with_directive_trait(self, mock_logger, mock_learn, mock_context_builder):
+    def test_complete_with_directive_trait(self, mock_logger):
+        from llm_agent.traits.llm import LLMTrait
+
         config = AgentConfig(name="test", fact_injection="none")
-        llm = MagicMock()
-        llm.complete.return_value = CompletionResult(
+        agent = Agent(lg=mock_logger, config=config)
+
+        # Add mock LLMTrait
+        mock_llm_trait = MagicMock(spec=LLMTrait)
+        mock_llm_trait.complete.return_value = CompletionResult(
             id="resp-1",
             content="Response",
             model="default",
             tokens_used=10,
             latency_ms=100,
         )
-        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
+        agent._traits[LLMTrait] = mock_llm_trait
 
+        # Add DirectiveTrait
         directive = Directive(prompt="You are a helpful assistant. Be friendly.")
         agent.add_trait(DirectiveTrait(directive))
 
         agent.complete("Hello")
 
         # Check that directive was injected into prompt
-        call_args = llm.complete.call_args
+        call_args = mock_llm_trait.complete.call_args
         messages = call_args.kwargs["messages"]
         system_prompt = messages[0].content
 
