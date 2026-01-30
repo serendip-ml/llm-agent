@@ -12,6 +12,7 @@ from llm_agent.llm import (
     Message,
     StructuredOutputError,
 )
+from llm_agent.task import Task, TaskResult
 from llm_agent.tools import (
     BaseTool,
     FileReadTool,
@@ -26,7 +27,15 @@ from llm_agent.tools import (
     ToolRegistry,
     ToolResult,
 )
-from llm_agent.traits import BaseTrait, Directive, DirectiveTrait, HTTPConfig, HTTPTrait, Trait
+from llm_agent.traits import (
+    BaseTrait,
+    Directive,
+    DirectiveTrait,
+    HTTPConfig,
+    HTTPTrait,
+    ToolsTrait,
+    Trait,
+)
 
 
 __version__ = "0.0.0"
@@ -51,6 +60,8 @@ __all__ = [
     "ScoredFact",
     "ShellTool",
     "StructuredOutputError",
+    "Task",
+    "TaskResult",
     "Tool",
     "ToolCall",
     "ToolCallResult",
@@ -58,5 +69,6 @@ __all__ = [
     "ToolExecutor",
     "ToolRegistry",
     "ToolResult",
+    "ToolsTrait",
     "Trait",
 ]

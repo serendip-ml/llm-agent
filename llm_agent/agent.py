@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from appinfra.log import Logger
 from llm_learn.collection import ScoredFact
@@ -14,8 +14,13 @@ from llm_agent.traits.base import Trait
 
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from llm_agent.protocol.base import Request, Response
+    from llm_agent.task import Task, TaskResult
     from llm_agent.traits.learn import LearnTrait
+    from llm_agent.traits.llm import LLMTrait
+    from llm_agent.traits.tools import ToolsTrait
 
 
 TraitT = TypeVar("TraitT", bound=Trait)
@@ -256,6 +261,242 @@ class Agent:
                 max_facts=self._config.max_facts,
             )
         return prompt
+
+    # =========================================================================
+    # Task Execution
+    # =========================================================================
+
+    def execute(self, task: Task) -> TaskResult:
+        """Execute a task with optional tools and structured output.
+
+        This method provides a higher-level interface than complete(), supporting:
+        - Tool use via ToolsTrait (iterative tool loop)
+        - Structured output extraction via output_schema
+        - Task context injection into prompts
+
+        Requires LLMTrait. ToolsTrait is optional but required for tool use.
+
+        Args:
+            task: Task definition with description, context, and optional schema.
+
+        Returns:
+            TaskResult with final content, parsed output (if schema provided),
+            and execution metadata.
+
+        Raises:
+            RuntimeError: If LLMTrait is not attached.
+
+        Example:
+            from pydantic import BaseModel
+
+            class Answer(BaseModel):
+                answer: str
+                confidence: float
+
+            result = agent.execute(Task(
+                name="question",
+                description="What is 2+2?",
+                output_schema=Answer,
+            ))
+            print(result.parsed.answer)  # "4"
+        """
+        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.traits.tools import ToolsTrait
+
+        llm_trait = self.require_trait(LLMTrait)
+        tools_trait = self.get_trait(ToolsTrait)
+
+        # Build system prompt with directive/facts and task context
+        base_prompt = task.system_prompt or self._config.default_prompt
+        prompt = self._build_task_prompt(base_prompt, task)
+
+        messages = [
+            Message(role="system", content=prompt),
+            Message(role="user", content=task.description),
+        ]
+
+        # Phase 1: Tool loop (if tools available)
+        if tools_trait is not None and tools_trait.has_tools():
+            return self._execute_with_tools(task, messages, llm_trait, tools_trait)
+
+        # No tools - simple completion path
+        return self._execute_simple(task, messages, llm_trait)
+
+    def _build_task_prompt(self, base_prompt: str, task: Task) -> str:
+        """Build system prompt with directive, facts, and task context."""
+        # Start with directive/fact injection
+        prompt = self._build_prompt(base_prompt, query=task.description)
+
+        # Add task context if provided
+        if task.context:
+            context_lines = [f"- {k}: {v}" for k, v in task.context.items()]
+            context_str = "\n".join(context_lines)
+            prompt = f"{prompt}\n\n## Task Context\n{context_str}"
+
+        return prompt
+
+    def _execute_simple(
+        self, task: Task, messages: list[Message], llm_trait: LLMTrait
+    ) -> TaskResult:
+        """Execute task without tools (simple completion)."""
+        from llm_agent.llm.backend import StructuredOutputError
+        from llm_agent.task import TaskResult
+
+        try:
+            result = llm_trait.complete(
+                messages=messages,
+                model=self._config.model,
+                output_schema=task.output_schema,
+            )
+            return TaskResult(
+                success=True,
+                content=result.content,
+                parsed=result.parsed,
+                tool_calls=[],
+                iterations=1,
+                tokens_used=result.tokens_used,
+            )
+        except StructuredOutputError as e:
+            return TaskResult(
+                success=False,
+                content="",
+                error=f"Structured output error: {e}",
+            )
+
+    def _execute_with_tools(
+        self,
+        task: Task,
+        messages: list[Message],
+        llm_trait: LLMTrait,
+        tools_trait: ToolsTrait,
+    ) -> TaskResult:
+        """Execute task with tool loop and optional structured extraction."""
+        from llm_agent.task import TaskResult
+
+        # Phase 1: Run tool loop
+        exec_result, error = self._run_tool_loop(task, messages, llm_trait, tools_trait)
+        if error:
+            return TaskResult(success=False, content="", error=error)
+
+        # Phase 2: Structured extraction if output_schema provided
+        return self._build_tool_result(task, exec_result, llm_trait)
+
+    def _run_tool_loop(
+        self,
+        task: Task,
+        messages: list[Message],
+        llm_trait: LLMTrait,
+        tools_trait: ToolsTrait,
+    ) -> tuple[Any, str | None]:
+        """Run the tool execution loop. Returns (result, error)."""
+        from llm_agent.tools.executor import ToolExecutor
+
+        backend = _LLMTraitBackend(llm_trait)
+        executor = ToolExecutor(
+            llm=backend,
+            registry=tools_trait.registry,
+            model=self._config.model,
+        )
+
+        try:
+            return executor.run(messages=messages, max_iterations=task.max_iterations), None
+        except RuntimeError as e:
+            return None, str(e)
+
+    def _build_tool_result(
+        self,
+        task: Task,
+        exec_result: Any,
+        llm_trait: LLMTrait,
+    ) -> TaskResult:
+        """Build TaskResult from tool execution, with optional structured extraction."""
+        from llm_agent.task import TaskResult
+
+        parsed, final_content, extra_tokens = None, exec_result.content, 0
+
+        if task.output_schema is not None:
+            extraction = self._extract_structured_output(
+                exec_result.content, task.output_schema, llm_trait
+            )
+            if extraction["error"]:
+                return self._tool_result_with_error(exec_result, extraction["error"])
+            parsed, final_content, extra_tokens = (
+                extraction["parsed"],
+                extraction["content"],
+                extraction["tokens"],
+            )
+
+        return TaskResult(
+            success=True,
+            content=final_content,
+            parsed=parsed,
+            tool_calls=exec_result.tool_calls,
+            iterations=exec_result.iterations,
+            tokens_used=exec_result.total_tokens + extra_tokens,
+        )
+
+    def _tool_result_with_error(self, exec_result: Any, error: str) -> TaskResult:
+        """Build a failed TaskResult from tool execution with an error."""
+        from llm_agent.task import TaskResult
+
+        return TaskResult(
+            success=False,
+            content=exec_result.content,
+            tool_calls=exec_result.tool_calls,
+            iterations=exec_result.iterations,
+            tokens_used=exec_result.total_tokens,
+            error=error,
+        )
+
+    def _extract_structured_output(
+        self,
+        tool_loop_content: str,
+        output_schema: type[BaseModel],
+        llm_trait: LLMTrait,
+    ) -> dict[str, Any]:
+        """Extract structured output from tool loop result.
+
+        Returns:
+            Dict with keys: parsed, content, tokens, error
+        """
+        from llm_agent.llm.backend import StructuredOutputError
+
+        messages = self._build_extraction_messages(tool_loop_content)
+
+        try:
+            result = llm_trait.complete(
+                messages=messages,
+                model=self._config.model,
+                output_schema=output_schema,
+            )
+            return {
+                "parsed": result.parsed,
+                "content": result.content,
+                "tokens": result.tokens_used,
+                "error": None,
+            }
+        except StructuredOutputError as e:
+            return {
+                "parsed": None,
+                "content": "",
+                "tokens": 0,
+                "error": f"Structured output error: {e}",
+            }
+
+    def _build_extraction_messages(self, tool_loop_content: str) -> list[Message]:
+        """Build messages for structured output extraction."""
+        system_prompt = (
+            "You are a data extraction assistant. "
+            "Your task is to extract information and return it in the exact JSON format requested."
+        )
+        user_prompt = (
+            "Based on the following information, extract the relevant data.\n\n"
+            f"Information:\n{tool_loop_content}"
+        )
+        return [
+            Message(role="system", content=system_prompt),
+            Message(role="user", content=user_prompt),
+        ]
 
     # =========================================================================
     # Memory (delegates to LearnTrait)
@@ -546,3 +787,39 @@ class _ResponseContext:
         self.query = query
         self.response = response
         self.model = model
+
+
+class _LLMTraitBackend:
+    """Adapter that wraps LLMTrait to satisfy LLMBackend protocol.
+
+    Used internally by Agent.execute() to provide ToolExecutor with
+    an LLMBackend-compatible interface.
+    """
+
+    def __init__(self, llm_trait: LLMTrait) -> None:
+        self._trait = llm_trait
+
+    def complete(
+        self,
+        messages: list[Message],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> CompletionResult:
+        """Delegate to LLMTrait.complete()."""
+        return self._trait.complete(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+        )
+
+    def load_adapter(self, adapter_path: str) -> None:
+        """Not supported through trait adapter."""
+        raise NotImplementedError("Adapter loading not supported via trait")
+
+    def unload_adapter(self) -> None:
+        """Not supported through trait adapter."""
+        raise NotImplementedError("Adapter unloading not supported via trait")
