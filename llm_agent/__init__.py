@@ -4,7 +4,14 @@ from llm_learn.collection import ScoredFact
 
 from llm_agent.agent import Agent
 from llm_agent.config import AgentConfig
-from llm_agent.llm import CompletionResult, HTTPBackend, LLMBackend, LLMError, Message
+from llm_agent.llm import (
+    CompletionResult,
+    HTTPBackend,
+    LLMBackend,
+    LLMError,
+    Message,
+    StructuredOutputError,
+)
 from llm_agent.tools import (
     BaseTool,
     FileReadTool,
@@ -43,6 +50,7 @@ __all__ = [
     "Message",
     "ScoredFact",
     "ShellTool",
+    "StructuredOutputError",
     "Tool",
     "ToolCall",
     "ToolCallResult",

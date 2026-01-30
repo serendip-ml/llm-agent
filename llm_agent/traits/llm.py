@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from llm_infer.client import ChatResponse, LLMClient
+from pydantic import BaseModel, ValidationError
 
+from llm_agent.llm.backend import StructuredOutputError
 from llm_agent.llm.types import CompletionResult, Message
 
 
@@ -106,6 +109,7 @@ class LLMTrait:
         temperature: float | None = None,
         max_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
+        output_schema: type[BaseModel] | None = None,
     ) -> CompletionResult:
         """Generate a completion.
 
@@ -115,12 +119,27 @@ class LLMTrait:
             temperature: Temperature override (uses config default if None).
             max_tokens: Max tokens override (uses config default if None).
             tools: Tool definitions for function calling.
+            output_schema: Pydantic model class for structured output. When provided,
+                the LLM is instructed to return JSON matching the schema, and the
+                response is validated. Result.parsed will contain the validated object.
 
         Returns:
-            CompletionResult with content and metadata.
+            CompletionResult with content and metadata. If output_schema was provided,
+            result.parsed contains the validated Pydantic object.
+
+        Raises:
+            ValueError: If both tools and output_schema are provided.
+            StructuredOutputError: If JSON parsing or schema validation fails.
         """
-        # Convert Message objects to dicts for LLMClient
+        if tools and output_schema:
+            raise ValueError("Cannot use both tools and output_schema")
+
         api_messages = self._messages_to_dicts(messages)
+        extra_body = None
+
+        if output_schema:
+            api_messages = self._inject_schema_prompt(api_messages, output_schema)
+            extra_body = {"response_format": {"type": "json_object"}}
 
         response = self.client.chat_full(
             messages=api_messages,
@@ -128,9 +147,16 @@ class LLMTrait:
             temperature=temperature if temperature is not None else self.config.temperature,
             max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
             tools=tools,
+            extra_body=extra_body,
         )
 
-        return self._response_to_result(response)
+        result = self._response_to_result(response)
+
+        # Parse and validate structured output
+        if output_schema:
+            result.parsed = self._parse_structured_output(result.content, output_schema)
+
+        return result
 
     def _messages_to_dicts(self, messages: list[Message]) -> list[dict[str, Any]]:
         """Convert Message objects to API format."""
@@ -180,3 +206,63 @@ class LLMTrait:
             }
             for tc in response.tool_calls
         ]
+
+    def _build_schema_prompt(self, schema: type[BaseModel]) -> str:
+        """Generate prompt instructing LLM to output JSON matching schema."""
+        json_schema = schema.model_json_schema()
+        return (
+            "You must respond with valid JSON matching this schema:\n"
+            f"```json\n{json.dumps(json_schema, indent=2)}\n```\n"
+            "Respond ONLY with the JSON object, no other text."
+        )
+
+    def _inject_schema_prompt(
+        self,
+        messages: list[dict[str, Any]],
+        schema: type[BaseModel],
+    ) -> list[dict[str, Any]]:
+        """Inject schema instruction into messages.
+
+        Appends schema prompt to existing system message or creates one.
+        """
+        schema_prompt = self._build_schema_prompt(schema)
+        result = list(messages)  # shallow copy
+
+        if result and result[0].get("role") == "system":
+            # Append to existing system message
+            result[0] = {
+                **result[0],
+                "content": f"{result[0]['content']}\n\n{schema_prompt}",
+            }
+        else:
+            # Insert new system message at the start
+            result.insert(0, {"role": "system", "content": schema_prompt})
+
+        return result
+
+    def _parse_structured_output(
+        self,
+        content: str,
+        schema: type[BaseModel],
+    ) -> BaseModel:
+        """Parse JSON content and validate against schema.
+
+        Args:
+            content: Raw JSON string from LLM response.
+            schema: Pydantic model class to validate against.
+
+        Returns:
+            Validated Pydantic model instance.
+
+        Raises:
+            StructuredOutputError: If JSON is invalid or doesn't match schema.
+        """
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as e:
+            raise StructuredOutputError(f"Invalid JSON in response: {e}") from e
+
+        try:
+            return schema.model_validate(data)
+        except ValidationError as e:
+            raise StructuredOutputError(f"Response doesn't match schema: {e}") from e

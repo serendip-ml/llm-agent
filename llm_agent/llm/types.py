@@ -39,3 +39,8 @@ class CompletionResult(BaseModel):
     tool_calls: list[dict[str, Any]] | None = Field(
         default=None, description="Tool calls requested by LLM"
     )
+
+    # Parsed structured output (when output_schema is provided)
+    parsed: Any | None = Field(
+        default=None, description="Validated object when output_schema is used"
+    )
