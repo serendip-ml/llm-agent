@@ -56,6 +56,12 @@ class LLMError(Exception):
     pass
 
 
+class StructuredOutputError(Exception):
+    """Raised when structured output parsing or validation fails."""
+
+    pass
+
+
 class HTTPBackend:
     """Backend that calls an OpenAI-compatible HTTP API.
 
