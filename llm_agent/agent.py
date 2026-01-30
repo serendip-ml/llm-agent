@@ -6,17 +6,16 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal, TypeVar
 
 from appinfra.log import Logger
-from llm_learn import LearnClient
 from llm_learn.collection import ScoredFact
-from llm_learn.inference import ContextBuilder, Embedder
 
 from llm_agent.config import AgentConfig
-from llm_agent.llm import CompletionResult, LLMBackend, Message
+from llm_agent.llm import CompletionResult, Message
 from llm_agent.traits.base import Trait
 
 
 if TYPE_CHECKING:
     from llm_agent.protocol.base import Request, Response
+    from llm_agent.traits.learn import LearnTrait
 
 
 TraitT = TypeVar("TraitT", bound=Trait)
@@ -25,41 +24,44 @@ TraitT = TypeVar("TraitT", bound=Trait)
 class Agent:
     """Learning agent that improves through feedback.
 
-    Coordinates LLM backend with llm-learn for facts, feedback, and preferences.
+    Coordinates capabilities via traits:
+    - LLMTrait: LLM completions
+    - LearnTrait: Memory (facts), feedback, preferences
+    - DirectiveTrait: Directive/persona injection
+    - HTTPTrait: HTTP server
+
+    Example:
+        from appinfra.log import Logger
+        from llm_agent import Agent, AgentConfig
+        from llm_agent.traits import LLMTrait, LLMConfig, LearnTrait, LearnConfig
+
+        lg = Logger.create("agent")
+        config = AgentConfig(name="my-agent")
+
+        agent = Agent(lg, config)
+        agent.add_trait(LLMTrait(LLMConfig(base_url="http://localhost:8000/v1")))
+        agent.add_trait(LearnTrait(LearnConfig(profile_id=1)))
+        agent.start()
+
+        result = agent.complete("Hello!")
     """
 
     def __init__(
         self,
         lg: Logger,
         config: AgentConfig,
-        llm: LLMBackend,
-        learn: LearnClient,
-        embedder: Embedder | None = None,
     ) -> None:
         """Initialize agent.
 
         Args:
             lg: Logger instance.
             config: Agent configuration.
-            llm: LLM backend for completions.
-            learn: Learning client from llm-learn.
-            embedder: Embedder for RAG (optional, enables semantic search).
         """
-        # Validate RAG mode configuration
-        if config.fact_injection == "rag" and embedder is None:
-            raise ValueError(
-                "fact_injection='rag' requires an embedder. "
-                "Either provide an embedder or use fact_injection='all' or 'none'."
-            )
-
         self._lg = lg
         self._config = config
-        self._llm = llm
-        self._learn = learn
-        self._embedder = embedder
-        self._context = ContextBuilder(learn.facts)
         self._response_contexts: dict[str, _ResponseContext] = {}
         self._traits: dict[type[Trait], Trait] = {}
+        self._started = False
 
     @property
     def name(self) -> str:
@@ -71,7 +73,35 @@ class Agent:
         """Agent configuration."""
         return self._config
 
-    # === Traits ===
+    # =========================================================================
+    # Lifecycle
+    # =========================================================================
+
+    def start(self) -> None:
+        """Start the agent and all traits."""
+        if self._started:
+            return
+
+        for trait in self._traits.values():
+            trait.on_start()
+
+        self._started = True
+        self._lg.info("Agent started", extra={"name": self.name})
+
+    def stop(self) -> None:
+        """Stop the agent and all traits."""
+        if not self._started:
+            return
+
+        for trait in self._traits.values():
+            trait.on_stop()
+
+        self._started = False
+        self._lg.info("Agent stopped", extra={"name": self.name})
+
+    # =========================================================================
+    # Traits
+    # =========================================================================
 
     def add_trait(self, trait: Trait) -> None:
         """Add a trait to this agent.
@@ -112,7 +142,29 @@ class Agent:
         """
         return trait_type in self._traits
 
-    # === Core operations ===
+    def require_trait(self, trait_type: type[TraitT]) -> TraitT:
+        """Get a required trait, raising if not attached.
+
+        Args:
+            trait_type: The trait class to look up.
+
+        Returns:
+            The trait instance.
+
+        Raises:
+            RuntimeError: If the trait is not attached.
+        """
+        trait = self.get_trait(trait_type)
+        if trait is None:
+            raise RuntimeError(
+                f"{trait_type.__name__} required but not attached - "
+                f"add it with agent.add_trait({trait_type.__name__}(...))"
+            )
+        return trait
+
+    # =========================================================================
+    # Core operations
+    # =========================================================================
 
     def complete(
         self,
@@ -121,7 +173,8 @@ class Agent:
     ) -> CompletionResult:
         """Generate a response with context-augmented prompt.
 
-        Facts are automatically injected based on config.fact_injection mode.
+        Requires LLMTrait. Facts are automatically injected based on
+        config.fact_injection mode (requires LearnTrait for 'all' or 'rag').
 
         Args:
             query: User input.
@@ -129,10 +182,15 @@ class Agent:
 
         Returns:
             Completion result with response and metadata.
-        """
-        base_prompt = system_prompt or self._config.default_prompt
 
-        # Build prompt with fact injection (pass query for RAG mode)
+        Raises:
+            RuntimeError: If LLMTrait not attached.
+        """
+        from llm_agent.traits.llm import LLMTrait
+
+        llm_trait = self.require_trait(LLMTrait)
+
+        base_prompt = system_prompt or self._config.default_prompt
         prompt = self._build_prompt(base_prompt, query=query)
 
         messages = [
@@ -140,14 +198,13 @@ class Agent:
             Message(role="user", content=query),
         ]
 
-        result = self._llm.complete(
+        result = llm_trait.complete(
             messages=messages,
             model=self._config.model,
         )
 
         # Track response for feedback (bounded to prevent memory leaks)
         if len(self._response_contexts) >= self._config.max_tracked_responses:
-            # Evict oldest entry (dicts maintain insertion order in Python 3.7+)
             oldest_key = next(iter(self._response_contexts))
             del self._response_contexts[oldest_key]
         self._response_contexts[result.id] = _ResponseContext(
@@ -162,6 +219,7 @@ class Agent:
     def _build_prompt(self, base_prompt: str, query: str | None = None) -> str:
         """Build system prompt with directive and fact injection."""
         from llm_agent.traits.directive import DirectiveTrait
+        from llm_agent.traits.learn import LearnTrait
 
         prompt = base_prompt
 
@@ -170,35 +228,68 @@ class Agent:
         if directive_trait is not None:
             prompt = directive_trait.build_prompt(prompt)
 
-        # Inject facts based on config
-        if self._config.fact_injection == "rag":
-            assert query is not None  # RAG mode only called from complete() which provides query
-            prompt = self._inject_rag_facts(prompt, query)
-        elif self._config.fact_injection == "all":
-            prompt = self._context.build_system_prompt(
-                base_prompt=prompt,
-                max_facts=self._config.max_facts,
-            )
-        # "none" mode: no fact injection
+        # Inject facts based on config (requires LearnTrait)
+        learn_trait = self.get_trait(LearnTrait)
+        if learn_trait is not None and self._config.fact_injection != "none":
+            prompt = self._inject_facts(prompt, learn_trait, query)
 
         return prompt
 
-    def _inject_rag_facts(self, prompt: str, query: str) -> str:
-        """Inject semantically relevant facts into prompt using RAG."""
-        assert self._embedder is not None  # Validated at __init__
+    def _inject_facts(self, prompt: str, learn_trait: LearnTrait, query: str | None) -> str:
+        """Inject facts into prompt based on config mode."""
+        if self._config.fact_injection == "rag":
+            if query is None:
+                raise ValueError("RAG mode requires query for semantic search")
+            if not learn_trait.has_embedder:
+                raise ValueError(
+                    "fact_injection='rag' requires embedder - configure embedder_url in LearnConfig"
+                )
+            return learn_trait.build_prompt_rag(
+                base_prompt=prompt,
+                query=query,
+                top_k=self._config.rag_top_k,
+                min_similarity=self._config.rag_min_similarity,
+            )
+        elif self._config.fact_injection == "all":
+            return learn_trait.build_prompt(
+                base_prompt=prompt,
+                max_facts=self._config.max_facts,
+            )
+        return prompt
 
-        embedding = self._embedder.embed(query)
-        scored_facts = self._learn.facts.search_similar(
-            embedding=embedding.embedding,
-            model_name=self._embedder.model,
-            top_k=self._config.rag_top_k,
-            min_similarity=self._config.rag_min_similarity,
-        )
-        facts = [sf.fact for sf in scored_facts]
-        return self._context.build_system_prompt_from_facts(
-            base_prompt=prompt,
-            facts=facts,
-        )
+    # =========================================================================
+    # Memory (delegates to LearnTrait)
+    # =========================================================================
+
+    def remember(self, fact: str, category: str = "general") -> int:
+        """Store a fact about the user.
+
+        Requires LearnTrait.
+
+        Args:
+            fact: The fact to store.
+            category: Category for organization.
+
+        Returns:
+            Fact ID.
+        """
+        from llm_agent.traits.learn import LearnTrait
+
+        learn_trait = self.require_trait(LearnTrait)
+        return learn_trait.remember(fact, category=category)
+
+    def forget(self, fact_id: int) -> None:
+        """Remove a stored fact.
+
+        Requires LearnTrait.
+
+        Args:
+            fact_id: ID of the fact to remove.
+        """
+        from llm_agent.traits.learn import LearnTrait
+
+        learn_trait = self.require_trait(LearnTrait)
+        learn_trait.forget(fact_id)
 
     def recall(
         self,
@@ -209,68 +300,32 @@ class Agent:
     ) -> list[ScoredFact]:
         """Search facts by semantic similarity to query.
 
+        Requires LearnTrait with embedder configured.
+
         Args:
             query: Text to search for similar facts.
             top_k: Max results (defaults to config.rag_top_k).
-            min_similarity: Minimum similarity threshold (defaults to config.rag_min_similarity).
+            min_similarity: Minimum similarity (defaults to config.rag_min_similarity).
             categories: Filter to these categories.
 
         Returns:
             List of ScoredFact sorted by similarity (highest first).
-
-        Raises:
-            ValueError: If embedder not configured.
         """
-        if self._embedder is None:
-            raise ValueError("recall() requires an embedder")
+        from llm_agent.traits.learn import LearnTrait
 
-        embedding = self._embedder.embed(query)
-        return self._learn.facts.search_similar(
-            embedding=embedding.embedding,
-            model_name=self._embedder.model,
-            top_k=self._config.rag_top_k if top_k is None else top_k,
-            min_similarity=self._config.rag_min_similarity
-            if min_similarity is None
-            else min_similarity,
+        learn_trait = self.require_trait(LearnTrait)
+        return learn_trait.recall(
+            query=query,
+            top_k=top_k if top_k is not None else self._config.rag_top_k,
+            min_similarity=min_similarity
+            if min_similarity is not None
+            else self._config.rag_min_similarity,
             categories=categories,
         )
 
-    # === Memory (delegates to llm-learn) ===
-
-    def remember(self, fact: str, category: str = "general") -> int:
-        """Store a fact about the user.
-
-        If an embedder is configured, the fact is also embedded for semantic search.
-
-        Args:
-            fact: The fact to store.
-            category: Category for organization (preferences, rules, background, etc.)
-
-        Returns:
-            Fact ID.
-        """
-        fact_id = self._learn.facts.add(fact, category=category)
-
-        # Embed for semantic search if embedder available
-        if self._embedder is not None:
-            embedding = self._embedder.embed(fact)
-            self._learn.facts.set_embedding(
-                fact_id=fact_id,
-                embedding=embedding.embedding,
-                model_name=self._embedder.model,
-            )
-
-        return fact_id
-
-    def forget(self, fact_id: int) -> None:
-        """Remove a stored fact.
-
-        Args:
-            fact_id: ID of the fact to remove.
-        """
-        self._learn.facts.delete(fact_id)
-
-    # === Feedback (delegates to llm-learn) ===
+    # =========================================================================
+    # Feedback (delegates to LearnTrait)
+    # =========================================================================
 
     def feedback(
         self,
@@ -280,6 +335,8 @@ class Agent:
     ) -> None:
         """Record feedback on a response.
 
+        Requires LearnTrait.
+
         Args:
             response_id: ID from CompletionResult.
             signal: Whether response was good or bad.
@@ -288,14 +345,18 @@ class Agent:
         Raises:
             ValueError: If response_id is not found.
         """
+        from llm_agent.traits.learn import LearnTrait
+
+        learn_trait = self.require_trait(LearnTrait)
+
         # Pop to remove after use - prevents unbounded memory growth
         ctx = self._response_contexts.pop(response_id, None)
         if ctx is None:
             raise ValueError(f"Unknown response_id: {response_id}")
 
         # Record feedback signal
-        self._learn.feedback.record(
-            content_text=ctx.response,
+        learn_trait.record_feedback(
+            content=ctx.response,
             signal=signal,
             context={"query": ctx.query, "model": ctx.model},
         )
@@ -303,13 +364,15 @@ class Agent:
         # If negative with correction, create preference pair
         if signal == "negative" and correction is not None:
             full_context = f"{ctx.system_prompt}\n\nUser: {ctx.query}"
-            self._learn.preferences.record(
+            learn_trait.record_preference(
                 context=full_context,
                 chosen=correction,
                 rejected=ctx.response,
             )
 
-    # === HTTP Request Handling ===
+    # =========================================================================
+    # HTTP Request Handling
+    # =========================================================================
 
     def handle_request(self, request: Request) -> Response:
         """Handle an HTTP protocol request.
@@ -342,7 +405,6 @@ class Agent:
 
         handler = handlers.get(request.message_type)
         if handler is None:
-            # Return generic error response
             from llm_agent.protocol.base import Response
 
             return Response(
@@ -466,20 +528,6 @@ class Agent:
         except Exception as e:
             self._lg.warning("feedback request failed", extra={"exception": e})
             return FeedbackResponse(id=req.id, success=False, error=str(e))
-
-    # === Adapter ===
-
-    def load_adapter(self, adapter_path: str) -> None:
-        """Load a fine-tuned adapter.
-
-        Args:
-            adapter_path: Path to the adapter.
-        """
-        self._llm.load_adapter(adapter_path)
-
-    def unload_adapter(self) -> None:
-        """Revert to base model."""
-        self._llm.unload_adapter()
 
 
 class _ResponseContext:

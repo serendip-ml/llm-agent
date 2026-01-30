@@ -206,39 +206,42 @@ class TestAgentHandleRequest:
         return MagicMock()
 
     @pytest.fixture
-    def mock_learn(self):
-        """Create mock LearnClient."""
-        learn = MagicMock()
-        learn.facts = MagicMock()
-        learn.facts.list_active.return_value = []
-        learn.feedback = MagicMock()
-        learn.preferences = MagicMock()
-        return learn
+    def mock_llm_trait(self):
+        """Create mock LLMTrait."""
+        from llm_agent.traits.llm import LLMTrait
 
-    @pytest.fixture
-    def mock_context_builder(self):
-        """Patch ContextBuilder to avoid database calls."""
-        with patch("llm_agent.agent.ContextBuilder") as mock_cls:
-            mock_builder = MagicMock()
-            mock_builder.build_system_prompt.side_effect = lambda base_prompt, **_: base_prompt
-            mock_cls.return_value = mock_builder
-            yield mock_cls
-
-    @pytest.fixture
-    def agent(self, mock_logger, mock_learn, mock_context_builder):
-        """Create a test agent."""
-        from llm_agent import Agent, AgentConfig
-
-        config = AgentConfig(name="test-agent", fact_injection="none")
-        llm = MagicMock()
-        llm.complete.return_value = CompletionResult(
+        trait = MagicMock(spec=LLMTrait)
+        trait.complete.return_value = CompletionResult(
             id="resp-123",
             content="Hello!",
             model="gpt-4",
             tokens_used=25,
             latency_ms=100,
         )
-        return Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn)
+        return trait
+
+    @pytest.fixture
+    def mock_learn_trait(self):
+        """Create mock LearnTrait."""
+        from llm_agent.traits.learn import LearnTrait
+
+        trait = MagicMock(spec=LearnTrait)
+        trait.remember.return_value = 42
+        trait.has_embedder = False  # No embedder by default
+        return trait
+
+    @pytest.fixture
+    def agent(self, mock_logger, mock_llm_trait, mock_learn_trait):
+        """Create a test agent with mocked traits."""
+        from llm_agent import Agent, AgentConfig
+        from llm_agent.traits.learn import LearnTrait
+        from llm_agent.traits.llm import LLMTrait
+
+        config = AgentConfig(name="test-agent", fact_injection="none")
+        agent = Agent(lg=mock_logger, config=config)
+        agent._traits[LLMTrait] = mock_llm_trait
+        agent._traits[LearnTrait] = mock_learn_trait
+        return agent
 
     def test_handle_health_request(self, agent):
         req = HealthRequest(id="req-1")
@@ -261,8 +264,8 @@ class TestAgentHandleRequest:
         assert resp.response_id == "resp-123"
         assert resp.content == "Hello!"
 
-    def test_handle_remember_request(self, agent, mock_learn):
-        mock_learn.facts.add.return_value = 42
+    def test_handle_remember_request(self, agent, mock_learn_trait):
+        mock_learn_trait.remember.return_value = 42
         req = RememberRequest(id="req-1", fact="User likes Python", category="preferences")
 
         resp = agent.handle_request(req)
@@ -270,18 +273,20 @@ class TestAgentHandleRequest:
         assert isinstance(resp, RememberResponse)
         assert resp.success is True
         assert resp.fact_id == 42
-        mock_learn.facts.add.assert_called_once_with("User likes Python", category="preferences")
+        mock_learn_trait.remember.assert_called_once_with(
+            "User likes Python", category="preferences"
+        )
 
-    def test_handle_forget_request(self, agent, mock_learn):
+    def test_handle_forget_request(self, agent, mock_learn_trait):
         req = ForgetRequest(id="req-1", fact_id=42)
 
         resp = agent.handle_request(req)
 
         assert isinstance(resp, ForgetResponse)
         assert resp.success is True
-        mock_learn.facts.delete.assert_called_once_with(42)
+        mock_learn_trait.forget.assert_called_once_with(42)
 
-    def test_handle_feedback_request(self, agent, mock_learn):
+    def test_handle_feedback_request(self, agent, mock_learn_trait):
         # First complete a request to track the response
         complete_req = CompleteRequest(id="req-1", query="Hello")
         agent.handle_request(complete_req)
@@ -292,7 +297,7 @@ class TestAgentHandleRequest:
 
         assert isinstance(resp, FeedbackResponse)
         assert resp.success is True
-        mock_learn.feedback.record.assert_called_once()
+        mock_learn_trait.record_feedback.assert_called_once()
 
     def test_handle_unknown_message_type(self, agent):
         # Create a request with unknown message type
@@ -307,9 +312,9 @@ class TestAgentHandleRequest:
         assert resp.success is False
         assert "Unknown message type" in resp.error
 
-    def test_handle_complete_request_error(self, agent):
+    def test_handle_complete_request_error(self, agent, mock_llm_trait):
         # Make LLM raise an exception
-        agent._llm.complete.side_effect = ValueError("LLM error")
+        mock_llm_trait.complete.side_effect = ValueError("LLM error")
         req = CompleteRequest(id="req-1", query="Hello")
 
         resp = agent.handle_request(req)
@@ -318,8 +323,8 @@ class TestAgentHandleRequest:
         assert resp.success is False
         assert "LLM error" in resp.error
 
-    def test_handle_remember_request_error(self, agent, mock_learn):
-        mock_learn.facts.add.side_effect = ValueError("Storage error")
+    def test_handle_remember_request_error(self, agent, mock_learn_trait):
+        mock_learn_trait.remember.side_effect = ValueError("Storage error")
         req = RememberRequest(id="req-1", fact="test fact")
 
         resp = agent.handle_request(req)
@@ -329,8 +334,8 @@ class TestAgentHandleRequest:
         assert "Storage error" in resp.error
         assert resp.fact_id == -1
 
-    def test_handle_forget_request_error(self, agent, mock_learn):
-        mock_learn.facts.delete.side_effect = ValueError("Fact not found")
+    def test_handle_forget_request_error(self, agent, mock_learn_trait):
+        mock_learn_trait.forget.side_effect = ValueError("Fact not found")
         req = ForgetRequest(id="req-1", fact_id=999)
 
         resp = agent.handle_request(req)
@@ -339,8 +344,9 @@ class TestAgentHandleRequest:
         assert resp.success is False
         assert "Fact not found" in resp.error
 
-    def test_handle_recall_request_error(self, agent, mock_learn):
+    def test_handle_recall_request_error(self, agent, mock_learn_trait):
         # recall() raises when embedder not configured
+        mock_learn_trait.recall.side_effect = ValueError("recall() requires embedder")
         req = RecallRequest(id="req-1", query="test query")
 
         resp = agent.handle_request(req)
@@ -351,17 +357,12 @@ class TestAgentHandleRequest:
         assert resp.success is False
         assert "embedder" in resp.error.lower()
 
-    def test_handle_recall_request_success(self, mock_logger, mock_learn, mock_context_builder):
+    def test_handle_recall_request_success(self, mock_logger):
         """Verify successful recall returns facts serialized correctly."""
         from llm_agent import Agent, AgentConfig
         from llm_agent.protocol.v1 import RecallResponse
-
-        # Create embedder mock
-        embedder = MagicMock()
-        embedder.model = "test-embed-model"
-        embedding_result = MagicMock()
-        embedding_result.embedding = [0.1, 0.2, 0.3]
-        embedder.embed.return_value = embedding_result
+        from llm_agent.traits.learn import LearnTrait
+        from llm_agent.traits.llm import LLMTrait
 
         # Setup mock scored facts
         mock_fact = MagicMock()
@@ -371,12 +372,18 @@ class TestAgentHandleRequest:
         mock_scored_fact = MagicMock()
         mock_scored_fact.fact = mock_fact
         mock_scored_fact.similarity = 0.85
-        mock_learn.facts.search_similar.return_value = [mock_scored_fact]
 
-        # Create agent with embedder
+        # Create mock traits
+        mock_llm_trait = MagicMock(spec=LLMTrait)
+        mock_learn_trait = MagicMock(spec=LearnTrait)
+        mock_learn_trait.recall.return_value = [mock_scored_fact]
+        mock_learn_trait.has_embedder = True
+
+        # Create agent with traits
         config = AgentConfig(name="test-agent", fact_injection="none")
-        llm = MagicMock()
-        agent = Agent(lg=mock_logger, config=config, llm=llm, learn=mock_learn, embedder=embedder)
+        agent = Agent(lg=mock_logger, config=config)
+        agent._traits[LLMTrait] = mock_llm_trait
+        agent._traits[LearnTrait] = mock_learn_trait
 
         req = RecallRequest(id="req-1", query="programming")
         resp = agent.handle_request(req)
