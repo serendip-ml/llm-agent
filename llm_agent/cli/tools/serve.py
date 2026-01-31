@@ -151,7 +151,11 @@ class ServeTool(Tool):
             do_shutdown()
 
     def _install_signal_handlers(self, do_shutdown: Callable[[], None]) -> None:
-        """Install signal handlers for graceful shutdown."""
+        """Install signal handlers for graceful shutdown.
+
+        Note: do_shutdown() calls core.shutdown() which uses bounded timeouts
+        (5s graceful + 2s terminate + kill) per agent, so this won't hang indefinitely.
+        """
 
         def shutdown_handler(signum: int, frame: Any) -> None:
             self.lg.info("shutdown signal received")

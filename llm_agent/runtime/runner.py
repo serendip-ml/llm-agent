@@ -274,7 +274,8 @@ class AgentRunner:
 
     def _build_insights(self, limit: int) -> list[dict[str, Any]]:
         """Build insights list from recent results."""
-        results = self._agent.get_recent_results(limit)  # type: ignore[union-attr]
+        assert self._agent is not None  # Caller (_handle_get_insights) checks this
+        results = self._agent.get_recent_results(limit)
         return [
             {
                 "success": r.success,

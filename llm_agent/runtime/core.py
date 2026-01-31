@@ -162,6 +162,7 @@ class Core:
         self._lg.debug("ask request", extra={"agent": name, "question_len": len(question)})
 
         request = Request(type=MessageType.ASK, payload={"question": question})
+        # channel is guaranteed non-None by _get_running_handle
         response = handle.channel.request(request, timeout=timeout)  # type: ignore[union-attr]
 
         if not response.success:
@@ -188,6 +189,7 @@ class Core:
         self._lg.debug("feedback request", extra={"agent": name})
 
         request = Request(type=MessageType.FEEDBACK, payload={"message": message})
+        # channel is guaranteed non-None by _get_running_handle
         response = handle.channel.request(request, timeout=timeout)  # type: ignore[union-attr]
 
         if not response.success:
@@ -218,6 +220,7 @@ class Core:
         self._lg.debug("get_insights request", extra={"agent": name, "limit": limit})
 
         request = Request(type=MessageType.GET_INSIGHTS, payload={"limit": limit})
+        # channel is guaranteed non-None by _get_running_handle
         response = handle.channel.request(request, timeout=timeout)  # type: ignore[union-attr]
 
         if not response.success:
