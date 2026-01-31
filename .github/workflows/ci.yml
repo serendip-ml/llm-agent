@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # Install appinfra from GitHub to get unreleased features (e.g., MPQueueHandler).
+          # Remove this line once appinfra is released with these changes.
+          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@d034d84e27c7312d1bdd680fb4cc9d1b7fc24a2e"
           python -m pip install -e ".[dev]"
 
       - name: Check formatting
@@ -60,6 +63,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # Install appinfra from GitHub to get unreleased features (e.g., MPQueueHandler).
+          # Remove this line once appinfra is released with these changes.
+          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@d034d84e27c7312d1bdd680fb4cc9d1b7fc24a2e"
           python -m pip install -e ".[dev]"
 
       - name: Run tests
@@ -84,6 +90,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # Install appinfra from GitHub to get unreleased features (e.g., MPQueueHandler).
+          # Remove this line once appinfra is released with these changes.
+          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@d034d84e27c7312d1bdd680fb4cc9d1b7fc24a2e"
           python -m pip install -e ".[dev]"
 
       - name: Run tests with coverage
