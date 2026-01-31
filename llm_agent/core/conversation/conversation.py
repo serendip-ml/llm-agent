@@ -11,14 +11,10 @@ Conversation to maintain context across interactions.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from llm_agent.core.conversation.tokens import estimate_message_tokens
 from llm_agent.core.llm import Message
-
-
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass

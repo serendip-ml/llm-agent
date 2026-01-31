@@ -262,7 +262,10 @@ class AgentRunner:
                     type=MessageType.INSIGHTS_RESPONSE,
                     request_id=msg.id,
                     success=True,
-                    payload={"insights": insights},
+                    payload={
+                        "insights": insights,
+                        "cycle_count": self._agent.cycle_count,
+                    },
                 )
             )
         except Exception as e:

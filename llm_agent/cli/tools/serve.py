@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import signal
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from appinfra.app.fastapi import ServerBuilder
@@ -130,24 +131,31 @@ class ServeTool(Tool):
         if learn_trait is not None:
             learn_trait.on_start()
 
-        self._install_signal_handlers(core, learn_trait)
+        shutdown_done = False
+
+        def do_shutdown() -> None:
+            nonlocal shutdown_done
+            if shutdown_done:
+                return
+            shutdown_done = True
+            core.shutdown()
+            if learn_trait is not None:
+                learn_trait.on_stop()
+
+        self._install_signal_handlers(do_shutdown)
         server = self._build_server(config, core)
 
         try:
             server.start()
         finally:
-            core.shutdown()
-            if learn_trait is not None:
-                learn_trait.on_stop()
+            do_shutdown()
 
-    def _install_signal_handlers(self, core: Core, learn_trait: LearnTrait | None) -> None:
+    def _install_signal_handlers(self, do_shutdown: Callable[[], None]) -> None:
         """Install signal handlers for graceful shutdown."""
 
         def shutdown_handler(signum: int, frame: Any) -> None:
             self.lg.info("shutdown signal received")
-            core.shutdown()
-            if learn_trait is not None:
-                learn_trait.on_stop()
+            do_shutdown()
 
         signal.signal(signal.SIGTERM, shutdown_handler)
         signal.signal(signal.SIGINT, shutdown_handler)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 from dataclasses import asdict
+from datetime import UTC, datetime
 from multiprocessing import Queue
 from typing import TYPE_CHECKING, Any, cast
 
@@ -224,6 +225,13 @@ class Core:
             raise RuntimeError(response.error or "Get insights failed")
 
         insights = cast(list[dict[str, Any]], response.payload.get("insights", []))
+
+        # Update handle metrics from response
+        cycle_count = response.payload.get("cycle_count")
+        if cycle_count is not None:
+            handle.cycle_count = cycle_count
+            handle.last_run = datetime.now(UTC)
+
         self._lg.debug("get_insights completed", extra={"agent": name, "count": len(insights)})
         return insights
 
