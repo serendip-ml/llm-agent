@@ -8,8 +8,12 @@ from __future__ import annotations
 
 
 # Average chars per token varies by model/tokenizer, but 4 is a reasonable default.
-# GPT-style tokenizers: ~4 chars/token for English text
-# This is intentionally conservative (underestimates tokens) to avoid truncation.
+# GPT-style tokenizers: ~4 chars/token for English text.
+#
+# LIMITATION: This heuristic is calibrated for English/Latin scripts. For CJK,
+# Arabic, and other non-Latin scripts, actual token counts may be 2-4x higher
+# than estimated (these scripts typically have ~1-2 chars/token). Consider using
+# actual tokenizer counts for multilingual content approaching token limits.
 DEFAULT_CHARS_PER_TOKEN = 4
 
 

@@ -678,18 +678,18 @@ Answer the user's question based on your purpose and what you've learned."""
         )
 
 
-def _setup_tools(
-    registry: ToolRegistry,
-    tools_config: dict[str, dict[str, Any]],
-    learn_trait: LearnTrait | None,
-) -> None:
-    """Set up tools from configuration.
+# Tool type aliases map to canonical names
+_TOOL_TYPE_ALIASES: dict[str, str] = {
+    "file_read": "read_file",
+    "file_write": "write_file",
+    "fetch": "http_fetch",
+}
 
-    Args:
-        registry: Tool registry to add tools to.
-        tools_config: Tool configurations keyed by type.
-        learn_trait: LearnTrait for memory tools (optional).
-    """
+
+def _create_tool(
+    tool_type: str, tool_config: dict[str, Any], learn_trait: LearnTrait | None
+) -> Any:
+    """Create a tool instance from type and config."""
     from llm_agent.core.tools.builtin import (
         FileReadTool,
         FileWriteTool,
@@ -699,25 +699,35 @@ def _setup_tools(
         ShellTool,
     )
 
+    canonical_type = _TOOL_TYPE_ALIASES.get(tool_type, tool_type)
+
+    if canonical_type == "shell":
+        return ShellTool(**tool_config)
+    elif canonical_type == "read_file":
+        return FileReadTool(**tool_config)
+    elif canonical_type == "write_file":
+        return FileWriteTool(**tool_config)
+    elif canonical_type == "http_fetch":
+        return HTTPFetchTool(**tool_config)
+    elif canonical_type in ("remember", "recall"):
+        if learn_trait is None:
+            raise ValueError(f"{canonical_type} tool requires LearnTrait")
+        return (
+            RememberTool(learn_trait) if canonical_type == "remember" else RecallTool(learn_trait)
+        )
+    else:
+        raise ValueError(f"Unknown tool type: {tool_type}")
+
+
+def _setup_tools(
+    registry: ToolRegistry,
+    tools_config: dict[str, dict[str, Any]],
+    learn_trait: LearnTrait | None,
+) -> None:
+    """Set up tools from configuration."""
     for tool_type, tool_config in tools_config.items():
-        if tool_type == "shell":
-            registry.register(ShellTool(**tool_config))
-        elif tool_type == "read_file" or tool_type == "file_read":
-            registry.register(FileReadTool(**tool_config))
-        elif tool_type == "write_file" or tool_type == "file_write":
-            registry.register(FileWriteTool(**tool_config))
-        elif tool_type == "http_fetch" or tool_type == "fetch":
-            registry.register(HTTPFetchTool(**tool_config))
-        elif tool_type == "remember":
-            if learn_trait is None:
-                raise ValueError("remember tool requires LearnTrait")
-            registry.register(RememberTool(learn_trait))
-        elif tool_type == "recall":
-            if learn_trait is None:
-                raise ValueError("recall tool requires LearnTrait")
-            registry.register(RecallTool(learn_trait))
-        else:
-            raise ValueError(f"Unknown tool type: {tool_type}")
+        tool = _create_tool(tool_type, tool_config, learn_trait)
+        registry.register(tool)
 
 
 def _json_schema_to_pydantic(schema: dict[str, Any], name: str) -> type[BaseModel]:

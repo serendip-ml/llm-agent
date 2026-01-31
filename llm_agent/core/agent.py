@@ -222,7 +222,12 @@ class Agent:
         return result
 
     def _track_response(self, result: CompletionResult, prompt: str, query: str) -> None:
-        """Track response for feedback (bounded to prevent memory leaks)."""
+        """Track response for feedback (bounded FIFO to prevent memory leaks).
+
+        Uses FIFO eviction when limit is reached. The default limit of 100 responses
+        should be sufficient for typical interactive use. For high-throughput scenarios,
+        submit feedback promptly before responses are evicted.
+        """
         if len(self._response_contexts) >= self._config.max_tracked_responses:
             oldest_key = next(iter(self._response_contexts))
             del self._response_contexts[oldest_key]

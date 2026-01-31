@@ -111,29 +111,24 @@ def _agent_not_found(name: str) -> HTTPException:
 
 
 # ============================================================================
-# Router - defined at module level for idiomatic FastAPI
+# Route Handlers
 # ============================================================================
 
-_router = APIRouter(tags=["Agent Management"])
 
-
-@_router.get("/health", response_model=HealthResponse)
-def health(request: Request) -> HealthResponse:
+def _health(request: Request) -> HealthResponse:
     """Health check endpoint."""
     core = _get_core(request)
     return HealthResponse(status="ok", agent_count=len(core.registry.list_agents()))
 
 
-@_router.get("/agents", response_model=AgentListResponse)
-def list_agents(request: Request) -> AgentListResponse:
+def _list_agents(request: Request) -> AgentListResponse:
     """List all registered agents."""
     core = _get_core(request)
     agents = core.registry.list_agents()
     return AgentListResponse(agents=[_to_response(a) for a in agents])
 
 
-@_router.get("/agents/{name}", response_model=AgentInfoResponse)
-def get_agent(name: str, request: Request) -> AgentInfoResponse:
+def _get_agent(name: str, request: Request) -> AgentInfoResponse:
     """Get agent information by name."""
     core = _get_core(request)
     handle = core.registry.get(name)
@@ -144,8 +139,7 @@ def get_agent(name: str, request: Request) -> AgentInfoResponse:
     return _to_response(AgentInfo.from_handle(handle))
 
 
-@_router.post("/agents/{name}/start", response_model=AgentInfoResponse)
-def start_agent(name: str, request: Request) -> AgentInfoResponse:
+def _start_agent(name: str, request: Request) -> AgentInfoResponse:
     """Start an agent process."""
     core = _get_core(request)
     try:
@@ -157,8 +151,7 @@ def start_agent(name: str, request: Request) -> AgentInfoResponse:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
 
-@_router.post("/agents/{name}/stop", response_model=AgentInfoResponse)
-def stop_agent(name: str, request: Request) -> AgentInfoResponse:
+def _stop_agent(name: str, request: Request) -> AgentInfoResponse:
     """Stop an agent process."""
     core = _get_core(request)
     try:
@@ -168,8 +161,7 @@ def stop_agent(name: str, request: Request) -> AgentInfoResponse:
         raise _agent_not_found(name) from None
 
 
-@_router.post("/agents/{name}/ask", response_model=AskResponse)
-def ask_agent(name: str, body: AskRequest, request: Request) -> AskResponse:
+def _ask_agent(name: str, body: AskRequest, request: Request) -> AskResponse:
     """Ask an agent a question."""
     core = _get_core(request)
     try:
@@ -181,8 +173,7 @@ def ask_agent(name: str, body: AskRequest, request: Request) -> AskResponse:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
 
-@_router.post("/agents/{name}/feedback", response_model=FeedbackResponse)
-def feedback_agent(name: str, body: FeedbackRequest, request: Request) -> FeedbackResponse:
+def _feedback_agent(name: str, body: FeedbackRequest, request: Request) -> FeedbackResponse:
     """Send feedback to an agent."""
     core = _get_core(request)
     try:
@@ -194,8 +185,7 @@ def feedback_agent(name: str, body: FeedbackRequest, request: Request) -> Feedba
         raise HTTPException(status_code=400, detail=str(e)) from None
 
 
-@_router.get("/agents/{name}/insights", response_model=InsightsResponse)
-def get_insights(name: str, request: Request, limit: int = 10) -> InsightsResponse:
+def _get_insights(name: str, request: Request, limit: int = 10) -> InsightsResponse:
     """Get recent insights from an agent."""
     core = _get_core(request)
     try:
@@ -213,8 +203,37 @@ def get_insights(name: str, request: Request, limit: int = 10) -> InsightsRespon
 
 
 def create_management_routes() -> APIRouter:
-    """Create API router for agent management endpoints.
+    """Create a fresh API router for agent management endpoints.
+
+    Returns a new router instance each time, allowing safe mounting
+    to multiple apps or test isolation.
 
     Routes delegate to Core stored in app.state.
     """
-    return _router
+    router = APIRouter(tags=["Agent Management"])
+
+    router.add_api_route("/health", _health, methods=["GET"], response_model=HealthResponse)
+    router.add_api_route("/agents", _list_agents, methods=["GET"], response_model=AgentListResponse)
+    router.add_api_route(
+        "/agents/{name}", _get_agent, methods=["GET"], response_model=AgentInfoResponse
+    )
+    router.add_api_route(
+        "/agents/{name}/start", _start_agent, methods=["POST"], response_model=AgentInfoResponse
+    )
+    router.add_api_route(
+        "/agents/{name}/stop", _stop_agent, methods=["POST"], response_model=AgentInfoResponse
+    )
+    router.add_api_route(
+        "/agents/{name}/ask", _ask_agent, methods=["POST"], response_model=AskResponse
+    )
+    router.add_api_route(
+        "/agents/{name}/feedback",
+        _feedback_agent,
+        methods=["POST"],
+        response_model=FeedbackResponse,
+    )
+    router.add_api_route(
+        "/agents/{name}/insights", _get_insights, methods=["GET"], response_model=InsightsResponse
+    )
+
+    return router
