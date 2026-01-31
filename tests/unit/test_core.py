@@ -1,0 +1,423 @@
+"""Tests for Runtime Core."""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from llm_agent.core.traits.llm import LLMConfig
+from llm_agent.runtime import AgentRegistry, AgentState, Core
+from llm_agent.runtime.transport import MessageType, Response
+
+
+pytestmark = pytest.mark.unit
+
+
+@pytest.fixture
+def mock_logger():
+    return MagicMock()
+
+
+@pytest.fixture
+def llm_config():
+    return LLMConfig(base_url="http://localhost:8000/v1")
+
+
+@pytest.fixture
+def registry(mock_logger):
+    return AgentRegistry(lg=mock_logger)
+
+
+@pytest.fixture
+def core(mock_logger, registry, llm_config):
+    """Create Core with mocked log listener."""
+    with patch("llm_agent.runtime.core.LogQueueListener"):
+        core = Core(
+            lg=mock_logger,
+            registry=registry,
+            llm_config=llm_config,
+        )
+    return core
+
+
+class TestCoreInit:
+    """Tests for Core initialization."""
+
+    def test_init_creates_log_queue(self, mock_logger, registry, llm_config):
+        """Core creates log queue and listener on init."""
+        with patch("llm_agent.runtime.core.LogQueueListener") as mock_listener_class:
+            Core(lg=mock_logger, registry=registry, llm_config=llm_config)
+            mock_listener_class.assert_called_once()
+            mock_listener_class.return_value.start.assert_called_once()
+
+    def test_init_with_learn_trait(self, mock_logger, registry, llm_config):
+        """Core accepts optional LearnTrait."""
+        mock_learn_trait = MagicMock()
+        with patch("llm_agent.runtime.core.LogQueueListener"):
+            core = Core(
+                lg=mock_logger,
+                registry=registry,
+                llm_config=llm_config,
+                learn_trait=mock_learn_trait,
+            )
+        assert core._learn_trait is mock_learn_trait
+
+    def test_init_with_variables(self, mock_logger, registry, llm_config):
+        """Core accepts optional variables dict."""
+        variables = {"API_KEY": "test-key"}
+        with patch("llm_agent.runtime.core.LogQueueListener"):
+            core = Core(
+                lg=mock_logger,
+                registry=registry,
+                llm_config=llm_config,
+                variables=variables,
+            )
+        assert core._variables == variables
+
+    def test_registry_property(self, core, registry):
+        """Core exposes registry property."""
+        assert core.registry is registry
+
+
+class TestCoreStart:
+    """Tests for Core.start()."""
+
+    def test_start_not_found(self, core):
+        """Start raises KeyError for nonexistent agent."""
+        with pytest.raises(KeyError, match="not found"):
+            core.start("nonexistent")
+
+    def test_start_transitions_to_running(self, core, registry):
+        """Start transitions state through STARTING to RUNNING."""
+        registry.register("test", {"name": "test"})
+
+        with patch.object(core, "_spawn_process"):
+            info = core.start("test")
+
+        assert info.status == "running"
+
+    def test_start_clears_previous_error(self, core, registry):
+        """Start clears any previous error state."""
+        registry.register("test", {})
+        handle = registry.get("test")
+        handle.error = "Previous error"
+
+        with patch.object(core, "_spawn_process"):
+            core.start("test")
+
+        assert handle.error is None
+
+    def test_start_error_transitions_to_error(self, core, registry, mock_logger):
+        """Start error transitions to ERROR state."""
+        registry.register("test", {"name": "test"})
+
+        with patch.object(core, "_spawn_process", side_effect=RuntimeError("spawn failed")):
+            info = core.start("test")
+
+        assert info.status == "error"
+        assert "spawn failed" in info.error
+
+
+class TestCoreStop:
+    """Tests for Core.stop()."""
+
+    def test_stop_not_found(self, core):
+        """Stop raises KeyError for nonexistent agent."""
+        with pytest.raises(KeyError, match="not found"):
+            core.stop("nonexistent")
+
+    def test_stop_not_running_is_noop(self, core, registry):
+        """Stop on non-running agent is no-op."""
+        registry.register("test", {})
+
+        info = core.stop("test")
+
+        assert info.status == "idle"
+
+    def test_stop_running_agent(self, core, registry):
+        """Stop terminates running agent."""
+        registry.register("test", {})
+        handle = registry.get("test")
+        handle.state = AgentState.RUNNING
+        mock_channel = MagicMock()
+        handle.channel = mock_channel
+        mock_process = MagicMock()
+        mock_process.is_alive.return_value = False
+        handle.process = mock_process
+
+        info = core.stop("test")
+
+        assert info.status == "stopped"
+        mock_channel.send.assert_called()  # Shutdown message sent
+
+
+class TestCoreAsk:
+    """Tests for Core.ask()."""
+
+    def test_ask_not_found(self, core):
+        """Ask raises KeyError for nonexistent agent."""
+        with pytest.raises(KeyError, match="not found"):
+            core.ask("nonexistent", "question")
+
+    def test_ask_not_running(self, core, registry):
+        """Ask raises RuntimeError if agent not running."""
+        registry.register("test", {})
+
+        with pytest.raises(RuntimeError, match="not running"):
+            core.ask("test", "question")
+
+    def test_ask_success(self, core, registry):
+        """Ask returns response from agent."""
+        registry.register("test", {})
+        handle = registry.get("test")
+        handle.state = AgentState.RUNNING
+        mock_channel = MagicMock()
+        mock_channel.request.return_value = Response(
+            id="resp-1",
+            type=MessageType.ASK_RESPONSE,
+            request_id="req-1",
+            success=True,
+            payload={"response": "Test answer"},
+        )
+        handle.channel = mock_channel
+
+        response = core.ask("test", "What is the answer?")
+
+        assert response == "Test answer"
+
+    def test_ask_failure(self, core, registry):
+        """Ask raises RuntimeError on failure response."""
+        registry.register("test", {})
+        handle = registry.get("test")
+        handle.state = AgentState.RUNNING
+        mock_channel = MagicMock()
+        mock_channel.request.return_value = Response(
+            id="resp-1",
+            type=MessageType.ASK_RESPONSE,
+            request_id="req-1",
+            success=False,
+            error="Agent error",
+        )
+        handle.channel = mock_channel
+
+        with pytest.raises(RuntimeError, match="Agent error"):
+            core.ask("test", "What is the answer?")
+
+
+class TestCoreFeedback:
+    """Tests for Core.feedback()."""
+
+    def test_feedback_not_found(self, core):
+        """Feedback raises KeyError for nonexistent agent."""
+        with pytest.raises(KeyError, match="not found"):
+            core.feedback("nonexistent", "message")
+
+    def test_feedback_not_running(self, core, registry):
+        """Feedback raises RuntimeError if agent not running."""
+        registry.register("test", {})
+
+        with pytest.raises(RuntimeError, match="not running"):
+            core.feedback("test", "message")
+
+    def test_feedback_success(self, core, registry):
+        """Feedback sends message to agent."""
+        registry.register("test", {})
+        handle = registry.get("test")
+        handle.state = AgentState.RUNNING
+        mock_channel = MagicMock()
+        mock_channel.request.return_value = Response(
+            id="resp-1",
+            type=MessageType.FEEDBACK_RESPONSE,
+            request_id="req-1",
+            success=True,
+        )
+        handle.channel = mock_channel
+
+        core.feedback("test", "Good job!")  # Should not raise
+
+    def test_feedback_failure(self, core, registry):
+        """Feedback raises RuntimeError on failure."""
+        registry.register("test", {})
+        handle = registry.get("test")
+        handle.state = AgentState.RUNNING
+        mock_channel = MagicMock()
+        mock_channel.request.return_value = Response(
+            id="resp-1",
+            type=MessageType.FEEDBACK_RESPONSE,
+            request_id="req-1",
+            success=False,
+            error="Feedback error",
+        )
+        handle.channel = mock_channel
+
+        with pytest.raises(RuntimeError, match="Feedback error"):
+            core.feedback("test", "message")
+
+
+class TestCoreGetInsights:
+    """Tests for Core.get_insights()."""
+
+    def test_get_insights_not_found(self, core):
+        """get_insights raises KeyError for nonexistent agent."""
+        with pytest.raises(KeyError, match="not found"):
+            core.get_insights("nonexistent")
+
+    def test_get_insights_not_running(self, core, registry):
+        """get_insights raises RuntimeError if agent not running."""
+        registry.register("test", {})
+
+        with pytest.raises(RuntimeError, match="not running"):
+            core.get_insights("test")
+
+    def test_get_insights_success(self, core, registry):
+        """get_insights returns insights from agent."""
+        registry.register("test", {})
+        handle = registry.get("test")
+        handle.state = AgentState.RUNNING
+        mock_channel = MagicMock()
+        insights_data = [{"success": True, "content": "Insight 1", "parsed": None, "iterations": 1}]
+        mock_channel.request.return_value = Response(
+            id="resp-1",
+            type=MessageType.INSIGHTS_RESPONSE,
+            request_id="req-1",
+            success=True,
+            payload={"insights": insights_data},
+        )
+        handle.channel = mock_channel
+
+        insights = core.get_insights("test", limit=5)
+
+        assert insights == insights_data
+
+    def test_get_insights_failure(self, core, registry):
+        """get_insights raises RuntimeError on failure."""
+        registry.register("test", {})
+        handle = registry.get("test")
+        handle.state = AgentState.RUNNING
+        mock_channel = MagicMock()
+        mock_channel.request.return_value = Response(
+            id="resp-1",
+            type=MessageType.INSIGHTS_RESPONSE,
+            request_id="req-1",
+            success=False,
+            error="Insights error",
+        )
+        handle.channel = mock_channel
+
+        with pytest.raises(RuntimeError, match="Insights error"):
+            core.get_insights("test")
+
+
+class TestCoreShutdown:
+    """Tests for Core.shutdown()."""
+
+    def test_shutdown_stops_all_running(self, core, registry, mock_logger):
+        """Shutdown stops all running agents."""
+        registry.register("agent1", {})
+        registry.register("agent2", {})
+
+        # Set agent1 to running
+        handle1 = registry.get("agent1")
+        handle1.state = AgentState.RUNNING
+        handle1.channel = MagicMock()
+        handle1.process = MagicMock()
+        handle1.process.is_alive.return_value = False
+
+        core.shutdown()
+
+        # agent1 should have been stopped
+        assert handle1.state == AgentState.STOPPED
+
+    def test_shutdown_handles_stop_errors(self, core, registry, mock_logger):
+        """Shutdown handles errors when stopping agents."""
+        registry.register("test", {})
+        handle = registry.get("test")
+        handle.state = AgentState.RUNNING
+
+        # Mock stop to raise an exception
+        with patch.object(core, "stop", side_effect=RuntimeError("Stop failed")):
+            core.shutdown()  # Should not raise
+
+        # Verify warning was logged
+        mock_logger.warning.assert_called()
+
+
+class TestCoreTerminateProcess:
+    """Tests for Core._terminate_process()."""
+
+    def test_terminate_sends_shutdown_message(self, core, registry):
+        """Terminate sends shutdown message to agent."""
+        from llm_agent.runtime import AgentHandle
+
+        handle = AgentHandle(name="test", config={})
+        mock_channel = MagicMock()
+        mock_process = MagicMock()
+        mock_process.is_alive.return_value = False
+        handle.channel = mock_channel
+        handle.process = mock_process
+
+        core._terminate_process(handle)
+
+        mock_channel.send.assert_called_once()
+
+    def test_terminate_handles_channel_error(self, core, registry):
+        """Terminate handles channel send errors gracefully."""
+        from llm_agent.runtime import AgentHandle
+
+        handle = AgentHandle(name="test", config={})
+        mock_channel = MagicMock()
+        mock_channel.send.side_effect = RuntimeError("Channel error")
+        mock_process = MagicMock()
+        mock_process.is_alive.return_value = False
+        handle.channel = mock_channel
+        handle.process = mock_process
+
+        core._terminate_process(handle)  # Should not raise
+
+    def test_terminate_kills_stubborn_process(self, core, registry):
+        """Terminate kills process that won't stop."""
+        from llm_agent.runtime import AgentHandle
+
+        handle = AgentHandle(name="test", config={})
+        mock_channel = MagicMock()
+        mock_process = MagicMock()
+        # Process stays alive through terminate
+        mock_process.is_alive.side_effect = [True, True, True]
+        handle.channel = mock_channel
+        handle.process = mock_process
+
+        core._terminate_process(handle)
+
+        mock_process.terminate.assert_called()
+        mock_process.kill.assert_called()
+
+    def test_terminate_clears_handle(self, core, registry):
+        """Terminate clears process and channel from handle."""
+        from llm_agent.runtime import AgentHandle
+
+        handle = AgentHandle(name="test", config={})
+        handle.channel = MagicMock()
+        handle.process = MagicMock()
+        handle.process.is_alive.return_value = False
+
+        core._terminate_process(handle)
+
+        assert handle.process is None
+        assert handle.channel is None
+
+
+class TestCoreBuildRunnerConfig:
+    """Tests for Core._build_runner_config()."""
+
+    def test_build_runner_config(self, core, registry):
+        """Build runner config adds name to config dict."""
+        from llm_agent.runtime import AgentHandle
+
+        handle = AgentHandle(
+            name="test-agent",
+            config={"directive": {"prompt": "Test"}},
+        )
+
+        config = core._build_runner_config(handle)
+
+        assert config["name"] == "test-agent"
+        assert config["directive"] == {"prompt": "Test"}

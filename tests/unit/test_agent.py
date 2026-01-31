@@ -93,7 +93,7 @@ class TestAgentTraits:
         assert agent.has_trait(type(mock_trait))
 
     def test_add_duplicate_trait_raises(self, mock_logger):
-        from llm_agent.traits.llm import LLMConfig, LLMTrait
+        from llm_agent.core.traits.llm import LLMConfig, LLMTrait
 
         agent = Agent(lg=mock_logger, config=AgentConfig(name="test"))
         trait1 = LLMTrait(LLMConfig())
@@ -146,7 +146,7 @@ class TestAgentComplete:
     @pytest.fixture
     def mock_llm_trait(self):
         """Create mock LLMTrait."""
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         trait = MagicMock(spec=LLMTrait)
         trait.complete.return_value = CompletionResult(
@@ -161,7 +161,7 @@ class TestAgentComplete:
     @pytest.fixture
     def agent_with_llm(self, mock_logger, mock_llm_trait):
         """Create agent with LLMTrait attached."""
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         agent = Agent(lg=mock_logger, config=AgentConfig(name="test"))
         agent._traits[LLMTrait] = mock_llm_trait
@@ -226,7 +226,7 @@ class TestAgentMemory:
     @pytest.fixture
     def mock_learn_trait(self):
         """Create mock LearnTrait."""
-        from llm_agent.traits.learn import LearnTrait
+        from llm_agent.core.traits.learn import LearnTrait
 
         trait = MagicMock(spec=LearnTrait)
         trait.remember.return_value = 42
@@ -236,7 +236,7 @@ class TestAgentMemory:
     @pytest.fixture
     def agent_with_learn(self, mock_logger, mock_learn_trait):
         """Create agent with LearnTrait attached."""
-        from llm_agent.traits.learn import LearnTrait
+        from llm_agent.core.traits.learn import LearnTrait
 
         agent = Agent(lg=mock_logger, config=AgentConfig(name="test"))
         agent._traits[LearnTrait] = mock_learn_trait
@@ -319,7 +319,7 @@ class TestAgentFeedback:
     @pytest.fixture
     def mock_llm_trait(self):
         """Create mock LLMTrait."""
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         trait = MagicMock(spec=LLMTrait)
         return trait
@@ -327,7 +327,7 @@ class TestAgentFeedback:
     @pytest.fixture
     def mock_learn_trait(self):
         """Create mock LearnTrait."""
-        from llm_agent.traits.learn import LearnTrait
+        from llm_agent.core.traits.learn import LearnTrait
 
         trait = MagicMock(spec=LearnTrait)
         return trait
@@ -335,8 +335,8 @@ class TestAgentFeedback:
     @pytest.fixture
     def agent_with_traits(self, mock_logger, mock_llm_trait, mock_learn_trait):
         """Create agent with LLMTrait and LearnTrait attached."""
-        from llm_agent.traits.learn import LearnTrait
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.learn import LearnTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         # Use fact_injection="none" to avoid needing to mock build_prompt
         config = AgentConfig(name="test", fact_injection="none")
@@ -457,7 +457,7 @@ class TestAgentFactInjection:
     @pytest.fixture
     def mock_llm_trait(self):
         """Create mock LLMTrait."""
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         trait = MagicMock(spec=LLMTrait)
         trait.complete.return_value = CompletionResult(
@@ -472,7 +472,7 @@ class TestAgentFactInjection:
     @pytest.fixture
     def mock_learn_trait(self):
         """Create mock LearnTrait."""
-        from llm_agent.traits.learn import LearnTrait
+        from llm_agent.core.traits.learn import LearnTrait
 
         trait = MagicMock(spec=LearnTrait)
         trait.has_embedder = True
@@ -482,7 +482,7 @@ class TestAgentFactInjection:
 
     def test_no_fact_injection(self, mock_logger, mock_llm_trait):
         """Verify fact_injection='none' skips fact injection."""
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         config = AgentConfig(name="test", fact_injection="none", default_prompt="Base.")
         agent = Agent(lg=mock_logger, config=config)
@@ -495,8 +495,8 @@ class TestAgentFactInjection:
 
     def test_all_fact_injection(self, mock_logger, mock_llm_trait, mock_learn_trait):
         """Verify fact_injection='all' uses build_prompt."""
-        from llm_agent.traits.learn import LearnTrait
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.learn import LearnTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         config = AgentConfig(name="test", fact_injection="all", default_prompt="Base.")
         agent = Agent(lg=mock_logger, config=config)
@@ -511,8 +511,8 @@ class TestAgentFactInjection:
 
     def test_rag_fact_injection(self, mock_logger, mock_llm_trait, mock_learn_trait):
         """Verify fact_injection='rag' uses build_prompt_rag."""
-        from llm_agent.traits.learn import LearnTrait
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.learn import LearnTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         config = AgentConfig(name="test", fact_injection="rag", default_prompt="Base.")
         agent = Agent(lg=mock_logger, config=config)
@@ -527,8 +527,8 @@ class TestAgentFactInjection:
 
     def test_rag_without_embedder_raises(self, mock_logger, mock_llm_trait, mock_learn_trait):
         """Verify RAG mode requires embedder."""
-        from llm_agent.traits.learn import LearnTrait
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.learn import LearnTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         config = AgentConfig(name="test", fact_injection="rag")
         agent = Agent(lg=mock_logger, config=config)

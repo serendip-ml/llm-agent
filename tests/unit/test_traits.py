@@ -14,8 +14,8 @@ from llm_agent import (
     DirectiveTrait,
     StructuredOutputError,
 )
-from llm_agent.llm.types import Message
-from llm_agent.traits.llm import LLMConfig, LLMTrait
+from llm_agent.core.llm.types import Message
+from llm_agent.core.traits.llm import LLMConfig, LLMTrait
 
 
 pytestmark = pytest.mark.unit
@@ -178,7 +178,7 @@ class TestAgentTraits:
         assert not agent.has_trait(DirectiveTrait)
 
     def test_complete_with_directive_trait(self, mock_logger):
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         config = AgentConfig(name="test", fact_injection="none")
         agent = Agent(lg=mock_logger, config=config)

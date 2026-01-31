@@ -8,8 +8,8 @@ import httpx
 import pytest
 from pydantic import BaseModel
 
-from llm_agent.llm.types import Message
-from llm_agent.traits.llm import LLMConfig, LLMTrait
+from llm_agent.core.llm.types import Message
+from llm_agent.core.traits.llm import LLMConfig, LLMTrait
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]

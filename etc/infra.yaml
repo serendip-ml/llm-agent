@@ -1,0 +1,24 @@
+logging:
+  level: info
+  location: false
+  location_color: gray-5
+
+  handlers:
+    console_text:
+      type: console              # Handler type (console, file, database, rotating_file, timed_rotating_file)
+      enabled: true              # Enable this handler
+      level: trace               # More detailed than global - should be restricted to INFO
+      format: text               # Format: text, json
+      stream: stdout             # Output stream: stdout, stderr
+      colors: true               # Enable colored output
+      micros: false              # Show microseconds (overwrites global setting)
+
+    file:
+      type: file                 # Handler type
+      enabled: false             # Enable file logging
+      level: trace               # More detailed than global - should be restricted to INFO
+      format: text               # Format: text, json (set to json for JSON output)
+      file: !path "../.logs/app.log"       # Output file path (same for both text and JSON)
+      rotation: size             # Rotation: none, size, timed
+      max_size: "50MB"           # Max file size before rotation
+      backup_count: 5            # Number of backup files to keep
