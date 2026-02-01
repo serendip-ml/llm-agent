@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from llm_agent.core.traits.base import BaseTrait
 
@@ -40,7 +40,7 @@ class Identity(BaseModel):
 
     # Placeholder for future structured behavior (constraints, signals, etc.)
     # Design TBD based on concrete use cases like code review agent.
-    extensions: dict[str, Any] = {}
+    extensions: dict[str, Any] = Field(default_factory=dict)
     """Reserved for future structured constraints/signals."""
 
 

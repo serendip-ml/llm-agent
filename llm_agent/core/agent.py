@@ -105,7 +105,8 @@ class Agent(ABC):
     def add_trait(self, trait: Trait) -> None:
         """Add a trait to this agent.
 
-        Traits are attached immediately upon adding.
+        Traits are attached immediately upon adding. If the agent is already
+        started, the trait's on_start() is called automatically.
 
         Args:
             trait: The trait instance to add.
@@ -118,6 +119,8 @@ class Agent(ABC):
             raise ValueError(f"Trait {trait_type.__name__} already added")
         self._traits[trait_type] = trait
         trait.attach(self)
+        if self._started:
+            trait.on_start()
 
     def get_trait(self, trait_type: type[TraitT]) -> TraitT | None:
         """Get an attached trait by its type.

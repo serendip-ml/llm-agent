@@ -128,19 +128,32 @@ class ConversationRunner:
     def _run_conversation_loop(self, task: Task | None) -> TaskResult:
         """Run tool executor with current conversation state."""
         if self.tools_trait is None or not self.tools_trait.has_tools():
-            return self._run_simple_completion()
+            return self._run_simple_completion(task)
         return self._run_with_tools(task)
 
-    def _run_simple_completion(self) -> TaskResult:
+    def _run_simple_completion(self, task: Task | None) -> TaskResult:
         """Run simple completion without tools."""
-        result = self.llm_trait.complete(messages=self.conversation.messages())
+        result = self.llm_trait.complete(
+            messages=self.conversation.messages(),
+            model=self.model,
+        )
         self.conversation.add_assistant(result.content)
+
+        # Handle structured output extraction if requested
+        parsed, extra_tokens = None, 0
+        if task is not None and task.output_schema is not None:
+            extraction = self._try_extract_structured_simple(result, task.output_schema)
+            if isinstance(extraction, TaskResult):
+                return extraction
+            parsed, extra_tokens = extraction
+
         return TaskResult(
             success=True,
             content=result.content,
+            parsed=parsed,
             tool_calls=[],
             iterations=1,
-            tokens_used=result.tokens_used,
+            tokens_used=result.tokens_used + extra_tokens,
         )
 
     def _run_with_tools(self, task: Task | None) -> TaskResult:
@@ -241,6 +254,31 @@ class ConversationRunner:
                 tool_calls=exec_result.tool_calls,
                 iterations=exec_result.iterations,
                 tokens_used=exec_result.total_tokens,
+                error=f"Structured output error: {e}",
+            )
+
+    def _try_extract_structured_simple(
+        self, completion_result: Any, output_schema: type
+    ) -> tuple[Any, int] | TaskResult:
+        """Try to extract structured output from simple completion."""
+        from llm_agent.core.llm.backend import StructuredOutputError
+
+        messages = self._build_extraction_messages(completion_result.content)
+
+        try:
+            result = self.llm_trait.complete(
+                messages=messages,
+                model=self.model,
+                output_schema=output_schema,
+            )
+            return result.parsed, result.tokens_used
+        except StructuredOutputError as e:
+            return TaskResult(
+                success=False,
+                content=completion_result.content,
+                tool_calls=[],
+                iterations=1,
+                tokens_used=completion_result.tokens_used,
                 error=f"Structured output error: {e}",
             )
 

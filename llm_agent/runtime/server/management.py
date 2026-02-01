@@ -111,6 +111,10 @@ def _check_response(resp: Any, agent_name: str | None = None) -> None:
         error = resp.error or "Unknown error"
         if agent_name and "not found" in error.lower():
             raise HTTPException(status_code=404, detail=f"Agent not found: {agent_name}")
+        # Internal IPC errors (from exception handling) are server errors
+        if "internal server error" in error.lower():
+            raise HTTPException(status_code=500, detail=error)
+        # Business logic errors (e.g., "not running", "invalid transition") are client errors
         raise HTTPException(status_code=400, detail=error)
 
 
@@ -124,6 +128,7 @@ async def _health(request: Request) -> HealthResponse:
     req = MgmtHealthRequest(id=str(uuid4()))
     resp = await request.app.state.ipc_channel.submit(req.id, req)
     resp = cast(MgmtHealthResponse, resp)
+    _check_response(resp)
     return HealthResponse(status=resp.status, agent_count=resp.agent_count)
 
 
@@ -132,6 +137,7 @@ async def _list_agents(request: Request) -> AgentListResponse:
     req = ListAgentsRequest(id=str(uuid4()))
     resp = await request.app.state.ipc_channel.submit(req.id, req)
     resp = cast(ListAgentsResponse, resp)
+    _check_response(resp)
     return AgentListResponse(agents=[AgentInfoResponse(**a) for a in resp.agents])
 
 

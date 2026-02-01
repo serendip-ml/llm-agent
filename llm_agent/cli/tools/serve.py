@@ -138,27 +138,38 @@ class ServeTool(Tool):
 
         request_q: Queue[Any] = mp.Queue()
         response_q: Queue[Any] = mp.Queue()
-
-        shutdown_requested = False
+        shutdown_state = {"requested": False}
 
         def do_shutdown() -> None:
-            nonlocal shutdown_requested
-            if shutdown_requested:
-                return
-            shutdown_requested = True
-            core.shutdown()
-            if learn_trait is not None:
-                learn_trait.on_stop()
+            self._do_shutdown(shutdown_state, core, learn_trait)
 
         self._install_signal_handlers(do_shutdown)
         server = self._build_server(config, request_q, response_q)
 
         try:
             process = server.start_subprocess()
-            self._ipc_loop(core, request_q, response_q, lambda: shutdown_requested)
+
+            def is_shutdown() -> bool:
+                return shutdown_state["requested"] or not process.is_alive()
+
+            self._ipc_loop(core, request_q, response_q, is_shutdown)
             process.join()
         finally:
             do_shutdown()
+
+    def _do_shutdown(
+        self,
+        state: dict[str, bool],
+        core: Core,
+        learn_trait: LearnTrait | None,
+    ) -> None:
+        """Execute shutdown sequence (idempotent)."""
+        if state["requested"]:
+            return
+        state["requested"] = True
+        core.shutdown()
+        if learn_trait is not None:
+            learn_trait.on_stop()
 
     def _install_signal_handlers(self, do_shutdown: Callable[[], None]) -> None:
         """Install signal handlers for graceful shutdown.

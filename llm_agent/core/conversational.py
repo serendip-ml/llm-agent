@@ -466,20 +466,13 @@ class ConversationalAgent(Agent):
         Returns:
             Agent's response.
         """
-        from llm_agent.core.traits.identity import IdentityTrait
-
         self._lg.debug("ask received", extra={"agent": self.name, "question_len": len(question)})
 
         # Build context from recent results
         context = self._build_context_for_ask()
 
-        # Get identity prompt
-        identity_trait = self.get_trait(IdentityTrait)
-        identity_prompt = identity_trait.identity.prompt if identity_trait else ""
-
+        # Build base prompt - identity is injected by _build_prompt() via complete()
         system_prompt = f"""You are {self.name}, a learning agent.
-
-{identity_prompt}
 
 {context}
 

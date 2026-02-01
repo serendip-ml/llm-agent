@@ -7,7 +7,7 @@ Notes on how the agent should work and learn over time.
 The agent works like Claude Code solving a problem - but autonomously, without a user in the loop.
 
 1. **Identity** - Who the agent is (defined in YAML)
-2. **Method** - How the agent operates (can evolve over time)
+2. **Method** - How the agent operates (can evolve)
 3. **Task** - Problem or question to work through
 4. **Conversation** - Agent works through the problem across multiple LLM requests, maintaining context
 5. **Conclusion** - Agent determines if task is solved, unsolvable, or needs help

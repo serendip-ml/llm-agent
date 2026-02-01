@@ -313,7 +313,7 @@ class LLMTraitBackend:
         self,
         messages: list[Message],
         model: str | None = None,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         max_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
     ) -> CompletionResult:
