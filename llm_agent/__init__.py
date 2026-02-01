@@ -4,6 +4,13 @@ from llm_learn.collection import ScoredFact
 
 from llm_agent.core.agent import Agent
 from llm_agent.core.config import AgentConfig
+from llm_agent.core.conversational import ConversationalAgent
+from llm_agent.core.factory import (
+    AgentFactory,
+    ToolFactory,
+    TraitFactory,
+    create_agent_from_config,
+)
 from llm_agent.core.llm import (
     CompletionResult,
     HTTPBackend,
@@ -12,7 +19,6 @@ from llm_agent.core.llm import (
     Message,
     StructuredOutputError,
 )
-from llm_agent.core.prompt_agent import PromptAgent, PromptAgentConfig
 from llm_agent.core.task import Task, TaskCompletion, TaskResult, TaskStatus
 from llm_agent.core.tools import (
     BaseTool,
@@ -33,10 +39,11 @@ from llm_agent.core.tools import (
 )
 from llm_agent.core.traits import (
     BaseTrait,
-    Directive,
-    DirectiveTrait,
     HTTPConfig,
     HTTPTrait,
+    Identity,
+    IdentityTrait,
+    MethodTrait,
     ToolsTrait,
     Trait,
 )
@@ -45,34 +52,24 @@ from llm_agent.core.traits import (
 __version__ = "0.0.0"
 
 __all__ = [
+    # Agents
     "Agent",
     "AgentConfig",
+    "ConversationalAgent",
+    "create_agent_from_config",
+    # Factories
+    "AgentFactory",
+    "ToolFactory",
+    "TraitFactory",
+    # Tools
     "BaseTool",
-    "BaseTrait",
-    "CompletionResult",
     "CompleteTaskTool",
-    "Directive",
-    "DirectiveTrait",
     "FileReadTool",
     "FileWriteTool",
-    "HTTPBackend",
     "HTTPFetchTool",
-    "HTTPConfig",
-    "HTTPTrait",
-    "LLMBackend",
-    "LLMError",
-    "Message",
-    "PromptAgent",
-    "PromptAgentConfig",
     "RecallTool",
     "RememberTool",
-    "ScoredFact",
     "ShellTool",
-    "StructuredOutputError",
-    "Task",
-    "TaskCompletion",
-    "TaskResult",
-    "TaskStatus",
     "Tool",
     "ToolCall",
     "ToolCallResult",
@@ -80,6 +77,29 @@ __all__ = [
     "ToolExecutor",
     "ToolRegistry",
     "ToolResult",
-    "ToolsTrait",
+    # Traits
+    "BaseTrait",
+    "Identity",
+    "IdentityTrait",
+    "MethodTrait",
     "Trait",
+    # HTTP
+    "HTTPConfig",
+    "HTTPTrait",
+    # LLM
+    "CompletionResult",
+    "HTTPBackend",
+    "LLMBackend",
+    "LLMError",
+    "Message",
+    "StructuredOutputError",
+    # Memory
+    "ScoredFact",
+    # Tasks
+    "Task",
+    "TaskCompletion",
+    "TaskResult",
+    "TaskStatus",
+    # Tools trait
+    "ToolsTrait",
 ]

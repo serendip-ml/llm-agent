@@ -6,11 +6,12 @@ Notes on how the agent should work and learn over time.
 
 The agent works like Claude Code solving a problem - but autonomously, without a user in the loop.
 
-1. **Directive** - Agent's persona and purpose (defined in YAML)
-2. **Task** - Problem or question to work through
-3. **Conversation** - Agent works through the problem across multiple LLM requests, maintaining context
-4. **Conclusion** - Agent determines if task is solved, unsolvable, or needs help
-5. **Learning** - Conclusions and feedback accumulate in llm-learn
+1. **Identity** - Who the agent is (defined in YAML)
+2. **Method** - How the agent operates (can evolve over time)
+3. **Task** - Problem or question to work through
+4. **Conversation** - Agent works through the problem across multiple LLM requests, maintaining context
+5. **Conclusion** - Agent determines if task is solved, unsolvable, or needs help
+6. **Learning** - Conclusions and feedback accumulate in llm-learn
 
 ## Key Insight: Failure is Training Data
 
@@ -25,7 +26,7 @@ it should become significantly better.
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │                     Single Session                          │
-│  Directive + Task → Conversation → Conclusion → Output      │
+│  Identity + Method + Task → Conversation → Conclusion       │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼

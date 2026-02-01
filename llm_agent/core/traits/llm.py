@@ -292,3 +292,44 @@ class LLMTrait:
             return schema.model_validate(data)
         except ValidationError as e:
             raise StructuredOutputError(f"Response doesn't match schema: {e}") from e
+
+
+class LLMTraitBackend:
+    """Adapter that wraps LLMTrait to satisfy LLMBackend protocol.
+
+    Used by ConversationalAgent.execute() to provide ToolExecutor
+    with an LLMBackend-compatible interface.
+
+    Example:
+        llm_trait = agent.require_trait(LLMTrait)
+        backend = LLMTraitBackend(llm_trait)
+        executor = ToolExecutor(lg=lg, llm=backend, registry=registry)
+    """
+
+    def __init__(self, llm_trait: LLMTrait) -> None:
+        self._trait = llm_trait
+
+    def complete(
+        self,
+        messages: list[Message],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> CompletionResult:
+        """Delegate to LLMTrait.complete()."""
+        return self._trait.complete(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+        )
+
+    def load_adapter(self, adapter_path: str) -> None:
+        """Not supported through trait adapter."""
+        raise NotImplementedError("Adapter loading not supported via trait")
+
+    def unload_adapter(self) -> None:
+        """Not supported through trait adapter."""
+        raise NotImplementedError("Adapter unloading not supported via trait")

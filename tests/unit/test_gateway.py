@@ -7,7 +7,7 @@ This file tests configuration models that are still in use.
 
 import pytest
 
-from llm_agent.core.traits.directive import Directive
+from llm_agent.core.traits.identity import Identity
 from llm_agent.runtime.server.config import (
     AgentConfigYAML,
     AgentServerConfig,
@@ -26,13 +26,13 @@ class TestAgentServerConfig:
     def test_agent_config_yaml(self):
         """Parse agent config from dict."""
         config = AgentConfigYAML(
-            directive=Directive(prompt="Test prompt"),
+            identity=Identity(prompt="Test prompt"),
             task=TaskConfigYAML(description="Do things"),
             tools={"shell": {"allowed_commands": ["ls"]}},
             schedule=ScheduleConfigYAML(interval=300),
         )
         assert config.class_ == "prompt"
-        assert config.directive.prompt == "Test prompt"
+        assert config.identity.prompt == "Test prompt"
         assert config.schedule.interval == 300
 
     def test_agent_server_config_from_dict(self):
@@ -43,7 +43,7 @@ class TestAgentServerConfig:
             "agents": {
                 "test-agent": {
                     "class": "prompt",
-                    "directive": {"prompt": "Be helpful"},
+                    "identity": {"prompt": "Be helpful"},
                     "task": {"description": "Help users"},
                 }
             },
@@ -53,7 +53,7 @@ class TestAgentServerConfig:
         assert config.server.port == 9000
         assert config.llm["base_url"] == "http://localhost:8000/v1"
         assert "test-agent" in config.agents
-        assert config.agents["test-agent"].directive.prompt == "Be helpful"
+        assert config.agents["test-agent"].identity.prompt == "Be helpful"
 
 
 class TestScheduleConfigYAML:
@@ -114,7 +114,7 @@ class TestAgentConfigYAML:
     def test_default_class(self):
         """AgentConfigYAML defaults to 'prompt' class."""
         config = AgentConfigYAML(
-            directive=Directive(prompt="Test"),
+            identity="Test prompt",
             task=TaskConfigYAML(description="Test"),
         )
         assert config.class_ == "prompt"
@@ -123,7 +123,7 @@ class TestAgentConfigYAML:
         """AgentConfigYAML accepts 'programmatic' class."""
         raw = {
             "class": "programmatic",
-            "directive": {"prompt": "Test"},
+            "identity": "Test prompt",
             "task": {"description": "Test"},
         }
         config = AgentConfigYAML(**raw)
@@ -132,7 +132,7 @@ class TestAgentConfigYAML:
     def test_tools_default_empty(self):
         """AgentConfigYAML defaults tools to empty dict."""
         config = AgentConfigYAML(
-            directive=Directive(prompt="Test"),
+            identity="Test prompt",
             task=TaskConfigYAML(description="Test"),
         )
         assert config.tools == {}
@@ -140,7 +140,7 @@ class TestAgentConfigYAML:
     def test_schedule_optional(self):
         """AgentConfigYAML schedule is optional."""
         config = AgentConfigYAML(
-            directive=Directive(prompt="Test"),
+            identity="Test prompt",
             task=TaskConfigYAML(description="Test"),
         )
         assert config.schedule is None

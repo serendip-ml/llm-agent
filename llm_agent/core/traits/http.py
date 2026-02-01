@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 from appinfra.log import Logger
 from fastapi import APIRouter
 
+from llm_agent.runtime.server.protocol.base import Request, Response
+
 
 if TYPE_CHECKING:
     from llm_agent.core.agent import Agent
@@ -36,25 +38,30 @@ class HTTPConfig:
 
 @dataclass
 class HTTPTrait:
-    """HTTP server trait.
+    """HTTP server trait with request handling.
 
     Runs a FastAPI server in a subprocess and communicates via IPC queues.
-    The agent provides route factory and request handler methods.
+    Handles standard agent protocol requests (complete, remember, recall, etc.).
 
     Architecture:
-        HTTP Request -> FastAPI subprocess -> request_queue -> IPC thread -> agent.handle_request()
-        HTTP Response <- FastAPI subprocess <- response_queue <- agent.handle_request()
+        HTTP Request -> FastAPI subprocess -> request_queue -> IPC thread -> handle_request()
+        HTTP Response <- FastAPI subprocess <- response_queue <- handle_request()
 
-    The agent should implement:
-        - create_routes() -> APIRouter: Creates the API routes
-        - handle_request(request) -> response: Handles IPC requests
+    The trait handles protocol requests by calling methods on the attached agent:
+    - /health -> agent.name
+    - /complete -> agent.complete()
+    - /remember -> agent.remember()
+    - /forget -> agent.forget()
+    - /recall -> agent.recall()
+    - /feedback -> agent.feedback()
 
     Example:
         from appinfra.log import Logger
 
         lg = Logger.create("agent")
-        agent = Agent(config)
+        agent = ConversationalAgent(lg, config)
         agent.add_trait(HTTPTrait(lg, HTTPConfig(port=8080)))
+        agent.start()
 
     Lifecycle:
         - attach(): Creates HTTPServer instance
@@ -168,31 +175,21 @@ class HTTPTrait:
         self.lg.debug("IPC processing thread stopped")
 
     def _ipc_loop(self, poll_timeout: float = 0.1) -> None:
-        """Background loop processing IPC requests.
-
-        Args:
-            poll_timeout: Queue polling timeout in seconds.
-        """
+        """Background loop processing IPC requests."""
         assert self._server is not None
-        handle_request: Callable[[Any], Any] = getattr(
-            self._agent, "handle_request", self._default_handler
-        )
 
         while not self._ipc_shutdown.is_set():
             request = None
             try:
                 request = self._server.request_queue.get(timeout=poll_timeout)
-                response = handle_request(request)
+                response = self.handle_request(request)
                 if response is not None:
                     self._server.response_queue.put(response)
             except Empty:
                 pass
             except Exception:
                 self.lg.exception("IPC processing error")
-                # Send error response to prevent client timeout
                 if request is not None:
-                    from llm_agent.runtime.server.protocol.base import Response
-
                     error_resp = Response(
                         id=getattr(request, "id", "unknown"),
                         success=False,
@@ -200,16 +197,202 @@ class HTTPTrait:
                     )
                     self._server.response_queue.put(error_resp)
 
-    def _default_handler(self, request: Any) -> Any:
-        """Default request handler when agent doesn't implement handle_request."""
-        from llm_agent.runtime.server.protocol.base import Response
+    # -------------------------------------------------------------------------
+    # Request Handling
+    # -------------------------------------------------------------------------
 
-        self.lg.warning(
-            "No handle_request method on agent, request ignored",
-            extra={"request_type": type(request).__name__},
+    def handle_request(self, request: Request) -> Response:
+        """Handle an HTTP protocol request.
+
+        Dispatches to the appropriate handler based on message type.
+
+        Args:
+            request: Protocol request message.
+
+        Returns:
+            Protocol response message.
+        """
+        from llm_agent.runtime.server.protocol.v1 import (
+            CompleteRequest,
+            FeedbackRequest,
+            ForgetRequest,
+            HealthRequest,
+            RecallRequest,
+            RememberRequest,
         )
-        return Response(
-            id=getattr(request, "id", "unknown"),
+
+        handlers: dict[str, Callable[[Request], Response]] = {
+            HealthRequest.message_type: self._handle_health,
+            CompleteRequest.message_type: self._handle_complete,
+            RememberRequest.message_type: self._handle_remember,
+            ForgetRequest.message_type: self._handle_forget,
+            RecallRequest.message_type: self._handle_recall,
+            FeedbackRequest.message_type: self._handle_feedback,
+        }
+
+        handler = handlers.get(request.message_type)
+        if handler is None:
+            return Response(
+                id=request.id,
+                success=False,
+                error=f"Unknown message type: {request.message_type}",
+            )
+
+        return handler(request)
+
+    def _handle_health(self, request: Request) -> Response:
+        """Handle health check request."""
+        from llm_agent.runtime.server.protocol.v1 import HealthResponse
+
+        assert self._agent is not None
+        return HealthResponse(id=request.id, status="ok", agent_name=self._agent.name)
+
+    def _handle_complete(self, request: Request) -> Response:
+        """Handle completion request."""
+        from llm_agent.runtime.server.protocol.v1 import CompleteRequest, CompleteResponse
+
+        assert self._agent is not None
+        complete_fn: Callable[..., Any] | None = getattr(self._agent, "complete", None)
+        if complete_fn is None:
+            return self._complete_error(request.id, "Agent does not support complete()")
+
+        req = (
+            request
+            if isinstance(request, CompleteRequest)
+            else CompleteRequest(**request.model_dump())
+        )
+        try:
+            result = complete_fn(query=req.query, system_prompt=req.system_prompt)
+            return CompleteResponse(
+                id=req.id,
+                response_id=result.id,
+                content=result.content,
+                model=result.model,
+                tokens_used=result.tokens_used,
+            )
+        except Exception as e:
+            self.lg.warning("complete request failed", extra={"exception": e})
+            return self._complete_error(req.id, str(e))
+
+    def _complete_error(self, request_id: str, error: str) -> Response:
+        """Build a CompleteResponse error."""
+        from llm_agent.runtime.server.protocol.v1 import CompleteResponse
+
+        return CompleteResponse(
+            id=request_id,
             success=False,
-            error="Agent does not implement handle_request",
+            error=error,
+            response_id="",
+            content="",
+            model="",
+            tokens_used=0,
         )
+
+    def _handle_remember(self, request: Request) -> Response:
+        """Handle remember request."""
+        from llm_agent.runtime.server.protocol.v1 import RememberRequest, RememberResponse
+
+        assert self._agent is not None
+        remember_fn: Callable[..., int] | None = getattr(self._agent, "remember", None)
+        if remember_fn is None:
+            return RememberResponse(
+                id=request.id, success=False, error="Agent does not support remember()", fact_id=-1
+            )
+
+        req = (
+            request
+            if isinstance(request, RememberRequest)
+            else RememberRequest(**request.model_dump())
+        )
+        try:
+            fact_id = remember_fn(fact=req.fact, category=req.category)
+            return RememberResponse(id=req.id, fact_id=fact_id)
+        except Exception as e:
+            self.lg.warning("remember request failed", extra={"exception": e})
+            return RememberResponse(id=req.id, success=False, error=str(e), fact_id=-1)
+
+    def _handle_forget(self, request: Request) -> Response:
+        """Handle forget request."""
+        from llm_agent.runtime.server.protocol.v1 import ForgetRequest, ForgetResponse
+
+        assert self._agent is not None
+        forget_fn: Callable[..., None] | None = getattr(self._agent, "forget", None)
+        if forget_fn is None:
+            return ForgetResponse(
+                id=request.id, success=False, error="Agent does not support forget()"
+            )
+
+        req = (
+            request if isinstance(request, ForgetRequest) else ForgetRequest(**request.model_dump())
+        )
+        try:
+            forget_fn(fact_id=req.fact_id)
+            return ForgetResponse(id=req.id)
+        except Exception as e:
+            self.lg.warning("forget request failed", extra={"exception": e})
+            return ForgetResponse(id=req.id, success=False, error=str(e))
+
+    def _handle_recall(self, request: Request) -> Response:
+        """Handle recall request."""
+        from llm_agent.runtime.server.protocol.v1 import RecallRequest, RecallResponse
+
+        assert self._agent is not None
+        recall_fn: Callable[..., Any] | None = getattr(self._agent, "recall", None)
+        if recall_fn is None:
+            return RecallResponse(
+                id=request.id, success=False, error="Agent does not support recall()"
+            )
+
+        req = (
+            request if isinstance(request, RecallRequest) else RecallRequest(**request.model_dump())
+        )
+        try:
+            scored_facts = recall_fn(
+                query=req.query,
+                top_k=req.top_k,
+                min_similarity=req.min_similarity,
+                categories=req.categories,
+            )
+            return RecallResponse(id=req.id, facts=self._serialize_facts(scored_facts))
+        except Exception as e:
+            self.lg.warning("recall request failed", extra={"exception": e})
+            return RecallResponse(id=req.id, success=False, error=str(e))
+
+    def _serialize_facts(self, scored_facts: Any) -> list[dict[str, Any]]:
+        """Serialize scored facts for recall response."""
+        return [
+            {
+                "fact_id": sf.fact.id,
+                "content": sf.fact.content,
+                "category": sf.fact.category,
+                "similarity": sf.similarity,
+            }
+            for sf in scored_facts
+        ]
+
+    def _handle_feedback(self, request: Request) -> Response:
+        """Handle feedback request."""
+        from llm_agent.runtime.server.protocol.v1 import FeedbackRequest, FeedbackResponse
+
+        assert self._agent is not None
+        feedback_fn: Callable[..., None] | None = getattr(self._agent, "feedback", None)
+        if feedback_fn is None:
+            return FeedbackResponse(
+                id=request.id, success=False, error="Agent does not support feedback()"
+            )
+
+        req = (
+            request
+            if isinstance(request, FeedbackRequest)
+            else FeedbackRequest(**request.model_dump())
+        )
+        try:
+            feedback_fn(
+                response_id=req.response_id,
+                signal=req.signal,
+                correction=req.correction,
+            )
+            return FeedbackResponse(id=req.id)
+        except Exception as e:
+            self.lg.warning("feedback request failed", extra={"exception": e})
+            return FeedbackResponse(id=req.id, success=False, error=str(e))

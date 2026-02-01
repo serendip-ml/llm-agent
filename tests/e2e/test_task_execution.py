@@ -10,7 +10,7 @@ import httpx
 import pytest
 from pydantic import BaseModel
 
-from llm_agent import Agent, AgentConfig, FileReadTool, ShellTool, Task
+from llm_agent import AgentConfig, ConversationalAgent, FileReadTool, ShellTool, Task
 from llm_agent.core.traits.llm import LLMTrait
 from llm_agent.core.traits.tools import ToolsTrait
 
@@ -62,7 +62,7 @@ class TestTaskExecutionE2E:
     @pytest.fixture
     def agent(self, mock_logger):
         """Create agent with LLMTrait connected to LLM server."""
-        agent = Agent(
+        agent = ConversationalAgent(
             lg=mock_logger,
             config=AgentConfig(name="test-agent", fact_injection="none"),
         )
@@ -83,7 +83,7 @@ class TestTaskExecutionE2E:
     @pytest.fixture
     def agent_with_tools(self, mock_logger):
         """Create agent with LLMTrait and ToolsTrait."""
-        agent = Agent(
+        agent = ConversationalAgent(
             lg=mock_logger,
             config=AgentConfig(name="test-agent-tools", fact_injection="none"),
         )

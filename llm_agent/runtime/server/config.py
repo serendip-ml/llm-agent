@@ -10,7 +10,7 @@ from typing import Any, Literal
 from appinfra.app.fastapi.config import ApiConfig
 from pydantic import BaseModel, Field
 
-from llm_agent.core.traits.directive import Directive
+from llm_agent.core.traits.identity import Identity
 
 
 class LearnBackendConfig(BaseModel):
@@ -43,8 +43,13 @@ class AgentConfigYAML(BaseModel):
     Example:
         codebase-explorer:
           class: prompt
-          directive:
-            prompt: You are a codebase exploration agent...
+          identity: |
+            You are a codebase exploration agent.
+            You value curiosity over speed, insight over coverage.
+          method: |
+            - Start with high-level structure
+            - Read important files first
+            - Follow interesting patterns deeper
           task:
             description: Explore the codebase
           tools:
@@ -56,8 +61,11 @@ class AgentConfigYAML(BaseModel):
     class_: Literal["prompt", "programmatic"] = Field(alias="class", default="prompt")
     """Agent class: 'prompt' for YAML-only, 'programmatic' for custom Python."""
 
-    directive: Directive
-    """Agent's purpose and behavior."""
+    identity: Identity | str | None = None
+    """Agent's identity - who it is (string or Identity object)."""
+
+    method: str | None = None
+    """Agent's operational method - how it works."""
 
     task: TaskConfigYAML
     """Primary task configuration."""
@@ -67,6 +75,9 @@ class AgentConfigYAML(BaseModel):
 
     schedule: ScheduleConfigYAML | None = None
     """Optional automatic execution schedule."""
+
+    conversation: dict[str, Any] = {}
+    """Conversation settings (max_tokens, compact_threshold, etc.)."""
 
     model_config = {"populate_by_name": True}
 
