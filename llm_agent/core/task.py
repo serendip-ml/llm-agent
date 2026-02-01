@@ -2,11 +2,40 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from llm_agent.core.tools.base import ToolCallResult
+
+
+class TaskStatus(str, Enum):
+    """Status of a completed task.
+
+    The agent uses this to signal whether it reached a conclusion
+    or needs external help to continue.
+    """
+
+    DONE = "done"
+    """Agent reached a conclusion (success, impossible, or any definitive answer)."""
+
+    STUCK = "stuck"
+    """Agent cannot make progress and needs external help."""
+
+
+class TaskCompletion(BaseModel):
+    """Structured completion data from agent.
+
+    Captured when agent calls complete_task() to signal it's done
+    working on the current task.
+    """
+
+    status: TaskStatus
+    """Whether agent reached a conclusion or is stuck."""
+
+    conclusion: str
+    """What was determined, or why stuck."""
 
 
 class Task(BaseModel):
@@ -66,6 +95,9 @@ class TaskResult(BaseModel):
 
     parsed: Any | None = None
     """Validated object when output_schema was provided."""
+
+    completion: TaskCompletion | None = None
+    """Structured completion when agent called complete_task()."""
 
     tool_calls: list[ToolCallResult] = Field(default_factory=list)
     """All tool calls made during execution."""

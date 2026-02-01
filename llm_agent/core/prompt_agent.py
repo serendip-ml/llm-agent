@@ -476,10 +476,27 @@ class PromptOnlyAgent:
             success=True,
             content=final_content,
             parsed=parsed,
+            completion=self._extract_completion(exec_result.terminal_data),
             tool_calls=exec_result.tool_calls,
             iterations=exec_result.iterations,
             tokens_used=exec_result.total_tokens + extra_tokens,
         )
+
+    def _extract_completion(self, terminal_data: dict[str, Any] | None) -> Any:
+        """Extract TaskCompletion from terminal_data if valid."""
+        from llm_agent.core.task import TaskCompletion, TaskStatus
+
+        if not terminal_data:
+            return None
+        status = terminal_data.get("status")
+        conclusion = terminal_data.get("conclusion")
+        if not (status and conclusion):
+            return None
+        try:
+            return TaskCompletion(status=TaskStatus(status), conclusion=conclusion)
+        except ValueError:
+            self.lg.warning("invalid terminal status", extra={"status": status, "agent": self.name})
+            return None
 
     def _try_extract_structured(
         self, exec_result: Any, output_schema: type, llm_trait: LLMTrait
@@ -646,6 +663,7 @@ def _create_tool(
 ) -> Any:
     """Create a tool instance from type and config."""
     from llm_agent.core.tools.builtin import (
+        CompleteTaskTool,
         FileReadTool,
         FileWriteTool,
         HTTPFetchTool,
@@ -664,6 +682,8 @@ def _create_tool(
         return FileWriteTool(**tool_config)
     elif canonical_type == "http_fetch":
         return HTTPFetchTool(**tool_config)
+    elif canonical_type == "complete_task":
+        return CompleteTaskTool()
     elif canonical_type in ("remember", "recall"):
         if learn_trait is None:
             raise ValueError(f"{canonical_type} tool requires LearnTrait")

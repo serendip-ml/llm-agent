@@ -13,9 +13,10 @@ from llm_agent.core.llm import (
     StructuredOutputError,
 )
 from llm_agent.core.prompt_agent import PromptOnlyAgent, PromptOnlyAgentConfig
-from llm_agent.core.task import Task, TaskResult
+from llm_agent.core.task import Task, TaskCompletion, TaskResult, TaskStatus
 from llm_agent.core.tools import (
     BaseTool,
+    CompleteTaskTool,
     FileReadTool,
     FileWriteTool,
     HTTPFetchTool,
@@ -49,6 +50,7 @@ __all__ = [
     "BaseTool",
     "BaseTrait",
     "CompletionResult",
+    "CompleteTaskTool",
     "Directive",
     "DirectiveTrait",
     "FileReadTool",
@@ -57,18 +59,20 @@ __all__ = [
     "HTTPFetchTool",
     "HTTPConfig",
     "HTTPTrait",
-    "RecallTool",
-    "RememberTool",
     "LLMBackend",
     "LLMError",
     "Message",
     "PromptOnlyAgent",
     "PromptOnlyAgentConfig",
+    "RecallTool",
+    "RememberTool",
     "ScoredFact",
     "ShellTool",
     "StructuredOutputError",
     "Task",
+    "TaskCompletion",
     "TaskResult",
+    "TaskStatus",
     "Tool",
     "ToolCall",
     "ToolCallResult",

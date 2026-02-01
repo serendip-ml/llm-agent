@@ -1505,6 +1505,52 @@ class TestToolExecutor:
         assert result.tool_calls[0].result.success is False
         assert "Failed to parse arguments" in result.tool_calls[0].result.error
 
+    def test_run_terminal_tool_ends_early(self, mock_logger, mock_llm):
+        """Terminal tool ends execution immediately."""
+        from llm_agent.core.tools.builtin.complete import CompleteTaskTool
+
+        registry = ToolRegistry()
+        registry.register(CompleteTaskTool())
+
+        # LLM calls complete_task - should end immediately without second call
+        mock_llm.complete.return_value = CompletionResult(
+            id="resp-1",
+            content="I've figured it out.",
+            model="test",
+            tokens_used=10,
+            latency_ms=100,
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "complete_task",
+                        "arguments": json.dumps(
+                            {
+                                "status": "done",
+                                "conclusion": "The answer is 42.",
+                            }
+                        ),
+                    },
+                }
+            ],
+        )
+
+        executor = ToolExecutor(mock_logger, mock_llm, registry)
+        result = executor.run(messages=[Message(role="user", content="Solve this")])
+
+        # Should return immediately after terminal tool
+        assert result.iterations == 1
+        assert result.terminal_data == {
+            "status": "done",
+            "conclusion": "The answer is 42.",
+        }
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "complete_task"
+        assert result.tool_calls[0].result.terminal is True
+        # LLM should only be called once
+        assert mock_llm.complete.call_count == 1
+
 
 class TestRememberTool:
     """Tests for RememberTool."""
@@ -1674,3 +1720,91 @@ class TestRecallTool:
         assert "limit" in tool.parameters["properties"]
         assert "category" in tool.parameters["properties"]
         assert "query" in tool.parameters["required"]
+
+
+class TestCompleteTaskTool:
+    """Tests for CompleteTaskTool."""
+
+    def test_complete_done(self):
+        """Complete with done status."""
+        from llm_agent.core.tools.builtin.complete import CompleteTaskTool
+
+        tool = CompleteTaskTool()
+        result = tool.execute(status="done", conclusion="The answer is 42.")
+
+        assert result.success is True
+        assert result.terminal is True
+        assert result.terminal_data == {
+            "status": "done",
+            "conclusion": "The answer is 42.",
+        }
+        assert "done" in result.output
+
+    def test_complete_stuck(self):
+        """Complete with stuck status."""
+        from llm_agent.core.tools.builtin.complete import CompleteTaskTool
+
+        tool = CompleteTaskTool()
+        result = tool.execute(status="stuck", conclusion="Need database access.")
+
+        assert result.success is True
+        assert result.terminal is True
+        assert result.terminal_data == {
+            "status": "stuck",
+            "conclusion": "Need database access.",
+        }
+        assert "stuck" in result.output
+
+    def test_invalid_status(self):
+        """Invalid status returns error."""
+        from llm_agent.core.tools.builtin.complete import CompleteTaskTool
+
+        tool = CompleteTaskTool()
+        result = tool.execute(status="invalid", conclusion="test")
+
+        assert result.success is False
+        assert result.terminal is False
+        assert "Invalid status" in result.error
+
+    def test_missing_conclusion(self):
+        """Missing conclusion returns error."""
+        from llm_agent.core.tools.builtin.complete import CompleteTaskTool
+
+        tool = CompleteTaskTool()
+        result = tool.execute(status="done", conclusion="")
+
+        assert result.success is False
+        assert "required" in result.error.lower()
+
+    def test_whitespace_only_conclusion(self):
+        """Whitespace-only conclusion is rejected."""
+        from llm_agent.core.tools.builtin.complete import CompleteTaskTool
+
+        tool = CompleteTaskTool()
+        result = tool.execute(status="done", conclusion="   \n\t  ")
+
+        assert result.success is False
+        assert "required" in result.error.lower()
+
+    def test_conclusion_is_trimmed(self):
+        """Conclusion whitespace is trimmed."""
+        from llm_agent.core.tools.builtin.complete import CompleteTaskTool
+
+        tool = CompleteTaskTool()
+        result = tool.execute(status="done", conclusion="  The answer is 42.  ")
+
+        assert result.success is True
+        assert result.terminal_data["conclusion"] == "The answer is 42."
+
+    def test_tool_properties(self):
+        """Tool has correct properties."""
+        from llm_agent.core.tools.builtin.complete import CompleteTaskTool
+
+        tool = CompleteTaskTool()
+
+        assert tool.name == "complete_task"
+        assert "status" in tool.parameters["properties"]
+        assert "conclusion" in tool.parameters["properties"]
+        assert "status" in tool.parameters["required"]
+        assert "conclusion" in tool.parameters["required"]
+        assert tool.parameters["properties"]["status"]["enum"] == ["done", "stuck"]

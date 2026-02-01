@@ -2,6 +2,7 @@
 
 from llm_agent.core.tools.base import BaseTool, Tool, ToolCall, ToolCallResult, ToolResult
 from llm_agent.core.tools.builtin import (
+    CompleteTaskTool,
     FileReadTool,
     FileWriteTool,
     HTTPFetchTool,
@@ -26,6 +27,7 @@ __all__ = [
     "ToolExecutionResult",
     "ToolExecutor",
     # Built-in tools
+    "CompleteTaskTool",
     "FileReadTool",
     "FileWriteTool",
     "HTTPFetchTool",

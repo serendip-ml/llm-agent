@@ -19,6 +19,12 @@ class ToolResult(BaseModel):
     error: str | None = None
     """Error message if success is False."""
 
+    terminal: bool = False
+    """If True, this tool call ends the execution loop immediately."""
+
+    terminal_data: dict[str, Any] | None = None
+    """Data to capture when terminal=True (e.g., task completion info)."""
+
 
 class ToolCall(BaseModel):
     """A tool call from the LLM."""
