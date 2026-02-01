@@ -1,12 +1,12 @@
-"""Tests for PromptOnlyAgent."""
+"""Tests for PromptAgent."""
 
 from unittest.mock import MagicMock
 
 import pytest
 
 from llm_agent.core.prompt_agent import (
-    PromptOnlyAgent,
-    PromptOnlyAgentConfig,
+    PromptAgent,
+    PromptAgentConfig,
     _json_schema_to_pydantic,
     _substitute_variables,
 )
@@ -117,12 +117,12 @@ class TestJsonSchemaToPydantic:
         assert instance.o == {"k": "v"}
 
 
-class TestPromptOnlyAgentConfig:
-    """Tests for PromptOnlyAgentConfig."""
+class TestPromptAgentConfig:
+    """Tests for PromptAgentConfig."""
 
     def test_minimal_config(self):
         """Create config with minimal fields."""
-        config = PromptOnlyAgentConfig(
+        config = PromptAgentConfig(
             name="test-agent",
             directive=Directive(prompt="Be helpful"),
             task={"description": "Do something"},
@@ -135,7 +135,7 @@ class TestPromptOnlyAgentConfig:
 
     def test_full_config(self):
         """Create config with all fields."""
-        config = PromptOnlyAgentConfig(
+        config = PromptAgentConfig(
             name="explorer",
             directive=Directive(prompt="Explore code"),
             task={"description": "Find insights", "output_schema": {"type": "object"}},
@@ -147,8 +147,8 @@ class TestPromptOnlyAgentConfig:
         assert "shell" in config.tools
 
 
-class TestPromptOnlyAgent:
-    """Tests for PromptOnlyAgent."""
+class TestPromptAgent:
+    """Tests for PromptAgent."""
 
     @pytest.fixture
     def mock_logger(self):
@@ -168,7 +168,7 @@ class TestPromptOnlyAgent:
 
     def test_from_dict_minimal(self, mock_logger, llm_config, minimal_config_dict):
         """Create agent from minimal config dict."""
-        agent = PromptOnlyAgent.from_dict(
+        agent = PromptAgent.from_dict(
             lg=mock_logger,
             config_dict=minimal_config_dict,
             llm_config=llm_config,
@@ -183,7 +183,7 @@ class TestPromptOnlyAgent:
             "directive": {"prompt": "Explore {{CODEBASE_PATH}}"},
             "task": {"description": "Find code in {{CODEBASE_PATH}}"},
         }
-        agent = PromptOnlyAgent.from_dict(
+        agent = PromptAgent.from_dict(
             lg=mock_logger,
             config_dict=config_dict,
             llm_config=llm_config,
@@ -202,7 +202,7 @@ class TestPromptOnlyAgent:
                 "shell": {"allowed_commands": ["echo", "ls"]},
             },
         }
-        agent = PromptOnlyAgent.from_dict(
+        agent = PromptAgent.from_dict(
             lg=mock_logger,
             config_dict=config_dict,
             llm_config=llm_config,
@@ -229,7 +229,7 @@ class TestPromptOnlyAgent:
                 "recall": {},
             },
         }
-        agent = PromptOnlyAgent.from_dict(
+        agent = PromptAgent.from_dict(
             lg=mock_logger,
             config_dict=config_dict,
             llm_config=llm_config,
@@ -251,7 +251,7 @@ class TestPromptOnlyAgent:
             "tools": {"remember": {}},
         }
         with pytest.raises(ValueError, match="LearnTrait"):
-            PromptOnlyAgent.from_dict(
+            PromptAgent.from_dict(
                 lg=mock_logger,
                 config_dict=config_dict,
                 llm_config=llm_config,
@@ -259,7 +259,7 @@ class TestPromptOnlyAgent:
 
     def test_get_recent_results(self, mock_logger, llm_config, minimal_config_dict):
         """Get recent task results."""
-        agent = PromptOnlyAgent.from_dict(
+        agent = PromptAgent.from_dict(
             lg=mock_logger,
             config_dict=minimal_config_dict,
             llm_config=llm_config,
@@ -277,7 +277,7 @@ class TestPromptOnlyAgent:
 
     def test_run_once_stores_result(self, mock_logger, llm_config, minimal_config_dict):
         """run_once stores result in history."""
-        agent = PromptOnlyAgent.from_dict(
+        agent = PromptAgent.from_dict(
             lg=mock_logger,
             config_dict=minimal_config_dict,
             llm_config=llm_config,
@@ -297,7 +297,7 @@ class TestPromptOnlyAgent:
 
     def test_run_once_increments_cycle_count(self, mock_logger, llm_config, minimal_config_dict):
         """run_once increments cycle count and maintains conversation."""
-        agent = PromptOnlyAgent.from_dict(
+        agent = PromptAgent.from_dict(
             lg=mock_logger,
             config_dict=minimal_config_dict,
             llm_config=llm_config,
@@ -322,7 +322,7 @@ class TestPromptOnlyAgent:
 
     def test_reset_conversation(self, mock_logger, llm_config, minimal_config_dict):
         """reset_conversation clears state."""
-        agent = PromptOnlyAgent.from_dict(
+        agent = PromptAgent.from_dict(
             lg=mock_logger,
             config_dict=minimal_config_dict,
             llm_config=llm_config,
@@ -343,7 +343,7 @@ class TestPromptOnlyAgent:
 
     def test_ask_uses_context(self, mock_logger, llm_config, minimal_config_dict):
         """ask() includes context from results."""
-        agent = PromptOnlyAgent.from_dict(
+        agent = PromptAgent.from_dict(
             lg=mock_logger,
             config_dict=minimal_config_dict,
             llm_config=llm_config,

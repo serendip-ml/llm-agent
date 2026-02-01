@@ -1,7 +1,7 @@
 """Agent runner - runs a single agent in a subprocess.
 
 The AgentRunner is the entry point for agent subprocesses. It:
-- Creates and starts the PromptOnlyAgent
+- Creates and starts the PromptAgent
 - Runs a sync main loop processing messages from the channel
 - Handles scheduled execution if configured
 - Responds to shutdown messages cleanly
@@ -19,7 +19,7 @@ from llm_agent.runtime.transport import Message, MessageType, Response
 if TYPE_CHECKING:
     from appinfra.log import Logger
 
-    from llm_agent.core.prompt_agent import PromptOnlyAgent
+    from llm_agent.core.prompt_agent import PromptAgent
     from llm_agent.core.traits.learn import LearnTrait
     from llm_agent.core.traits.llm import LLMConfig
     from llm_agent.runtime.transport import Channel
@@ -72,7 +72,7 @@ class AgentRunner:
         self._learn_trait = learn_trait
         self._variables = variables or {}
 
-        self._agent: PromptOnlyAgent | None = None
+        self._agent: PromptAgent | None = None
         self._running = False
         self._schedule_interval: float | None = None
 
@@ -309,13 +309,13 @@ class AgentRunner:
             )
         )
 
-    def _create_agent(self) -> PromptOnlyAgent:
-        """Create PromptOnlyAgent from config."""
-        from llm_agent.core.prompt_agent import PromptOnlyAgent
+    def _create_agent(self) -> PromptAgent:
+        """Create PromptAgent from config."""
+        from llm_agent.core.prompt_agent import PromptAgent
 
         self._lg.debug("creating agent", extra={"agent": self._name})
 
-        agent = PromptOnlyAgent.from_dict(
+        agent = PromptAgent.from_dict(
             lg=self._lg,
             config_dict=self._config,
             llm_config=self._llm_config,

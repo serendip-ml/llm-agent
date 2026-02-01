@@ -12,7 +12,7 @@ from llm_agent.core.llm import (
     Message,
     StructuredOutputError,
 )
-from llm_agent.core.prompt_agent import PromptOnlyAgent, PromptOnlyAgentConfig
+from llm_agent.core.prompt_agent import PromptAgent, PromptAgentConfig
 from llm_agent.core.task import Task, TaskCompletion, TaskResult, TaskStatus
 from llm_agent.core.tools import (
     BaseTool,
@@ -62,8 +62,8 @@ __all__ = [
     "LLMBackend",
     "LLMError",
     "Message",
-    "PromptOnlyAgent",
-    "PromptOnlyAgentConfig",
+    "PromptAgent",
+    "PromptAgentConfig",
     "RecallTool",
     "RememberTool",
     "ScoredFact",

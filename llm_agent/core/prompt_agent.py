@@ -94,7 +94,7 @@ class ConversationYAMLConfig(BaseModel):
     """Minimum recent messages to preserve during compaction."""
 
 
-class PromptOnlyAgentConfig(BaseModel):
+class PromptAgentConfig(BaseModel):
     """Configuration for a prompt-only agent loaded from YAML."""
 
     name: str
@@ -158,7 +158,7 @@ def _substitute_in_dict(data: Any, variables: dict[str, str]) -> Any:
 
 def _create_agent_with_traits(
     lg: Logger,
-    config: PromptOnlyAgentConfig,
+    config: PromptAgentConfig,
     llm_config: LLMConfig,
     learn_trait: LearnTrait | None,
 ) -> Agent:
@@ -179,7 +179,7 @@ def _create_agent_with_traits(
     return agent
 
 
-def _create_conversation(config: PromptOnlyAgentConfig) -> Conversation:
+def _create_conversation(config: PromptAgentConfig) -> Conversation:
     """Create Conversation with config from agent config."""
     conv_config = ConversationConfig(
         max_tokens=config.conversation.max_tokens,
@@ -190,10 +190,10 @@ def _create_conversation(config: PromptOnlyAgentConfig) -> Conversation:
 
 
 @dataclass
-class PromptOnlyAgent:
+class PromptAgent:
     """Framework class for YAML-configured agents (Class 2).
 
-    PromptOnlyAgent wraps the core Agent class, providing:
+    PromptAgent wraps the core Agent class, providing:
     - Variable substitution ({{VAR}})
     - Automatic tool setup from config
     - Task execution with structured output
@@ -209,7 +209,7 @@ class PromptOnlyAgent:
 
         lg = Logger.create("agent")
         config_dict = {"name": "explorer", "directive": {...}, "task": {...}}
-        agent = PromptOnlyAgent.from_dict(
+        agent = PromptAgent.from_dict(
             lg=lg,
             config_dict=config_dict,
             llm_config=LLMConfig(base_url="http://localhost:8000/v1"),
@@ -224,7 +224,7 @@ class PromptOnlyAgent:
     lg: Logger = field(repr=False)
     """Logger instance."""
 
-    config: PromptOnlyAgentConfig
+    config: PromptAgentConfig
     """Loaded configuration."""
 
     agent: Agent = field(repr=False)
@@ -254,11 +254,11 @@ class PromptOnlyAgent:
         learn_trait: LearnTrait | None = None,
         variables: dict[str, str] | None = None,
         compactor: Compactor | None = None,
-    ) -> PromptOnlyAgent:
+    ) -> PromptAgent:
         """Create agent from configuration dictionary."""
         variables = variables or {}
         config_dict = _substitute_in_dict(config_dict, variables)
-        config = PromptOnlyAgentConfig(**config_dict)
+        config = PromptAgentConfig(**config_dict)
 
         agent = _create_agent_with_traits(lg, config, llm_config, learn_trait)
         conversation = _create_conversation(config)

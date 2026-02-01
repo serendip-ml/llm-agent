@@ -20,7 +20,7 @@ from llm_agent.core.conversation import (
     SlidingWindowCompactor,
     SummarizingCompactor,
 )
-from llm_agent.core.prompt_agent import PromptOnlyAgent, PromptOnlyAgentConfig
+from llm_agent.core.prompt_agent import PromptAgent, PromptAgentConfig
 from llm_agent.core.task import Task, TaskResult
 
 
@@ -34,8 +34,8 @@ __all__ = [
     "SlidingWindowCompactor",
     "SummarizingCompactor",
     # Prompt agents
-    "PromptOnlyAgent",
-    "PromptOnlyAgentConfig",
+    "PromptAgent",
+    "PromptAgentConfig",
     "Task",
     "TaskResult",
 ]
