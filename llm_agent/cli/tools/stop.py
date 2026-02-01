@@ -1,6 +1,7 @@
 """Stop tool - stop an agent."""
 
 import argparse
+import json
 from typing import Any
 
 import httpx
@@ -51,6 +52,10 @@ class StopTool(Tool):
         except httpx.HTTPStatusError as e:
             self.lg.error("server error", extra={"status": e.response.status_code})
             print(f"Error: Server returned {e.response.status_code}")
+            return None
+        except json.JSONDecodeError:
+            self.lg.error("invalid JSON response from server")
+            print("Error: Server returned invalid response")
             return None
 
     def _handle_response(self, name: str, data: dict[str, Any]) -> int:
