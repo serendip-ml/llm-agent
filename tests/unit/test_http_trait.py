@@ -1,5 +1,6 @@
 """Tests for HTTP trait and server components."""
 
+from queue import Empty
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -452,7 +453,10 @@ class TestHTTPTraitLifecycle:
     @patch("appinfra.app.fastapi.ServerBuilder")
     def test_on_start_creates_server(self, mock_builder_cls, mock_queue, mock_logger, mock_agent):
         """Verify on_start creates server with correct configuration."""
-        mock_queue.return_value = MagicMock()
+        # Configure mock queue to raise Empty on get() so IPC loop doesn't process mock requests
+        queue_instance = MagicMock()
+        queue_instance.get.side_effect = Empty
+        mock_queue.return_value = queue_instance
         mock_server = MagicMock()
         mock_server.start_subprocess.return_value = MagicMock()
 
@@ -485,7 +489,10 @@ class TestHTTPTraitLifecycle:
     @patch("appinfra.app.fastapi.ServerBuilder")
     def test_on_stop_stops_server(self, mock_builder_cls, mock_queue, mock_logger, mock_agent):
         """Verify on_stop stops server and cleans up."""
-        mock_queue.return_value = MagicMock()
+        # Configure mock queue to raise Empty on get() so IPC loop doesn't process mock requests
+        queue_instance = MagicMock()
+        queue_instance.get.side_effect = Empty
+        mock_queue.return_value = queue_instance
         mock_process = MagicMock()
         mock_server = MagicMock()
         mock_server.start_subprocess.return_value = mock_process

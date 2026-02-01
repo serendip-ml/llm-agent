@@ -208,6 +208,7 @@ class ServeTool(Tool):
     ) -> None:
         """Process IPC requests from FastAPI subprocess."""
         while not is_shutdown():
+            request = None
             try:
                 request = request_q.get(timeout=poll_timeout)
                 response = self._handle_request(core, request)
@@ -216,6 +217,15 @@ class ServeTool(Tool):
                 pass
             except Exception:
                 self.lg.exception("IPC processing error")
+                if request is not None:
+                    from llm_agent.runtime.server.protocol.base import Response
+
+                    error_resp = Response(
+                        id=getattr(request, "id", "unknown"),
+                        success=False,
+                        error="Internal server error",
+                    )
+                    response_q.put(error_resp)
 
     def _get_ipc_handlers(self) -> dict[str, Callable[[Core, Request], Response]]:
         """Get mapping of message types to handlers."""

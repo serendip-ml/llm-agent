@@ -6,6 +6,7 @@ import pytest
 
 from llm_agent import AgentConfig, CompletionResult, ConversationalAgent
 from llm_agent.core.agent import Agent
+from llm_agent.core.factory import _substitute_variables
 from llm_agent.core.task import Task
 
 
@@ -827,3 +828,104 @@ class TestConversationalAgentRecentResults:
         assert len(results) == 3
         assert results[0].content == "Result 2"
         assert results[2].content == "Result 4"
+
+
+class TestResetConversation:
+    """Tests for conversation reset functionality."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create mock Logger."""
+        return MagicMock()
+
+    def test_reset_conversation_clears_conversation(self, mock_logger):
+        """reset_conversation() clears the conversation."""
+        config = AgentConfig(name="test")
+        agent = ConversationalAgent(lg=mock_logger, config=config)
+
+        # Simulate some conversation state
+        agent._conversation = MagicMock()
+        agent._cycle_count = 5
+
+        agent.reset_conversation()
+
+        agent._conversation.clear.assert_called_once()
+        assert agent._cycle_count == 0
+
+    def test_reset_conversation_handles_none_conversation(self, mock_logger):
+        """reset_conversation() handles case where conversation is None."""
+        config = AgentConfig(name="test")
+        agent = ConversationalAgent(lg=mock_logger, config=config)
+
+        # Ensure conversation is None
+        agent._conversation = None
+        agent._cycle_count = 3
+
+        # Should not raise
+        agent.reset_conversation()
+        assert agent._cycle_count == 0
+
+
+class TestSubstituteVariables:
+    """Tests for variable substitution in templates."""
+
+    def test_substitute_from_dict(self):
+        """Variables are substituted from provided dict."""
+        text = "Hello {{NAME}}, welcome to {{PLACE}}!"
+        variables = {"NAME": "Alice", "PLACE": "Wonderland"}
+
+        result = _substitute_variables(text, variables)
+
+        assert result == "Hello Alice, welcome to Wonderland!"
+
+    def test_substitute_multiple_same_variable(self):
+        """Same variable can appear multiple times."""
+        text = "{{VAR}} and {{VAR}} again"
+        variables = {"VAR": "value"}
+
+        result = _substitute_variables(text, variables)
+
+        assert result == "value and value again"
+
+    def test_substitute_from_env(self, monkeypatch):
+        """Falls back to environment variables if not in dict."""
+        monkeypatch.setenv("TEST_ENV_VAR", "from_env")
+        text = "Value: {{TEST_ENV_VAR}}"
+
+        result = _substitute_variables(text, {})
+
+        assert result == "Value: from_env"
+
+    def test_substitute_dict_overrides_env(self, monkeypatch):
+        """Dict values take precedence over environment variables."""
+        monkeypatch.setenv("MY_VAR", "from_env")
+        text = "Value: {{MY_VAR}}"
+        variables = {"MY_VAR": "from_dict"}
+
+        result = _substitute_variables(text, variables)
+
+        assert result == "Value: from_dict"
+
+    def test_substitute_missing_raises(self):
+        """Missing variable raises ValueError."""
+        text = "Hello {{MISSING_VAR}}"
+
+        with pytest.raises(ValueError, match="Variable {{MISSING_VAR}} not found"):
+            _substitute_variables(text, {})
+
+    def test_substitute_no_variables(self):
+        """Text without variables is returned unchanged."""
+        text = "No variables here"
+
+        result = _substitute_variables(text, {})
+
+        assert result == "No variables here"
+
+    def test_substitute_preserves_partial_braces(self):
+        """Partial brace patterns are not substituted."""
+        text = "Single {BRACE} and {{VALID}}"
+        variables = {"VALID": "replaced"}
+
+        result = _substitute_variables(text, variables)
+
+        assert result == "Single {BRACE} and replaced"
