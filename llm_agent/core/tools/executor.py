@@ -377,8 +377,12 @@ class ToolExecutor:
         return result.output if result.success else f"Error: {result.error}"
 
     def _find_terminal_data(self, tool_results: list[ToolCallResult]) -> dict[str, Any] | None:
-        """Find terminal data from tool results, if any tool was terminal."""
+        """Find terminal data from tool results, if any tool was terminal.
+
+        Returns terminal_data dict if present, empty dict if terminal but no data,
+        or None if no terminal tool was called.
+        """
         for tr in tool_results:
-            if tr.result.terminal and tr.result.terminal_data is not None:
-                return tr.result.terminal_data
+            if tr.result.terminal:
+                return tr.result.terminal_data if tr.result.terminal_data is not None else {}
         return None

@@ -62,7 +62,7 @@ class CompleteTaskTool(BaseTool):
         and captures the completion data.
         """
         status = kwargs.get("status", "")
-        conclusion = kwargs.get("conclusion", "")
+        conclusion = kwargs.get("conclusion", "").strip()
 
         if status not in ("done", "stuck"):
             return ToolResult(

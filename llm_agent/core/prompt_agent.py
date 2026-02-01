@@ -462,7 +462,7 @@ class PromptOnlyAgent:
 
     def _build_task_result(self, task: Task, exec_result: Any, llm_trait: LLMTrait) -> TaskResult:
         """Build TaskResult from tool execution, with optional structured extraction."""
-        from llm_agent.core.task import TaskCompletion, TaskResult, TaskStatus
+        from llm_agent.core.task import TaskResult
 
         parsed, final_content, extra_tokens = None, exec_result.content, 0
 
@@ -472,23 +472,31 @@ class PromptOnlyAgent:
                 return extraction  # Error result
             parsed, final_content, extra_tokens = extraction
 
-        # Extract completion data if present (from complete_task tool)
-        completion = None
-        if exec_result.terminal_data is not None:
-            completion = TaskCompletion(
-                status=TaskStatus(exec_result.terminal_data["status"]),
-                conclusion=exec_result.terminal_data["conclusion"],
-            )
-
         return TaskResult(
             success=True,
             content=final_content,
             parsed=parsed,
-            completion=completion,
+            completion=self._extract_completion(exec_result.terminal_data),
             tool_calls=exec_result.tool_calls,
             iterations=exec_result.iterations,
             tokens_used=exec_result.total_tokens + extra_tokens,
         )
+
+    def _extract_completion(self, terminal_data: dict[str, Any] | None) -> Any:
+        """Extract TaskCompletion from terminal_data if valid."""
+        from llm_agent.core.task import TaskCompletion, TaskStatus
+
+        if not terminal_data:
+            return None
+        status = terminal_data.get("status")
+        conclusion = terminal_data.get("conclusion")
+        if not (status and conclusion):
+            return None
+        try:
+            return TaskCompletion(status=TaskStatus(status), conclusion=conclusion)
+        except ValueError:
+            self.lg.warning("invalid terminal status", extra={"status": status, "agent": self.name})
+            return None
 
     def _try_extract_structured(
         self, exec_result: Any, output_schema: type, llm_trait: LLMTrait

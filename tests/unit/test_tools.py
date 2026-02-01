@@ -1776,6 +1776,26 @@ class TestCompleteTaskTool:
         assert result.success is False
         assert "required" in result.error.lower()
 
+    def test_whitespace_only_conclusion(self):
+        """Whitespace-only conclusion is rejected."""
+        from llm_agent.core.tools.builtin.complete import CompleteTaskTool
+
+        tool = CompleteTaskTool()
+        result = tool.execute(status="done", conclusion="   \n\t  ")
+
+        assert result.success is False
+        assert "required" in result.error.lower()
+
+    def test_conclusion_is_trimmed(self):
+        """Conclusion whitespace is trimmed."""
+        from llm_agent.core.tools.builtin.complete import CompleteTaskTool
+
+        tool = CompleteTaskTool()
+        result = tool.execute(status="done", conclusion="  The answer is 42.  ")
+
+        assert result.success is True
+        assert result.terminal_data["conclusion"] == "The answer is 42."
+
     def test_tool_properties(self):
         """Tool has correct properties."""
         from llm_agent.core.tools.builtin.complete import CompleteTaskTool
