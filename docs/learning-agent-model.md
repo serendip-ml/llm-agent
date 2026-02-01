@@ -22,7 +22,7 @@ it should become significantly better.
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                     Single Session                          │
 │  Directive + Task → Conversation → Conclusion → Output      │

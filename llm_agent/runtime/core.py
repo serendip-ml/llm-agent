@@ -100,6 +100,7 @@ class Core:
             handle.state = transition(handle.state, AgentState.RUNNING)
             self._lg.info("agent started", extra={"agent": name})
         except Exception as e:
+            self._cleanup_failed_start(handle)
             handle.state = AgentState.ERROR
             handle.error = str(e)
             self._lg.warning("failed to start agent", extra={"agent": name, "exception": e})
@@ -275,6 +276,27 @@ class Core:
             raise RuntimeError(f"Agent not running: {name}")
 
         return handle
+
+    def _cleanup_failed_start(self, handle: AgentHandle) -> None:
+        """Clean up IPC resources after a failed start attempt.
+
+        Called when _spawn_process raises an exception. Ensures channel
+        and process are properly closed even on partial initialization.
+        """
+        import contextlib
+
+        if handle.channel is not None:
+            with contextlib.suppress(Exception):
+                handle.channel.close()
+            handle.channel = None
+
+        if handle.process is not None:
+            with contextlib.suppress(Exception):
+                handle.process.terminate()
+                handle.process.join(timeout=1.0)
+                if handle.process.is_alive():
+                    handle.process.kill()
+            handle.process = None
 
     def _spawn_process(self, handle: AgentHandle) -> None:
         """Spawn subprocess for agent."""

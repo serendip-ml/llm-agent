@@ -51,6 +51,10 @@ class StartTool(Tool):
             self.lg.error("failed to connect to server", extra={"exception": e})
             print(f"Error: Could not connect to gateway at {server}")
             return None
+        except httpx.HTTPStatusError as e:
+            self.lg.error("server error", extra={"status": e.response.status_code})
+            print(f"Error: Server returned {e.response.status_code}")
+            return None
 
     def _handle_response(self, name: str, data: dict[str, Any]) -> int:
         """Handle start response and print status."""

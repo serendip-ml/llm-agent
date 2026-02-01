@@ -2,7 +2,7 @@
 
 Provides:
 - HTTPServer: FastAPI server with subprocess IPC
-- create_app: App factory using registry
+- create_app: App factory using Core
 - Management routes for agent lifecycle
 """
 

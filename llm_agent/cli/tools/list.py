@@ -56,10 +56,11 @@ class ListTool(Tool):
         print("-" * 70)
 
         for agent in agents:
-            name = agent["name"]
-            status = agent["status"]
-            cycles = agent["cycle_count"]
-            schedule = f"{agent['schedule_interval']}s" if agent["schedule_interval"] else "-"
+            name = agent.get("name", "<unknown>")
+            status = agent.get("status", "unknown")
+            cycles = agent.get("cycle_count", 0)
+            interval = agent.get("schedule_interval")
+            schedule = f"{interval}s" if interval else "-"
             status_display = self._colorize_status(status)
             print(f"{name:<30} {status_display:<21} {cycles:<8} {schedule}")
 

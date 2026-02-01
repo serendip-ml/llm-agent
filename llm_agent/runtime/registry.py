@@ -101,14 +101,17 @@ class AgentRegistry:
 
         Raises:
             KeyError: If agent not found.
-            RuntimeError: If agent is still running.
+            RuntimeError: If agent is not in a safe state to unregister.
         """
         handle = self._agents.get(name)
         if handle is None:
             raise KeyError(f"Agent not found: {name}")
 
-        if handle.state == AgentState.RUNNING:
-            raise RuntimeError(f"Cannot unregister running agent: {name}")
+        if handle.state not in (AgentState.IDLE, AgentState.STOPPED):
+            raise RuntimeError(
+                f"Cannot unregister agent '{name}' in state {handle.state.value}. "
+                f"Agent must be IDLE or STOPPED."
+            )
 
         del self._agents[name]
         self._lg.info("agent unregistered", extra={"agent": name})

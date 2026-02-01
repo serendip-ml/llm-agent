@@ -70,8 +70,7 @@ tools:
   # recall: {}
 
 schedule:
-  #interval: 600  # Run every 10 minutes
-  interval: 10
+  interval: 600  # Run every 10 minutes
 
 conversation:
   max_tokens: 32000      # Qwen 2.5 7B default context window

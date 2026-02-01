@@ -165,7 +165,34 @@ class TestAgentRegistry:
         handle = registry.get("test")
         handle.state = AgentState.RUNNING
 
-        with pytest.raises(RuntimeError, match="Cannot unregister running agent"):
+        with pytest.raises(RuntimeError, match="Agent must be IDLE or STOPPED"):
+            registry.unregister("test")
+
+    def test_unregister_starting_raises(self, registry):
+        """unregister raises RuntimeError for agent in STARTING state."""
+        registry.register("test", {})
+        handle = registry.get("test")
+        handle.state = AgentState.STARTING
+
+        with pytest.raises(RuntimeError, match="Agent must be IDLE or STOPPED"):
+            registry.unregister("test")
+
+    def test_unregister_stopping_raises(self, registry):
+        """unregister raises RuntimeError for agent in STOPPING state."""
+        registry.register("test", {})
+        handle = registry.get("test")
+        handle.state = AgentState.STOPPING
+
+        with pytest.raises(RuntimeError, match="Agent must be IDLE or STOPPED"):
+            registry.unregister("test")
+
+    def test_unregister_error_raises(self, registry):
+        """unregister raises RuntimeError for agent in ERROR state."""
+        registry.register("test", {})
+        handle = registry.get("test")
+        handle.state = AgentState.ERROR
+
+        with pytest.raises(RuntimeError, match="Agent must be IDLE or STOPPED"):
             registry.unregister("test")
 
     def test_handles_returns_all(self, registry):

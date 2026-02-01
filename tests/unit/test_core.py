@@ -116,6 +116,30 @@ class TestCoreStart:
         assert info.status == "error"
         assert "spawn failed" in info.error
 
+    def test_start_error_cleans_up_resources(self, core, registry):
+        """Start cleans up IPC resources on spawn failure."""
+        registry.register("test", {"name": "test"})
+        handle = registry.get("test")
+
+        # Simulate partial spawn: channel created, then error
+        mock_channel = MagicMock()
+        mock_process = MagicMock()
+        mock_process.is_alive.return_value = True
+
+        def spawn_with_partial_setup(h):
+            h.channel = mock_channel
+            h.process = mock_process
+            raise RuntimeError("spawn failed after channel created")
+
+        with patch.object(core, "_spawn_process", side_effect=spawn_with_partial_setup):
+            core.start("test")
+
+        # Verify cleanup occurred
+        mock_channel.close.assert_called_once()
+        mock_process.terminate.assert_called()
+        assert handle.channel is None
+        assert handle.process is None
+
 
 class TestCoreStop:
     """Tests for Core.stop()."""
@@ -403,6 +427,67 @@ class TestCoreTerminateProcess:
 
         assert handle.process is None
         assert handle.channel is None
+
+
+class TestCoreCleanupFailedStart:
+    """Tests for Core._cleanup_failed_start()."""
+
+    def test_cleanup_with_channel_only(self, core, registry):
+        """Cleanup handles case where only channel was created."""
+        from llm_agent.runtime import AgentHandle
+
+        handle = AgentHandle(name="test", config={})
+        mock_channel = MagicMock()
+        handle.channel = mock_channel
+        handle.process = None
+
+        core._cleanup_failed_start(handle)
+
+        mock_channel.close.assert_called_once()
+        assert handle.channel is None
+
+    def test_cleanup_with_process_only(self, core, registry):
+        """Cleanup handles case where only process was created."""
+        from llm_agent.runtime import AgentHandle
+
+        handle = AgentHandle(name="test", config={})
+        handle.channel = None
+        mock_process = MagicMock()
+        mock_process.is_alive.return_value = False
+        handle.process = mock_process
+
+        core._cleanup_failed_start(handle)
+
+        mock_process.terminate.assert_called_once()
+        assert handle.process is None
+
+    def test_cleanup_handles_channel_close_error(self, core, registry):
+        """Cleanup suppresses channel close errors."""
+        from llm_agent.runtime import AgentHandle
+
+        handle = AgentHandle(name="test", config={})
+        mock_channel = MagicMock()
+        mock_channel.close.side_effect = RuntimeError("Close failed")
+        handle.channel = mock_channel
+
+        core._cleanup_failed_start(handle)  # Should not raise
+
+        assert handle.channel is None
+
+    def test_cleanup_kills_stubborn_process(self, core, registry):
+        """Cleanup kills process that won't terminate."""
+        from llm_agent.runtime import AgentHandle
+
+        handle = AgentHandle(name="test", config={})
+        mock_process = MagicMock()
+        mock_process.is_alive.return_value = True
+        handle.process = mock_process
+
+        core._cleanup_failed_start(handle)
+
+        mock_process.terminate.assert_called()
+        mock_process.kill.assert_called()
+        assert handle.process is None
 
 
 class TestCoreBuildRunnerConfig:

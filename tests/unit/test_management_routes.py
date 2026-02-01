@@ -7,10 +7,53 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from llm_agent.runtime import AgentHandle, AgentInfo, AgentState
+from llm_agent.runtime.server import create_app
 from llm_agent.runtime.server.management import create_management_routes
 
 
 pytestmark = pytest.mark.unit
+
+
+class TestCreateApp:
+    """Tests for create_app factory function."""
+
+    def test_creates_fastapi_app(self):
+        """create_app returns a FastAPI application."""
+        mock_core = MagicMock()
+        mock_core.registry.list_agents.return_value = []
+
+        app = create_app(mock_core)
+
+        assert isinstance(app, FastAPI)
+        assert app.title == "Agent Gateway"
+
+    def test_stores_core_in_state(self):
+        """create_app stores core in app.state."""
+        mock_core = MagicMock()
+
+        app = create_app(mock_core)
+
+        assert app.state.core is mock_core
+
+    def test_includes_management_routes(self):
+        """create_app includes management routes."""
+        mock_core = MagicMock()
+        mock_core.registry.list_agents.return_value = []
+
+        app = create_app(mock_core)
+        client = TestClient(app)
+
+        response = client.get("/health")
+
+        assert response.status_code == 200
+
+    def test_custom_title(self):
+        """create_app accepts custom title."""
+        mock_core = MagicMock()
+
+        app = create_app(mock_core, title="Custom Gateway")
+
+        assert app.title == "Custom Gateway"
 
 
 @pytest.fixture

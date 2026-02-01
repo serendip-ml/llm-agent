@@ -76,10 +76,13 @@ class AgentRunner:
         self._running = False
         self._schedule_interval: float | None = None
 
-        # Extract schedule interval from config
+        # Extract schedule interval from config (must be positive)
         schedule = config.get("schedule")
         if schedule and isinstance(schedule, dict):
-            self._schedule_interval = float(schedule.get("interval", 0)) or None
+            interval = schedule.get("interval")
+            if interval is not None:
+                interval_float = float(interval)
+                self._schedule_interval = interval_float if interval_float > 0 else None
 
     def run(self) -> None:
         """Main loop (blocking, sync). Called in subprocess.

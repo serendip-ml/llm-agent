@@ -1,6 +1,6 @@
 """FastAPI application factory.
 
-Creates the FastAPI app with routes configured for the agent registry.
+Creates the FastAPI app with routes configured for the runtime Core.
 """
 
 from __future__ import annotations
@@ -13,14 +13,14 @@ from llm_agent.runtime.server.management import create_management_routes
 
 
 if TYPE_CHECKING:
-    from llm_agent.runtime.registry import AgentRegistry
+    from llm_agent.runtime import Core
 
 
-def create_app(registry: AgentRegistry, title: str = "Agent Gateway") -> FastAPI:
+def create_app(core: Core, title: str = "Agent Gateway") -> FastAPI:
     """Create FastAPI application with routes.
 
     Args:
-        registry: Agent registry for managing agents.
+        core: Runtime core for managing agents.
         title: API title for OpenAPI docs.
 
     Returns:
@@ -32,8 +32,8 @@ def create_app(registry: AgentRegistry, title: str = "Agent Gateway") -> FastAPI
         version="1.0.0",
     )
 
-    # Store registry in app state for route handlers
-    app.state.registry = registry
+    # Store core in app state for route handlers
+    app.state.core = core
 
     # Include management routes
     app.include_router(create_management_routes())
