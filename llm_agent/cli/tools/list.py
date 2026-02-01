@@ -65,7 +65,7 @@ class ListTool(Tool):
             status = agent.get("status", "unknown")
             cycles = agent.get("cycle_count", 0)
             interval = agent.get("schedule_interval")
-            schedule = f"{interval}s" if interval else "-"
+            schedule = f"{interval}s" if interval is not None else "-"
             status_display = self._colorize_status(status)
             print(f"{name:<30} {status_display:<21} {cycles:<8} {schedule}")
 
