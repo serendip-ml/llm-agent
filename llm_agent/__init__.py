@@ -2,9 +2,9 @@
 
 from llm_learn.collection import ScoredFact
 
-from llm_agent.agent import Agent
-from llm_agent.config import AgentConfig
-from llm_agent.llm import (
+from llm_agent.core.agent import Agent
+from llm_agent.core.config import AgentConfig
+from llm_agent.core.llm import (
     CompletionResult,
     HTTPBackend,
     LLMBackend,
@@ -12,12 +12,15 @@ from llm_agent.llm import (
     Message,
     StructuredOutputError,
 )
-from llm_agent.task import Task, TaskResult
-from llm_agent.tools import (
+from llm_agent.core.prompt_agent import PromptOnlyAgent, PromptOnlyAgentConfig
+from llm_agent.core.task import Task, TaskResult
+from llm_agent.core.tools import (
     BaseTool,
     FileReadTool,
     FileWriteTool,
     HTTPFetchTool,
+    RecallTool,
+    RememberTool,
     ShellTool,
     Tool,
     ToolCall,
@@ -27,7 +30,7 @@ from llm_agent.tools import (
     ToolRegistry,
     ToolResult,
 )
-from llm_agent.traits import (
+from llm_agent.core.traits import (
     BaseTrait,
     Directive,
     DirectiveTrait,
@@ -54,9 +57,13 @@ __all__ = [
     "HTTPFetchTool",
     "HTTPConfig",
     "HTTPTrait",
+    "RecallTool",
+    "RememberTool",
     "LLMBackend",
     "LLMError",
     "Message",
+    "PromptOnlyAgent",
+    "PromptOnlyAgentConfig",
     "ScoredFact",
     "ShellTool",
     "StructuredOutputError",

@@ -2,7 +2,7 @@
 
 import pytest
 
-from llm_agent.llm import CompletionResult, Message
+from llm_agent.core.llm import CompletionResult, Message
 
 
 pytestmark = pytest.mark.unit

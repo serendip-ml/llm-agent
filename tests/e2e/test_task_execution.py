@@ -11,8 +11,8 @@ import pytest
 from pydantic import BaseModel
 
 from llm_agent import Agent, AgentConfig, FileReadTool, ShellTool, Task
-from llm_agent.traits.llm import LLMConfig, LLMTrait
-from llm_agent.traits.tools import ToolsTrait
+from llm_agent.core.traits.llm import LLMTrait
+from llm_agent.core.traits.tools import ToolsTrait
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]
@@ -68,11 +68,12 @@ class TestTaskExecutionE2E:
         )
         agent.add_trait(
             LLMTrait(
-                LLMConfig(
-                    base_url=LLM_BASE_URL,
-                    model=LLM_MODEL,
-                    temperature=0.0,
-                )
+                config={
+                    "type": "openai_compatible",
+                    "base_url": LLM_BASE_URL,
+                    "model": LLM_MODEL,
+                    "temperature": 0.0,
+                }
             )
         )
         agent.start()
@@ -88,11 +89,12 @@ class TestTaskExecutionE2E:
         )
         agent.add_trait(
             LLMTrait(
-                LLMConfig(
-                    base_url=LLM_BASE_URL,
-                    model=LLM_MODEL,
-                    temperature=0.0,
-                )
+                config={
+                    "type": "openai_compatible",
+                    "base_url": LLM_BASE_URL,
+                    "model": LLM_MODEL,
+                    "temperature": 0.0,
+                }
             )
         )
         tools_trait = ToolsTrait()

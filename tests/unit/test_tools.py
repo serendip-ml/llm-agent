@@ -848,8 +848,8 @@ class TestHTTPFetchTool:
         mock_response = self._mock_response(text="Hello, World!")
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
@@ -864,8 +864,8 @@ class TestHTTPFetchTool:
         mock_response = self._mock_response(text="authenticated response")
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_instance = mock_client.return_value.__enter__.return_value
@@ -889,8 +889,8 @@ class TestHTTPFetchTool:
         mock_response = self._mock_response()
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_instance = mock_client.return_value.__enter__.return_value
@@ -911,8 +911,8 @@ class TestHTTPFetchTool:
         )
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
@@ -927,8 +927,8 @@ class TestHTTPFetchTool:
         tool = HTTPFetchTool(timeout=5.0)
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.side_effect = (
@@ -944,8 +944,8 @@ class TestHTTPFetchTool:
         tool = HTTPFetchTool()
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.side_effect = httpx.ConnectError(
@@ -965,8 +965,8 @@ class TestHTTPFetchTool:
         )
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
@@ -984,8 +984,8 @@ class TestHTTPFetchTool:
         )
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
@@ -1001,8 +1001,8 @@ class TestHTTPFetchTool:
         mock_response = self._mock_response(text="x" * 200)
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
@@ -1018,8 +1018,8 @@ class TestHTTPFetchTool:
         mock_response = self._mock_response(text="github data")
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
@@ -1042,8 +1042,8 @@ class TestHTTPFetchTool:
         mock_response = self._mock_response()
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
@@ -1075,8 +1075,8 @@ class TestHTTPFetchTool:
         mock_response = self._mock_response()
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
@@ -1162,7 +1162,7 @@ class TestHTTPFetchTool:
         tool = HTTPFetchTool(allowed_domains=["localhost"], block_private_ips=False)
         mock_response = self._mock_response()
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client:
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
             result = tool.execute(url="http://localhost:8080/api")
 
@@ -1174,7 +1174,7 @@ class TestHTTPFetchTool:
         """Block requests to localhost (loopback)."""
         tool = HTTPFetchTool()
 
-        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+        with patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns:
             mock_dns.return_value = self._mock_dns_private("127.0.0.1")
             result = tool.execute(url="http://localhost/admin")
 
@@ -1185,7 +1185,7 @@ class TestHTTPFetchTool:
         """Block requests to 10.x.x.x private network."""
         tool = HTTPFetchTool()
 
-        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+        with patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns:
             mock_dns.return_value = self._mock_dns_private("10.0.0.1")
             result = tool.execute(url="http://internal-server/api")
 
@@ -1196,7 +1196,7 @@ class TestHTTPFetchTool:
         """Block requests to 172.16.x.x private network."""
         tool = HTTPFetchTool()
 
-        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+        with patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns:
             mock_dns.return_value = self._mock_dns_private("172.16.0.1")
             result = tool.execute(url="http://internal-server/api")
 
@@ -1207,7 +1207,7 @@ class TestHTTPFetchTool:
         """Block requests to 192.168.x.x private network."""
         tool = HTTPFetchTool()
 
-        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+        with patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns:
             mock_dns.return_value = self._mock_dns_private("192.168.1.1")
             result = tool.execute(url="http://router.local/admin")
 
@@ -1218,7 +1218,7 @@ class TestHTTPFetchTool:
         """Block requests to link-local addresses (169.254.x.x) including cloud metadata."""
         tool = HTTPFetchTool()
 
-        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+        with patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns:
             mock_dns.return_value = self._mock_dns_private("169.254.169.254")
             result = tool.execute(url="http://169.254.169.254/latest/meta-data/")
 
@@ -1231,7 +1231,7 @@ class TestHTTPFetchTool:
 
         tool = HTTPFetchTool()
 
-        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+        with patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns:
             mock_dns.return_value = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 0, 0, 0))]
             result = tool.execute(url="http://localhost/admin")
 
@@ -1244,8 +1244,8 @@ class TestHTTPFetchTool:
         mock_response = self._mock_response(text="public content")
 
         with (
-            patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns,
-            patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client,
+            patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns,
+            patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client,
         ):
             mock_dns.return_value = self._mock_dns_public()
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
@@ -1258,7 +1258,7 @@ class TestHTTPFetchTool:
         tool = HTTPFetchTool(block_private_ips=False)
         mock_response = self._mock_response(text="internal content")
 
-        with patch("llm_agent.tools.builtin.http.httpx.Client") as mock_client:
+        with patch("llm_agent.core.tools.builtin.http.httpx.Client") as mock_client:
             mock_client.return_value.__enter__.return_value.get.return_value = mock_response
             result = tool.execute(url="http://localhost/internal")
 
@@ -1270,7 +1270,7 @@ class TestHTTPFetchTool:
 
         tool = HTTPFetchTool()
 
-        with patch("llm_agent.tools.builtin.http.socket.getaddrinfo") as mock_dns:
+        with patch("llm_agent.core.tools.builtin.http.socket.getaddrinfo") as mock_dns:
             mock_dns.side_effect = socket.gaierror(8, "Name does not resolve")
             result = tool.execute(url="http://nonexistent.invalid/api")
 
@@ -1282,6 +1282,10 @@ class TestToolExecutor:
     """Tests for ToolExecutor."""
 
     @pytest.fixture
+    def mock_logger(self):
+        return MagicMock()
+
+    @pytest.fixture
     def mock_llm(self):
         return MagicMock()
 
@@ -1291,7 +1295,7 @@ class TestToolExecutor:
         registry.register(ShellTool())
         return registry
 
-    def test_run_no_tools_called(self, mock_llm, registry_with_shell):
+    def test_run_no_tools_called(self, mock_logger, mock_llm, registry_with_shell):
         """LLM returns final response without calling tools."""
         mock_llm.complete.return_value = CompletionResult(
             id="resp-1",
@@ -1302,14 +1306,14 @@ class TestToolExecutor:
             tool_calls=None,
         )
 
-        executor = ToolExecutor(mock_llm, registry_with_shell)
+        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell)
         result = executor.run(messages=[Message(role="user", content="Hello")])
 
         assert result.content == "Here is the answer"
         assert result.tool_calls == []
         assert result.iterations == 1
 
-    def test_run_with_tool_call(self, mock_llm, registry_with_shell):
+    def test_run_with_tool_call(self, mock_logger, mock_llm, registry_with_shell):
         """LLM calls a tool, then returns final response."""
         # First call: LLM wants to call shell tool
         mock_llm.complete.side_effect = [
@@ -1341,7 +1345,7 @@ class TestToolExecutor:
             ),
         ]
 
-        executor = ToolExecutor(mock_llm, registry_with_shell)
+        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell)
         result = executor.run(messages=[Message(role="user", content="Run echo hello")])
 
         assert result.content == "The command output was: hello"
@@ -1352,7 +1356,7 @@ class TestToolExecutor:
         assert result.iterations == 2
         assert result.total_tokens == 25
 
-    def test_run_max_iterations_exceeded(self, mock_llm, registry_with_shell):
+    def test_run_max_iterations_exceeded(self, mock_logger, mock_llm, registry_with_shell):
         """Error when max iterations exceeded."""
         # LLM keeps calling tools forever
         mock_llm.complete.return_value = CompletionResult(
@@ -1373,7 +1377,7 @@ class TestToolExecutor:
             ],
         )
 
-        executor = ToolExecutor(mock_llm, registry_with_shell)
+        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell)
 
         with pytest.raises(RuntimeError, match="exceeded.*iterations"):
             executor.run(
@@ -1381,7 +1385,7 @@ class TestToolExecutor:
                 max_iterations=3,
             )
 
-    def test_run_unknown_tool(self, mock_llm, registry_with_shell):
+    def test_run_unknown_tool(self, mock_logger, mock_llm, registry_with_shell):
         """Handle unknown tool gracefully."""
         mock_llm.complete.side_effect = [
             CompletionResult(
@@ -1411,14 +1415,14 @@ class TestToolExecutor:
             ),
         ]
 
-        executor = ToolExecutor(mock_llm, registry_with_shell)
+        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell)
         result = executor.run(messages=[Message(role="user", content="Call unknown")])
 
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].result.success is False
         assert "Unknown tool" in result.tool_calls[0].result.error
 
-    def test_run_tool_execution_error(self, mock_llm):
+    def test_run_tool_execution_error(self, mock_logger, mock_llm):
         """Handle tool execution errors gracefully."""
 
         class FailingTool(BaseTool):
@@ -1457,13 +1461,13 @@ class TestToolExecutor:
             ),
         ]
 
-        executor = ToolExecutor(mock_llm, registry)
+        executor = ToolExecutor(mock_logger, mock_llm, registry)
         result = executor.run(messages=[Message(role="user", content="Call failing")])
 
         assert result.tool_calls[0].result.success is False
         assert "Tool exploded" in result.tool_calls[0].result.error
 
-    def test_run_malformed_json_arguments(self, mock_llm, registry_with_shell):
+    def test_run_malformed_json_arguments(self, mock_logger, mock_llm, registry_with_shell):
         """Malformed JSON arguments return parse error to LLM instead of silently failing."""
         mock_llm.complete.side_effect = [
             CompletionResult(
@@ -1493,10 +1497,180 @@ class TestToolExecutor:
             ),
         ]
 
-        executor = ToolExecutor(mock_llm, registry_with_shell)
+        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell)
         result = executor.run(messages=[Message(role="user", content="Run command")])
 
         # The parse error should be returned as a tool error
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].result.success is False
         assert "Failed to parse arguments" in result.tool_calls[0].result.error
+
+
+class TestRememberTool:
+    """Tests for RememberTool."""
+
+    def test_remember_success(self):
+        """Store a fact successfully."""
+        from llm_agent.core.tools.builtin.learn import RememberTool
+
+        mock_learn_trait = MagicMock()
+        mock_learn_trait.remember.return_value = 42
+
+        tool = RememberTool(mock_learn_trait)
+        result = tool.execute(fact="User prefers Python")
+
+        assert result.success is True
+        assert "42" in result.output
+        assert "User prefers Python" in result.output
+        mock_learn_trait.remember.assert_called_once_with(
+            fact="User prefers Python",
+            category="general",
+            source="inferred",
+        )
+
+    def test_remember_with_category(self):
+        """Store a fact with category."""
+        from llm_agent.core.tools.builtin.learn import RememberTool
+
+        mock_learn_trait = MagicMock()
+        mock_learn_trait.remember.return_value = 123
+
+        tool = RememberTool(mock_learn_trait)
+        result = tool.execute(fact="Uses vim", category="preferences")
+
+        assert result.success is True
+        mock_learn_trait.remember.assert_called_once_with(
+            fact="Uses vim",
+            category="preferences",
+            source="inferred",
+        )
+
+    def test_remember_failure(self):
+        """Handle store failure gracefully."""
+        from llm_agent.core.tools.builtin.learn import RememberTool
+
+        mock_learn_trait = MagicMock()
+        mock_learn_trait.remember.side_effect = RuntimeError("Database error")
+
+        tool = RememberTool(mock_learn_trait)
+        result = tool.execute(fact="Some fact")
+
+        assert result.success is False
+        assert "Database error" in result.error
+
+    def test_tool_properties(self):
+        """Tool has correct properties."""
+        from llm_agent.core.tools.builtin.learn import RememberTool
+
+        mock_learn_trait = MagicMock()
+        tool = RememberTool(mock_learn_trait)
+
+        assert tool.name == "remember"
+        assert "fact" in tool.parameters["properties"]
+        assert "category" in tool.parameters["properties"]
+        assert "fact" in tool.parameters["required"]
+
+
+class TestRecallTool:
+    """Tests for RecallTool."""
+
+    def test_recall_with_embedder(self):
+        """Search facts using semantic search."""
+        from llm_agent.core.tools.builtin.learn import RecallTool
+
+        mock_fact = MagicMock()
+        mock_fact.content = "User prefers Python"
+        mock_fact.category = "preferences"
+
+        mock_scored_fact = MagicMock()
+        mock_scored_fact.fact = mock_fact
+        mock_scored_fact.similarity = 0.85
+
+        mock_learn_trait = MagicMock()
+        mock_learn_trait.has_embedder = True
+        mock_learn_trait.recall.return_value = [mock_scored_fact]
+
+        tool = RecallTool(mock_learn_trait)
+        result = tool.execute(query="programming language")
+
+        assert result.success is True
+        assert "User prefers Python" in result.output
+        assert "0.85" in result.output
+        mock_learn_trait.recall.assert_called_once()
+
+    def test_recall_without_embedder(self):
+        """Fall back to listing facts without semantic search."""
+        from llm_agent.core.tools.builtin.learn import RecallTool
+
+        mock_fact = MagicMock()
+        mock_fact.content = "Uses vim"
+        mock_fact.category = "tools"
+
+        mock_learn_trait = MagicMock()
+        mock_learn_trait.has_embedder = False
+        mock_learn_trait.learn.facts.list.return_value = [mock_fact]
+
+        tool = RecallTool(mock_learn_trait)
+        result = tool.execute(query="editor")
+
+        assert result.success is True
+        assert "Uses vim" in result.output
+
+    def test_recall_no_results(self):
+        """Handle no matching facts."""
+        from llm_agent.core.tools.builtin.learn import RecallTool
+
+        mock_learn_trait = MagicMock()
+        mock_learn_trait.has_embedder = True
+        mock_learn_trait.recall.return_value = []
+
+        tool = RecallTool(mock_learn_trait)
+        result = tool.execute(query="nonexistent topic")
+
+        assert result.success is True
+        assert "No matching facts" in result.output
+
+    def test_recall_with_category_filter(self):
+        """Filter recall by category."""
+        from llm_agent.core.tools.builtin.learn import RecallTool
+
+        mock_learn_trait = MagicMock()
+        mock_learn_trait.has_embedder = True
+        mock_learn_trait.recall.return_value = []
+
+        tool = RecallTool(mock_learn_trait)
+        tool.execute(query="test", category="preferences")
+
+        mock_learn_trait.recall.assert_called_once_with(
+            query="test",
+            top_k=5,
+            min_similarity=0.3,
+            categories=["preferences"],
+        )
+
+    def test_recall_failure(self):
+        """Handle recall failure gracefully."""
+        from llm_agent.core.tools.builtin.learn import RecallTool
+
+        mock_learn_trait = MagicMock()
+        mock_learn_trait.has_embedder = True
+        mock_learn_trait.recall.side_effect = RuntimeError("Embedder error")
+
+        tool = RecallTool(mock_learn_trait)
+        result = tool.execute(query="test")
+
+        assert result.success is False
+        assert "Embedder error" in result.error
+
+    def test_tool_properties(self):
+        """Tool has correct properties."""
+        from llm_agent.core.tools.builtin.learn import RecallTool
+
+        mock_learn_trait = MagicMock()
+        tool = RecallTool(mock_learn_trait)
+
+        assert tool.name == "recall"
+        assert "query" in tool.parameters["properties"]
+        assert "limit" in tool.parameters["properties"]
+        assert "category" in tool.parameters["properties"]
+        assert "query" in tool.parameters["required"]

@@ -17,7 +17,7 @@ from llm_agent import (
     ToolRegistry,
     ToolResult,
 )
-from llm_agent.llm.backend import StructuredOutputError
+from llm_agent.core.llm.backend import StructuredOutputError
 
 
 pytestmark = pytest.mark.unit
@@ -119,7 +119,7 @@ class TestAgentExecuteSimple:
 
     @pytest.fixture
     def mock_llm_trait(self):
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         trait = MagicMock(spec=LLMTrait)
         trait.complete.return_value = CompletionResult(
@@ -134,7 +134,7 @@ class TestAgentExecuteSimple:
 
     @pytest.fixture
     def agent_with_llm(self, mock_logger, mock_llm_trait):
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         agent = Agent(lg=mock_logger, config=AgentConfig(name="test", fact_injection="none"))
         agent._traits[LLMTrait] = mock_llm_trait
@@ -195,14 +195,14 @@ class TestAgentExecuteStructured:
 
     @pytest.fixture
     def mock_llm_trait(self):
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         trait = MagicMock(spec=LLMTrait)
         return trait
 
     @pytest.fixture
     def agent_with_llm(self, mock_logger, mock_llm_trait):
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         agent = Agent(lg=mock_logger, config=AgentConfig(name="test", fact_injection="none"))
         agent._traits[LLMTrait] = mock_llm_trait
@@ -257,14 +257,14 @@ class TestAgentExecuteWithTools:
 
     @pytest.fixture
     def mock_llm_trait(self):
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         trait = MagicMock(spec=LLMTrait)
         return trait
 
     @pytest.fixture
     def mock_tools_trait(self):
-        from llm_agent.traits.tools import ToolsTrait
+        from llm_agent.core.traits.tools import ToolsTrait
 
         trait = MagicMock(spec=ToolsTrait)
         registry = ToolRegistry()
@@ -275,8 +275,8 @@ class TestAgentExecuteWithTools:
 
     @pytest.fixture
     def agent_with_tools(self, mock_logger, mock_llm_trait, mock_tools_trait):
-        from llm_agent.traits.llm import LLMTrait
-        from llm_agent.traits.tools import ToolsTrait
+        from llm_agent.core.traits.llm import LLMTrait
+        from llm_agent.core.traits.tools import ToolsTrait
 
         agent = Agent(lg=mock_logger, config=AgentConfig(name="test", fact_injection="none"))
         agent._traits[LLMTrait] = mock_llm_trait
@@ -327,8 +327,8 @@ class TestAgentExecuteWithTools:
 
     def test_execute_no_tools_when_trait_empty(self, mock_logger, mock_llm_trait):
         """When ToolsTrait has no tools, use simple completion path."""
-        from llm_agent.traits.llm import LLMTrait
-        from llm_agent.traits.tools import ToolsTrait
+        from llm_agent.core.traits.llm import LLMTrait
+        from llm_agent.core.traits.tools import ToolsTrait
 
         mock_llm_trait.complete.return_value = CompletionResult(
             id="resp-1",
@@ -393,14 +393,14 @@ class TestAgentExecuteToolsAndSchema:
 
     @pytest.fixture
     def mock_llm_trait(self):
-        from llm_agent.traits.llm import LLMTrait
+        from llm_agent.core.traits.llm import LLMTrait
 
         trait = MagicMock(spec=LLMTrait)
         return trait
 
     @pytest.fixture
     def mock_tools_trait(self):
-        from llm_agent.traits.tools import ToolsTrait
+        from llm_agent.core.traits.tools import ToolsTrait
 
         trait = MagicMock(spec=ToolsTrait)
         registry = ToolRegistry()
@@ -411,8 +411,8 @@ class TestAgentExecuteToolsAndSchema:
 
     @pytest.fixture
     def agent_with_tools(self, mock_logger, mock_llm_trait, mock_tools_trait):
-        from llm_agent.traits.llm import LLMTrait
-        from llm_agent.traits.tools import ToolsTrait
+        from llm_agent.core.traits.llm import LLMTrait
+        from llm_agent.core.traits.tools import ToolsTrait
 
         agent = Agent(lg=mock_logger, config=AgentConfig(name="test", fact_injection="none"))
         agent._traits[LLMTrait] = mock_llm_trait
@@ -534,7 +534,7 @@ class TestToolsTrait:
     """Tests for ToolsTrait."""
 
     def test_register_tool(self):
-        from llm_agent.traits.tools import ToolsTrait
+        from llm_agent.core.traits.tools import ToolsTrait
 
         trait = ToolsTrait()
         tool = ShellTool()
@@ -545,7 +545,7 @@ class TestToolsTrait:
         assert trait.registry.get("shell") is tool
 
     def test_unregister_tool(self):
-        from llm_agent.traits.tools import ToolsTrait
+        from llm_agent.core.traits.tools import ToolsTrait
 
         trait = ToolsTrait()
         trait.register(ShellTool())
@@ -555,7 +555,7 @@ class TestToolsTrait:
         assert trait.has_tools() is False
 
     def test_trait_lifecycle(self):
-        from llm_agent.traits.tools import ToolsTrait
+        from llm_agent.core.traits.tools import ToolsTrait
 
         trait = ToolsTrait()
         mock_agent = MagicMock()
@@ -567,7 +567,7 @@ class TestToolsTrait:
         assert trait._agent is mock_agent
 
     def test_empty_registry(self):
-        from llm_agent.traits.tools import ToolsTrait
+        from llm_agent.core.traits.tools import ToolsTrait
 
         trait = ToolsTrait()
 

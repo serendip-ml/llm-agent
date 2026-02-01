@@ -39,6 +39,9 @@ dev = [
     "ruff>=0.5.0",
 ]
 
+[project.scripts]
+agent = "llm_agent.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/serendip-ml/llm-agent"
 Documentation = "https://github.com/serendip-ml/llm-agent#readme"

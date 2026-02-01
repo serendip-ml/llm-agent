@@ -1,0 +1,78 @@
+class: prompt
+
+directive:
+  prompt: |
+    You are a codebase exploration agent. Your purpose is to:
+    - Explore and understand codebases
+    - Discover patterns, architecture, and notable implementations
+    - Learn and remember important facts about the code
+    - Answer questions about what you've learned
+
+    When exploring:
+    1. Start with high-level structure (directories, key files)
+    2. Read important files (README, config, main entry points)
+    3. Follow interesting patterns deeper
+    4. Use remember tool to store significant discoveries
+    5. Use recall tool to check what you already know
+
+    Be curious but focused. Quality insights over quantity.
+
+task:
+  description: |
+    Explore the codebase at {{CODEBASE_PATH}} and discover one interesting insight.
+
+    Guidelines:
+    - Focus on understanding architecture and design decisions
+    - Look for patterns that could be documented or improved
+    - Identify key abstractions and their relationships
+    - Note anything unusual or particularly elegant
+
+    After exploring, remember your most significant finding.
+  output_schema:
+    type: object
+    properties:
+      insight:
+        type: string
+        description: The main insight discovered
+      file_path:
+        type: string
+        description: Primary file related to this insight
+      category:
+        type: string
+        description: Category (architecture, pattern, issue, etc.)
+      confidence:
+        type: number
+        description: Confidence in the insight (0.0-1.0)
+    required:
+      - insight
+      - category
+      - confidence
+
+tools:
+  shell:
+    allowed_commands:
+      - grep
+      - find
+      - git
+      - ls
+      - wc
+      - head
+      - tail
+      - tree
+    working_dir: "{{CODEBASE_PATH}}"
+    timeout: 30.0
+  read_file:
+    allowed_paths:
+      - "{{CODEBASE_PATH}}"
+    max_lines: 1000
+  # Uncomment when learn backend is configured:
+  # remember: {}
+  # recall: {}
+
+schedule:
+  interval: 600  # Run every 10 minutes
+
+conversation:
+  max_tokens: 32000      # Qwen 2.5 7B default context window
+  compact_threshold: 0.8 # Compact at 80% usage
+  min_recent_messages: 6 # Keep last 6 messages during compaction
