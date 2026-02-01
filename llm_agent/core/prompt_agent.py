@@ -462,7 +462,7 @@ class PromptOnlyAgent:
 
     def _build_task_result(self, task: Task, exec_result: Any, llm_trait: LLMTrait) -> TaskResult:
         """Build TaskResult from tool execution, with optional structured extraction."""
-        from llm_agent.core.task import TaskResult
+        from llm_agent.core.task import TaskCompletion, TaskResult, TaskStatus
 
         parsed, final_content, extra_tokens = None, exec_result.content, 0
 
@@ -472,10 +472,19 @@ class PromptOnlyAgent:
                 return extraction  # Error result
             parsed, final_content, extra_tokens = extraction
 
+        # Extract completion data if present (from complete_task tool)
+        completion = None
+        if exec_result.terminal_data is not None:
+            completion = TaskCompletion(
+                status=TaskStatus(exec_result.terminal_data["status"]),
+                conclusion=exec_result.terminal_data["conclusion"],
+            )
+
         return TaskResult(
             success=True,
             content=final_content,
             parsed=parsed,
+            completion=completion,
             tool_calls=exec_result.tool_calls,
             iterations=exec_result.iterations,
             tokens_used=exec_result.total_tokens + extra_tokens,
@@ -646,6 +655,7 @@ def _create_tool(
 ) -> Any:
     """Create a tool instance from type and config."""
     from llm_agent.core.tools.builtin import (
+        CompleteTaskTool,
         FileReadTool,
         FileWriteTool,
         HTTPFetchTool,
@@ -664,6 +674,8 @@ def _create_tool(
         return FileWriteTool(**tool_config)
     elif canonical_type == "http_fetch":
         return HTTPFetchTool(**tool_config)
+    elif canonical_type == "complete_task":
+        return CompleteTaskTool()
     elif canonical_type in ("remember", "recall"):
         if learn_trait is None:
             raise ValueError(f"{canonical_type} tool requires LearnTrait")

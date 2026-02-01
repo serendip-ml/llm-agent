@@ -33,6 +33,9 @@ class ToolExecutionResult(BaseModel):
     total_tokens: int
     """Total tokens used across all iterations."""
 
+    terminal_data: dict[str, Any] | None = None
+    """Data from terminal tool call (e.g., task completion info)."""
+
 
 class ToolExecutor:
     """Executes tool calls in a loop with the LLM.
@@ -96,28 +99,68 @@ class ToolExecutor:
         tools = self._registry.to_openai_tools() or None
 
         for iteration in range(max_iterations):
-            self._lg.debug(
-                "tool loop iteration",
-                extra={"iteration": iteration + 1, "max": max_iterations},
+            iteration_result, tokens = self._run_iteration(
+                working_messages, all_tool_calls, total_tokens, iteration, temperature, tools
             )
-
-            result = self._call_llm(working_messages, temperature, tools)
-            total_tokens += result.tokens_used
-            tool_calls, parse_errors = self._extract_tool_calls(result)
-
-            if not tool_calls:
-                self._lg.debug(
-                    "tool loop finished",
-                    extra={"iterations": iteration + 1, "total_tokens": total_tokens},
-                )
-                return self._build_final_result(result, all_tool_calls, iteration + 1, total_tokens)
-
-            tool_results = self._execute_tool_calls(tool_calls, parse_errors)
-            all_tool_calls.extend(tool_results)
-            self._append_tool_messages(working_messages, result, tool_calls, tool_results)
+            total_tokens += tokens
+            if iteration_result is not None:
+                return iteration_result
 
         raise RuntimeError(
             f"Tool execution exceeded {max_iterations} iterations without final response"
+        )
+
+    def _run_iteration(
+        self,
+        working_messages: list[Message],
+        all_tool_calls: list[ToolCallResult],
+        total_tokens: int,
+        iteration: int,
+        temperature: float,
+        tools: list[dict[str, Any]] | None,
+    ) -> tuple[ToolExecutionResult | None, int]:
+        """Run a single iteration. Returns (result, tokens_used). Result is None to continue."""
+        self._lg.debug("tool loop iteration", extra={"iteration": iteration + 1})
+
+        result = self._call_llm(working_messages, temperature, tools)
+        tokens_used = result.tokens_used
+        new_total = total_tokens + tokens_used
+        tool_calls, parse_errors = self._extract_tool_calls(result)
+
+        if not tool_calls:
+            self._lg.debug("tool loop finished", extra={"iterations": iteration + 1})
+            final = self._build_final_result(result, all_tool_calls, iteration + 1, new_total)
+            return final, tokens_used
+
+        tool_results = self._execute_tool_calls(tool_calls, parse_errors)
+        all_tool_calls.extend(tool_results)
+
+        terminal_data = self._find_terminal_data(tool_results)
+        if terminal_data is not None:
+            self._lg.debug("terminal tool called", extra={"iterations": iteration + 1})
+            terminal = self._build_terminal_result(
+                result, all_tool_calls, iteration + 1, new_total, terminal_data
+            )
+            return terminal, tokens_used
+
+        self._append_tool_messages(working_messages, result, tool_calls, tool_results)
+        return None, tokens_used
+
+    def _build_terminal_result(
+        self,
+        result: CompletionResult,
+        tool_calls: list[ToolCallResult],
+        iterations: int,
+        total_tokens: int,
+        terminal_data: dict[str, Any],
+    ) -> ToolExecutionResult:
+        """Build result when terminal tool was called."""
+        return ToolExecutionResult(
+            content=result.content,
+            tool_calls=tool_calls,
+            iterations=iterations,
+            total_tokens=total_tokens,
+            terminal_data=terminal_data,
         )
 
     def _call_llm(
@@ -332,3 +375,10 @@ class ToolExecutor:
     def _format_tool_result(self, result: ToolResult) -> str:
         """Format tool result for LLM consumption."""
         return result.output if result.success else f"Error: {result.error}"
+
+    def _find_terminal_data(self, tool_results: list[ToolCallResult]) -> dict[str, Any] | None:
+        """Find terminal data from tool results, if any tool was terminal."""
+        for tr in tool_results:
+            if tr.result.terminal and tr.result.terminal_data is not None:
+                return tr.result.terminal_data
+        return None
