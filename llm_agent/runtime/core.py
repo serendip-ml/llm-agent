@@ -9,7 +9,6 @@ Core is the runtime orchestrator that manages:
 from __future__ import annotations
 
 import multiprocessing as mp
-from dataclasses import asdict
 from datetime import UTC, datetime
 from multiprocessing import Queue
 from typing import TYPE_CHECKING, Any, cast
@@ -290,7 +289,7 @@ class Core:
                 handle.name,
                 self._build_runner_config(handle),
                 subprocess_channel,
-                asdict(self._llm_config),
+                self._llm_config,  # Already a dict, no need for asdict()
                 self._variables,
                 self._log_queue,
             ),
@@ -350,18 +349,16 @@ def _subprocess_entry(
     """
     from appinfra.log import Logger
 
-    from llm_agent.core.traits.llm import LLMConfig
     from llm_agent.runtime.runner import AgentRunner
 
     lg = Logger.with_queue(log_queue, name=f"agent.{name}", level="debug")
-    llm_config = LLMConfig(**llm_config_dict)
 
     runner = AgentRunner(
         name=name,
         config=config,
         channel=channel,
         lg=lg,
-        llm_config=llm_config,
+        llm_config=llm_config_dict,
         learn_trait=None,  # LearnTrait can't be passed across processes
         variables=variables,
     )

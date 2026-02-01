@@ -9,7 +9,7 @@ import pytest
 from pydantic import BaseModel
 
 from llm_agent.core.llm.types import Message
-from llm_agent.core.traits.llm import LLMConfig, LLMTrait
+from llm_agent.core.traits.llm import LLMTrait
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]
@@ -55,11 +55,12 @@ class TestStructuredOutputE2E:
     def trait(self):
         """Create LLMTrait connected to LLM server."""
         trait = LLMTrait(
-            LLMConfig(
-                base_url=LLM_BASE_URL,
-                model=LLM_MODEL,
-                temperature=0.0,
-            )
+            config={
+                "type": "openai_compatible",
+                "base_url": LLM_BASE_URL,
+                "model": LLM_MODEL,
+                "temperature": 0.0,
+            }
         )
         trait.on_start()
         yield trait

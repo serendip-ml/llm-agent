@@ -28,10 +28,8 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import yaml
 from pydantic import BaseModel
 
 from llm_agent.core.agent import Agent
@@ -196,7 +194,6 @@ class PromptOnlyAgent:
     """Framework class for YAML-configured agents (Class 2).
 
     PromptOnlyAgent wraps the core Agent class, providing:
-    - YAML-based configuration loading
     - Variable substitution ({{VAR}})
     - Automatic tool setup from config
     - Task execution with structured output
@@ -211,9 +208,10 @@ class PromptOnlyAgent:
         from appinfra.log import Logger
 
         lg = Logger.create("agent")
-        agent = PromptOnlyAgent.from_yaml(
+        config_dict = {"name": "explorer", "directive": {...}, "task": {...}}
+        agent = PromptOnlyAgent.from_dict(
             lg=lg,
-            path="etc/agents/explorer.yaml",
+            config_dict=config_dict,
             llm_config=LLMConfig(base_url="http://localhost:8000/v1"),
             variables={"CODEBASE_PATH": "/path/to/code"},
         )
@@ -246,49 +244,6 @@ class PromptOnlyAgent:
 
     _cycle_count: int = field(default=0, repr=False)
     """Number of run_once() cycles completed."""
-
-    @classmethod
-    def from_yaml(
-        cls,
-        lg: Logger,
-        path: str | Path,
-        llm_config: LLMConfig,
-        learn_trait: LearnTrait | None = None,
-        variables: dict[str, str] | None = None,
-        compactor: Compactor | None = None,
-    ) -> PromptOnlyAgent:
-        """Load agent configuration from YAML file.
-
-        Args:
-            lg: Logger instance.
-            path: Path to YAML config file.
-            llm_config: LLM backend configuration.
-            learn_trait: Optional LearnTrait for memory (enables remember/recall tools).
-            variables: Variable substitutions for {{VAR}} patterns.
-            compactor: Optional custom compactor (default: SlidingWindowCompactor).
-
-        Returns:
-            Configured PromptOnlyAgent ready to start.
-
-        Raises:
-            FileNotFoundError: If config file doesn't exist.
-            ValueError: If config is invalid or variable substitution fails.
-        """
-        path = Path(path)
-        if not path.exists():
-            raise FileNotFoundError(f"Config file not found: {path}")
-
-        with open(path) as f:
-            raw_config = yaml.safe_load(f)
-
-        return cls.from_dict(
-            lg=lg,
-            config_dict=raw_config,
-            llm_config=llm_config,
-            learn_trait=learn_trait,
-            variables=variables,
-            compactor=compactor,
-        )
 
     @classmethod
     def from_dict(

@@ -257,36 +257,6 @@ class TestPromptOnlyAgent:
                 llm_config=llm_config,
             )
 
-    def test_from_yaml(self, mock_logger, llm_config, tmp_path):
-        """Load config from YAML file."""
-        yaml_content = """
-name: yaml-agent
-directive:
-  prompt: |
-    You are loaded from YAML.
-task:
-  description: Do YAML things
-"""
-        config_file = tmp_path / "agent.yaml"
-        config_file.write_text(yaml_content)
-
-        agent = PromptOnlyAgent.from_yaml(
-            lg=mock_logger,
-            path=config_file,
-            llm_config=llm_config,
-        )
-        assert agent.name == "yaml-agent"
-        assert "YAML" in agent.config.directive.prompt
-
-    def test_from_yaml_not_found(self, mock_logger, llm_config):
-        """Raise error for missing file."""
-        with pytest.raises(FileNotFoundError):
-            PromptOnlyAgent.from_yaml(
-                lg=mock_logger,
-                path="/nonexistent/path.yaml",
-                llm_config=llm_config,
-            )
-
     def test_get_recent_results(self, mock_logger, llm_config, minimal_config_dict):
         """Get recent task results."""
         agent = PromptOnlyAgent.from_dict(

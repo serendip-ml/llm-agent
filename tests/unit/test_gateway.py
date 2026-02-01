@@ -51,7 +51,7 @@ class TestAgentServerConfig:
         config = AgentServerConfig.from_dict(raw)
 
         assert config.server.port == 9000
-        assert config.llm.base_url == "http://localhost:8000/v1"
+        assert config.llm["base_url"] == "http://localhost:8000/v1"
         assert "test-agent" in config.agents
         assert config.agents["test-agent"].directive.prompt == "Be helpful"
 

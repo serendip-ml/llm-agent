@@ -12,7 +12,7 @@ from llm_learn.core import Database
 from llm_learn.inference import ContextBuilder, Embedder
 
 from llm_agent.core.llm.types import CompletionResult
-from llm_agent.core.traits.llm import LLMConfig
+from llm_agent.core.traits.llm import LLMConfig, _resolve_llm_defaults
 
 
 if TYPE_CHECKING:
@@ -87,6 +87,7 @@ class LearnTrait:
     _embedder: Embedder | None = field(default=None, repr=False, compare=False)
     _context: ContextBuilder | None = field(default=None, repr=False, compare=False)
     _client: LLMClient | None = field(default=None, repr=False, compare=False)
+    _llm_defaults: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     def attach(self, agent: Agent) -> None:
         """Attach trait to agent.
@@ -109,12 +110,8 @@ class LearnTrait:
         self._context = ContextBuilder(self._learn.facts)
 
         # Create LLM client for completions
-        self._client = LLMClient.openai(
-            base_url=self.config.llm.base_url,
-            model=self.config.llm.model,
-            api_key=self.config.llm.api_key,
-            timeout=self.config.llm.timeout,
-        )
+        self._client = LLMClient.from_config(self.config.llm)
+        self._llm_defaults = _resolve_llm_defaults(self.config.llm)
 
         # Create embedder if URL provided
         if self.config.embedder_url:
@@ -205,9 +202,13 @@ class LearnTrait:
         response = self.client.chat_full(
             messages=[{"role": "user", "content": query}],
             system=prompt if prompt else None,
-            model=self.config.llm.model,
-            temperature=temperature if temperature is not None else self.config.llm.temperature,
-            max_tokens=max_tokens if max_tokens is not None else self.config.llm.max_tokens,
+            model=self._llm_defaults.get("model"),
+            temperature=temperature
+            if temperature is not None
+            else self._llm_defaults.get("temperature", 0.7),
+            max_tokens=max_tokens
+            if max_tokens is not None
+            else self._llm_defaults.get("max_tokens"),
         )
 
         return self._response_to_result(response)
@@ -250,7 +251,7 @@ class LearnTrait:
         return CompletionResult(
             id=str(uuid.uuid4()),
             content=response.content,
-            model=response.model or self.config.llm.model,
+            model=response.model or self._llm_defaults.get("model", "unknown"),
             tokens_used=tokens_used,
             latency_ms=0,
             tool_calls=None,

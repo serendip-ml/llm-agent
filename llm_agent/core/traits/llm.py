@@ -17,25 +17,49 @@ if TYPE_CHECKING:
     from llm_agent.core.agent import Agent
 
 
-@dataclass
-class LLMConfig:
-    """Configuration for LLM trait.
+# Type alias for LLM configuration dict
+LLMConfig = dict[str, Any]
+"""LLM configuration dictionary.
 
-    Attributes:
-        base_url: Base URL for OpenAI-compatible API.
-        model: Model name to use.
-        api_key: Optional API key for authenticated APIs.
-        timeout: Request timeout in seconds.
-        temperature: Default sampling temperature.
-        max_tokens: Default max tokens (None = model default).
+Supports multi-backend format (see llm-infer LLMClient.from_config):
+
+    default: local
+    backends:
+      local:
+        type: openai_compatible
+        base_url: http://localhost:8000/v1
+        model: qwen2.5-72b
+      anthropic:
+        type: anthropic
+        model: claude-sonnet-4-20250514
+"""
+
+
+def _resolve_llm_defaults(config: LLMConfig) -> dict[str, Any]:
+    """Extract default values from LLM config.
+
+    Returns dict with model, temperature, max_tokens from the selected backend.
     """
+    backends = config.get("backends", {})
+    default_name = config.get("default")
 
-    base_url: str = "http://localhost:8000/v1"
-    model: str = "default"
-    api_key: str | None = None
-    timeout: float = 120.0
-    temperature: float = 0.7
-    max_tokens: int | None = None
+    if not backends:
+        # Single backend config (no "backends" wrapper)
+        return {
+            "model": config.get("model", "default"),
+            "temperature": config.get("temperature", 0.7),
+            "max_tokens": config.get("max_tokens"),
+        }
+
+    if not default_name:
+        default_name = next(iter(backends.keys()))
+
+    backend_config = backends.get(default_name, {})
+    return {
+        "model": backend_config.get("model", "default"),
+        "temperature": backend_config.get("temperature", 0.7),
+        "max_tokens": backend_config.get("max_tokens"),
+    }
 
 
 @dataclass
@@ -46,13 +70,16 @@ class LLMTrait:
     to agents. Uses sync API for compatibility with current agent architecture.
 
     Example:
-        from llm_agent.core.traits import LLMTrait, LLMConfig
+        from llm_agent.core.traits import LLMTrait
 
+        llm_config = {
+            "default": "local",
+            "backends": {
+                "local": {"type": "openai_compatible", "base_url": "...", "model": "..."}
+            }
+        }
         agent = Agent(lg, config)
-        agent.add_trait(LLMTrait(LLMConfig(
-            base_url="http://localhost:8000/v1",
-            model="qwen2.5-72b",
-        )))
+        agent.add_trait(LLMTrait(llm_config))
 
         # Agent can now use complete()
         result = agent.complete("What is 2+2?")
@@ -63,10 +90,11 @@ class LLMTrait:
         - on_stop(): Closes LLMClient
     """
 
-    config: LLMConfig = field(default_factory=LLMConfig)
+    config: LLMConfig = field(default_factory=dict)
 
     _agent: Agent | None = field(default=None, repr=False, compare=False)
     _client: LLMClient | None = field(default=None, repr=False, compare=False)
+    _defaults: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     def attach(self, agent: Agent) -> None:
         """Attach trait to agent.
@@ -78,12 +106,8 @@ class LLMTrait:
 
     def on_start(self) -> None:
         """Create LLM client on agent start."""
-        self._client = LLMClient.openai(
-            base_url=self.config.base_url,
-            model=self.config.model,
-            api_key=self.config.api_key,
-            timeout=self.config.timeout,
-        )
+        self._client = LLMClient.from_config(self.config)
+        self._defaults = _resolve_llm_defaults(self.config)
 
     def on_stop(self) -> None:
         """Close LLM client on agent stop."""
@@ -143,9 +167,11 @@ class LLMTrait:
 
         response = self.client.chat_full(
             messages=api_messages,
-            model=model or self.config.model,
-            temperature=temperature if temperature is not None else self.config.temperature,
-            max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
+            model=model or self._defaults.get("model"),
+            temperature=temperature
+            if temperature is not None
+            else self._defaults.get("temperature", 0.7),
+            max_tokens=max_tokens if max_tokens is not None else self._defaults.get("max_tokens"),
             tools=tools,
             extra_body=extra_body,
         )
@@ -180,7 +206,7 @@ class LLMTrait:
         return CompletionResult(
             id=str(uuid.uuid4()),
             content=response.content,
-            model=response.model or self.config.model,
+            model=response.model or self._defaults.get("model", "unknown"),
             tokens_used=tokens_used,
             latency_ms=0,
             tool_calls=tool_calls,

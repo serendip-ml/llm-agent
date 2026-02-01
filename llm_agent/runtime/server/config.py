@@ -11,7 +11,6 @@ from appinfra.app.fastapi.config import ApiConfig
 from pydantic import BaseModel, Field
 
 from llm_agent.core.traits.directive import Directive
-from llm_agent.core.traits.llm import LLMConfig
 
 
 class LearnBackendConfig(BaseModel):
@@ -82,9 +81,7 @@ class AgentServerConfig(BaseModel):
           port: 8080
           uvicorn: !include './uvicorn.yaml'
 
-        llm:
-          base_url: http://localhost:8000/v1
-          model: default
+        llm: !include './llm.yaml'
 
         learn:
           profile_id: 1
@@ -101,8 +98,8 @@ class AgentServerConfig(BaseModel):
     server: ApiConfig
     """HTTP server settings (appinfra ApiConfig)."""
 
-    llm: LLMConfig
-    """LLM backend for agent completions."""
+    llm: dict[str, Any]
+    """LLM backend configuration (see llm-infer LLMClient.from_config)."""
 
     learn: LearnBackendConfig | None = None
     """Optional learn backend for memory/feedback."""
@@ -138,7 +135,7 @@ class AgentServerConfig(BaseModel):
 
         return cls(
             server=server,
-            llm=LLMConfig(**raw.get("llm", {})),
+            llm=raw.get("llm", {}),
             learn=raw.get("learn"),
             agents=raw.get("agents", {}),
         )
