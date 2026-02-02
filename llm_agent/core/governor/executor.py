@@ -133,7 +133,7 @@ class DecisionExecutor:
         terminal_data = self._find_terminal_data(tool_results)
         if terminal_data is not None:
             self._lg.debug("terminal tool called")
-            return interpreted.raw.content, 0, terminal_data
+            return interpreted.raw.content or "", 0, terminal_data
 
         return None, 0, None
 
@@ -220,7 +220,7 @@ class DecisionExecutor:
         )
 
         self._lg.debug("terminal tool accepted")
-        return interpreted.raw.content, 0, terminal_data or {}
+        return interpreted.raw.content or "", 0, terminal_data or {}
 
     def _accept_early_completion(
         self,
@@ -240,7 +240,7 @@ class DecisionExecutor:
             working_messages, interpreted.raw, list(interpreted.tool_calls), tool_results
         )
 
-        return interpreted.raw.content, extra_tokens, terminal_data or {}
+        return interpreted.raw.content or "", extra_tokens, terminal_data or {}
 
     def _continue_after_early_prompt(
         self,
@@ -283,7 +283,7 @@ class DecisionExecutor:
         )
 
         if terminal_data is not None:
-            return interpreted.raw.content, extra_tokens, terminal_data
+            return interpreted.raw.content or "", extra_tokens, terminal_data
 
         return None, extra_tokens, None
 
