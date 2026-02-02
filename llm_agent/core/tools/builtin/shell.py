@@ -48,6 +48,7 @@ class ShellTool(BaseTool):
     name = "shell"
     description = (
         "Execute a shell command and return its output. "
+        "Use for: git operations, file listing, grep searches, running scripts. "
         "Commands run in a bash shell with the configured working directory."
     )
     parameters: dict[str, Any] = {
@@ -81,14 +82,6 @@ class ShellTool(BaseTool):
         self._timeout = timeout
         self._max_output_chars = max_output_chars
         self._allowed_commands = allowed_commands
-
-        if allowed_commands:
-            commands = ", ".join(allowed_commands)
-            self.description = (
-                f"{ShellTool.description} "
-                f"Only these commands are allowed: {commands}. "
-                "Use other tools (e.g., read_file) for operations not covered by these commands."
-            )
 
     def execute(self, **kwargs: Any) -> ToolResult:
         """Execute a shell command.

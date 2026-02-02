@@ -132,6 +132,9 @@ class DefaultGovernorPolicy:
                 # This matches current behavior of processing all tools in batch
                 return PolicyDecision(decision=Decision.EXECUTE_TOOLS)
 
+            case _:
+                raise ValueError(f"Unhandled response event: {response.event}")
+
     def _check_approaching_limits(
         self,
         context: GovernorContext,

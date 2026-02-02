@@ -70,7 +70,7 @@ class DecisionExecutor:
         all_tool_calls: list[ToolCallResult],
         tools: list[dict[str, Any]] | None,
         context: GovernorContext,
-    ) -> tuple[str, int, dict[str, Any] | None] | None:
+    ) -> tuple[str | None, int, dict[str, Any] | None]:
         """Execute a policy decision.
 
         Args:
@@ -82,7 +82,10 @@ class DecisionExecutor:
             context: Current execution context.
 
         Returns:
-            None to continue loop, or (content, extra_tokens, terminal_data) to finish.
+            Tuple of (content, extra_tokens, terminal_data).
+            - content=None means continue loop
+            - content=str means finish with that content
+            - extra_tokens always tracks tokens used by confirmation LLM calls
         """
         match decision.decision:
             case Decision.EXECUTE_TOOLS:
@@ -103,17 +106,20 @@ class DecisionExecutor:
 
             case Decision.INJECT_AND_CONTINUE:
                 self._inject_message(decision.inject_message, working_messages)
-                return None
+                return None, 0, None
 
             case Decision.ABORT:
                 raise RuntimeError(decision.abort_reason)
+
+            case _:
+                raise ValueError(f"Unhandled decision type: {decision.decision}")
 
     def _execute_tools(
         self,
         interpreted: InterpretedResponse,
         working_messages: list[Message],
         all_tool_calls: list[ToolCallResult],
-    ) -> tuple[str, int, dict[str, Any] | None] | None:
+    ) -> tuple[str | None, int, dict[str, Any] | None]:
         """Execute tools and check for terminal."""
         tool_results = self._tool_executor.execute(
             list(interpreted.tool_calls), interpreted.parse_errors
@@ -129,7 +135,7 @@ class DecisionExecutor:
             self._lg.debug("terminal tool called")
             return interpreted.raw.content, 0, terminal_data
 
-        return None
+        return None, 0, None
 
     def _handle_confirm_completion(
         self,
@@ -138,7 +144,7 @@ class DecisionExecutor:
         all_tool_calls: list[ToolCallResult],
         tools: list[dict[str, Any]] | None,
         decision: PolicyDecision,
-    ) -> tuple[str, int, dict[str, Any] | None] | None:
+    ) -> tuple[str | None, int, dict[str, Any] | None]:
         """Handle CONFIRM_COMPLETION decision (no tools called)."""
         # Add assistant response and confirmation prompt
         working_messages.append(Message(role="assistant", content=interpreted.raw.content or ""))
@@ -154,7 +160,7 @@ class DecisionExecutor:
             working_messages.pop()  # Remove confirmation prompt
             working_messages.pop()  # Remove assistant echo
             self._lg.trace("completion confirmed")
-            return interpreted.raw.content, 0, None
+            return interpreted.raw.content, confirm_result.tokens_used, None
 
         # LLM called tools - execute them
         return self._execute_confirmation_tools(
@@ -168,7 +174,7 @@ class DecisionExecutor:
         all_tool_calls: list[ToolCallResult],
         tools: list[dict[str, Any]] | None,
         decision: PolicyDecision,
-    ) -> tuple[str, int, dict[str, Any] | None] | None:
+    ) -> tuple[str | None, int, dict[str, Any] | None]:
         """Handle CONFIRM_EARLY decision (terminal without prior work)."""
         self._lg.debug("early completion attempt, requesting confirmation")
 
@@ -186,7 +192,7 @@ class DecisionExecutor:
             # No tools after prompt - continue loop
             self._lg.debug("no tools after early completion prompt, continuing")
             working_messages.append(Message(role="assistant", content=confirm_result.content or ""))
-            return None
+            return None, confirm_result.tokens_used, None
 
         # Check if LLM confirmed by calling terminal again
         if confirm_interpreted.terminal_call is not None:
@@ -195,10 +201,8 @@ class DecisionExecutor:
             )
 
         # LLM called work tools - execute and continue
-        self._continue_after_early_prompt(
-            confirm_interpreted, working_messages, all_tool_calls, confirm_result.tokens_used
-        )
-        return None
+        self._continue_after_early_prompt(confirm_interpreted, working_messages, all_tool_calls)
+        return None, confirm_result.tokens_used, None
 
     def _accept_terminal(
         self,
@@ -244,7 +248,6 @@ class DecisionExecutor:
         interpreted: InterpretedResponse,
         working_messages: list[Message],
         all_tool_calls: list[ToolCallResult],
-        extra_tokens: int,
     ) -> None:
         """Execute work tools called after early completion prompt and continue."""
         self._lg.debug(
@@ -265,7 +268,7 @@ class DecisionExecutor:
         working_messages: list[Message],
         all_tool_calls: list[ToolCallResult],
         extra_tokens: int,
-    ) -> tuple[str, int, dict[str, Any] | None] | None:
+    ) -> tuple[str | None, int, dict[str, Any] | None]:
         """Execute tools called after confirmation prompt."""
         self._lg.debug(
             "tools called after confirmation",
@@ -283,7 +286,7 @@ class DecisionExecutor:
         if terminal_data is not None:
             return interpreted.raw.content, extra_tokens, terminal_data
 
-        return None
+        return None, extra_tokens, None
 
     def _inject_message(self, message: str | None, working_messages: list[Message]) -> None:
         """Inject a user message into the conversation."""

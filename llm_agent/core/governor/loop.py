@@ -151,12 +151,13 @@ class GovernorLoop:
             interpreted = self._interpreter.interpret(result, context.has_prior_work)
             decision = self._policy.decide(interpreted, context)
 
-            loop_result = self._executor.execute(
+            content, extra_tokens, terminal_data = self._executor.execute(
                 decision, interpreted, state.messages, state.tool_calls, state.tools, context
             )
+            state.total_tokens += extra_tokens
 
-            if loop_result is not None:
-                return self._build_result(state, loop_result)
+            if content is not None:
+                return self._build_result(state, content, terminal_data)
 
             if decision.decision == Decision.INJECT_AND_CONTINUE:
                 state.wrap_up_injected = True
@@ -176,16 +177,16 @@ class GovernorLoop:
     def _build_result(
         self,
         state: _LoopState,
-        loop_result: tuple[str, int, dict[str, Any] | None],
+        content: str,
+        terminal_data: dict[str, Any] | None,
     ) -> GovernorResult:
         """Build final result from loop state and completion data."""
-        content, extra_tokens, terminal_data = loop_result
         return GovernorResult(
             content=content,
             tool_calls=state.tool_calls,
             messages=state.messages,
             iterations=state.iteration + 1,
-            total_tokens=state.total_tokens + extra_tokens,
+            total_tokens=state.total_tokens,
             terminal_data=terminal_data,
         )
 

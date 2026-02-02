@@ -339,7 +339,7 @@ class TestAgentExecuteWithTools:
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].name == "shell"
         assert result.iterations == 2
-        assert result.tokens_used == 25  # Confirmation tokens not counted
+        assert result.tokens_used == 30  # 10 + 15 + 5 (confirmation)
 
     def test_execute_no_tools_when_trait_empty(self, mock_logger, mock_llm_trait):
         """When ToolsTrait has no tools, use simple completion path."""
@@ -508,8 +508,8 @@ class TestAgentExecuteToolsAndSchema:
         assert result.parsed.confidence == 0.9
         # Tool calls from phase 1
         assert len(result.tool_calls) == 1
-        # Tokens from both phases
-        assert result.tokens_used == 45  # 10 + 15 + 20
+        # Tokens from both phases (including confirmation)
+        assert result.tokens_used == 50  # 10 + 15 + 5 (confirmation) + 20
 
     def test_execute_extraction_error(self, agent_with_tools, mock_llm_trait, mock_tools_trait):
         """Handle structured extraction failure after successful tool loop."""
