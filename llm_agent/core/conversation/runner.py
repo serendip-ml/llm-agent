@@ -176,15 +176,16 @@ class ConversationRunner:
             exec_result = executor.run(
                 messages=messages, max_iterations=effective_task.max_iterations
             )
-            self._update_conversation_from_execution(messages)
+            self._update_conversation_from_execution(exec_result.messages, len(messages))
             return self._build_task_result(effective_task, exec_result)
         except RuntimeError as e:
             self.lg.warning("tool loop failed", extra={"agent": self._agent_name, "exception": e})
             return TaskResult(success=False, content="", error=str(e))
 
-    def _update_conversation_from_execution(self, messages: list[Message]) -> None:
+    def _update_conversation_from_execution(
+        self, messages: list[Message], original_count: int
+    ) -> None:
         """Update conversation with messages added during tool execution."""
-        original_count = len(self.conversation.messages())
         for msg in messages[original_count:]:
             self.conversation.add(msg)
 

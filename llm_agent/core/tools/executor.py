@@ -27,6 +27,9 @@ class ToolExecutionResult(BaseModel):
     tool_calls: list[ToolCallResult]
     """All tool calls made during execution."""
 
+    messages: list[Message]
+    """Complete message history including all tool interactions."""
+
     iterations: int
     """Number of LLM round-trips."""
 
@@ -129,7 +132,9 @@ class ToolExecutor:
 
         if not tool_calls:
             self._lg.debug("tool loop finished", extra={"iterations": iteration + 1})
-            final = self._build_final_result(result, all_tool_calls, iteration + 1, new_total)
+            final = self._build_final_result(
+                result, all_tool_calls, working_messages, iteration + 1, new_total
+            )
             return final, tokens_used
 
         tool_results = self._execute_tool_calls(tool_calls, parse_errors)
@@ -139,7 +144,7 @@ class ToolExecutor:
         if terminal_data is not None:
             self._lg.debug("terminal tool called", extra={"iterations": iteration + 1})
             terminal = self._build_terminal_result(
-                result, all_tool_calls, iteration + 1, new_total, terminal_data
+                result, all_tool_calls, working_messages, iteration + 1, new_total, terminal_data
             )
             return terminal, tokens_used
 
@@ -150,6 +155,7 @@ class ToolExecutor:
         self,
         result: CompletionResult,
         tool_calls: list[ToolCallResult],
+        messages: list[Message],
         iterations: int,
         total_tokens: int,
         terminal_data: dict[str, Any],
@@ -158,6 +164,7 @@ class ToolExecutor:
         return ToolExecutionResult(
             content=result.content,
             tool_calls=tool_calls,
+            messages=messages,
             iterations=iterations,
             total_tokens=total_tokens,
             terminal_data=terminal_data,
@@ -203,6 +210,7 @@ class ToolExecutor:
         self,
         result: CompletionResult,
         tool_calls: list[ToolCallResult],
+        messages: list[Message],
         iterations: int,
         total_tokens: int,
     ) -> ToolExecutionResult:
@@ -210,6 +218,7 @@ class ToolExecutor:
         return ToolExecutionResult(
             content=result.content,
             tool_calls=tool_calls,
+            messages=messages,
             iterations=iterations,
             total_tokens=total_tokens,
         )
