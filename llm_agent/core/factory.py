@@ -6,11 +6,11 @@ This module provides a factory hierarchy for creating agent components:
 - AgentFactory: Creates ConversationalAgent instances from configuration
 
 Example:
-    from appinfra.log import Logger
+    from appinfra.log import quick_console_logger
     from llm_agent.core.factory import AgentFactory, ToolFactory, TraitFactory
     from llm_agent.core.traits.llm import LLMConfig
 
-    lg = Logger.create("agent")
+    lg = quick_console_logger("agent", "info")
     llm_config = LLMConfig(base_url="http://localhost:8000/v1")
 
     tool_factory = ToolFactory()
@@ -333,6 +333,8 @@ class AgentFactory:
 
     def _create_base_agent(self, config: dict[str, Any]) -> ConversationalAgent:
         """Create the base agent with conversation configured."""
+        from llm_agent.core.task import Task
+
         task_config = config.get("task", {})
         conv_config = config.get("conversation", {})
 
@@ -347,11 +349,19 @@ class AgentFactory:
             default_prompt=task_config.get("description", ""),
         )
 
+        default_task = Task(
+            name=config["name"],
+            description=task_config.get("description", ""),
+            max_iterations=task_config.get("max_iterations", 10),
+            timeout_secs=task_config.get("timeout_secs", 0),
+        )
+
         return ConversationalAgent(
             lg=self._lg,
             config=agent_config,
             conversation=Conversation(config=conversation_config),
             compactor=self._compactor or SlidingWindowCompactor(),
+            default_task=default_task,
         )
 
     def _add_traits(self, agent: ConversationalAgent, config: dict[str, Any]) -> None:

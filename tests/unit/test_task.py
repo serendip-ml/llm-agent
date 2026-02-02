@@ -292,6 +292,7 @@ class TestAgentExecuteWithTools:
     def test_execute_calls_tools(self, agent_with_tools, mock_llm_trait, mock_tools_trait):
         # First call: LLM wants to call shell tool
         # Second call: LLM returns final response
+        # Third call: Confirmation
         mock_llm_trait.complete.side_effect = [
             CompletionResult(
                 id="resp-1",
@@ -318,6 +319,15 @@ class TestAgentExecuteWithTools:
                 latency_ms=100,
                 tool_calls=None,
             ),
+            # Confirmation response
+            CompletionResult(
+                id="resp-3",
+                content="Done.",
+                model="test",
+                tokens_used=5,
+                latency_ms=50,
+                tool_calls=None,
+            ),
         ]
 
         task = Task(name="run", description="Run echo hello")
@@ -329,7 +339,7 @@ class TestAgentExecuteWithTools:
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].name == "shell"
         assert result.iterations == 2
-        assert result.tokens_used == 25
+        assert result.tokens_used == 25  # Confirmation tokens not counted
 
     def test_execute_no_tools_when_trait_empty(self, mock_logger, mock_llm_trait):
         """When ToolsTrait has no tools, use simple completion path."""
@@ -456,7 +466,7 @@ class TestAgentExecuteToolsAndSchema:
                     }
                 ],
             ),
-            # Final tool loop response
+            # Final tool loop response (no tools)
             CompletionResult(
                 id="resp-2",
                 content="The shell output was: hello",
@@ -465,9 +475,18 @@ class TestAgentExecuteToolsAndSchema:
                 latency_ms=100,
                 tool_calls=None,
             ),
-            # Structured extraction phase
+            # Confirmation response
             CompletionResult(
                 id="resp-3",
+                content="Done.",
+                model="test",
+                tokens_used=5,
+                latency_ms=50,
+                tool_calls=None,
+            ),
+            # Structured extraction phase
+            CompletionResult(
+                id="resp-4",
                 content='{"answer": "hello", "confidence": 0.9}',
                 model="test",
                 tokens_used=20,
@@ -520,6 +539,15 @@ class TestAgentExecuteToolsAndSchema:
                 model="test",
                 tokens_used=15,
                 latency_ms=100,
+                tool_calls=None,
+            ),
+            # Confirmation response
+            CompletionResult(
+                id="resp-3",
+                content="Done.",
+                model="test",
+                tokens_used=5,
+                latency_ms=50,
                 tool_calls=None,
             ),
             # Extraction fails

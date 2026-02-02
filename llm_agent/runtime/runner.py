@@ -90,7 +90,7 @@ class AgentRunner:
         Creates the agent, starts it, then enters the message processing loop.
         Exits when shutdown message received or channel closes.
         """
-        self._lg.info("runner starting", extra={"agent": self._name})
+        self._lg.debug("starting agent...", extra={"agent": self._name})
 
         try:
             self._agent = self._create_agent()
@@ -102,6 +102,8 @@ class AgentRunner:
 
             self._run_loop()
 
+        except KeyboardInterrupt:
+            pass  # Clean shutdown, no traceback
         except Exception as e:
             self._lg.warning("runner error", extra={"agent": self._name, "exception": e})
             self._channel.send(
@@ -114,6 +116,10 @@ class AgentRunner:
         """Main message processing loop."""
         # Start at 0 to trigger immediate first run for scheduled agents
         last_cycle = 0.0
+        self._lg.trace(
+            "entering run loop",
+            extra={"agent": self._name, "schedule_interval": self._schedule_interval},
+        )
 
         while self._running:
             # Calculate timeout based on schedule
@@ -314,7 +320,7 @@ class AgentRunner:
         """Create ConversationalAgent from config."""
         from llm_agent.core.factory import create_agent_from_config
 
-        self._lg.debug("creating agent", extra={"agent": self._name})
+        self._lg.trace("creating agent...", extra={"agent": self._name})
 
         agent = create_agent_from_config(
             lg=self._lg,

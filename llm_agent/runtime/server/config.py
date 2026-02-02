@@ -28,6 +28,10 @@ class TaskConfigYAML(BaseModel):
 
     description: str
     output_schema: dict[str, Any] | None = None
+    max_iterations: int = 10
+    """Maximum LLM round-trips before stopping. 0 means no limit."""
+    timeout_secs: float = 0
+    """Maximum seconds for task execution. 0 means no limit."""
 
 
 class ScheduleConfigYAML(BaseModel):

@@ -65,6 +65,7 @@ class Core:
 
         # Queue-based logging for subprocesses
         self._log_queue: Queue[Any] = Queue()
+        self._log_config = lg.queue_config(self._log_queue)
         self._log_listener = LogQueueListener(self._log_queue, lg)
         self._log_listener.start()
 
@@ -98,12 +99,12 @@ class Core:
         try:
             self._spawn_process(handle)
             handle.state = transition(handle.state, AgentState.RUNNING)
-            self._lg.info("agent started", extra={"agent": name})
+            self._lg.debug("agent runtime started", extra={"agent": name})
         except Exception as e:
             self._cleanup_failed_start(handle)
             handle.state = AgentState.ERROR
             handle.error = str(e)
-            self._lg.warning("failed to start agent", extra={"agent": name, "exception": e})
+            self._lg.error("failed to start agent runtime", extra={"agent": name, "exception": e})
 
         return AgentInfo.from_handle(handle)
 
@@ -300,7 +301,7 @@ class Core:
 
     def _spawn_process(self, handle: AgentHandle) -> None:
         """Spawn subprocess for agent."""
-        self._lg.debug("spawning process", extra={"agent": handle.name})
+        self._lg.debug("spawning process for agent runtime...", extra={"agent": handle.name})
 
         main_channel, subprocess_channel = create_channel_pair()
         handle.channel = main_channel
@@ -313,13 +314,14 @@ class Core:
                 subprocess_channel,
                 self._llm_config,  # Already a dict, no need for asdict()
                 self._variables,
-                self._log_queue,
+                self._log_config,
             ),
             name=f"agent-{handle.name}",
             daemon=True,
         )
         handle.process.start()
         self._wait_for_started(main_channel)
+        self._lg.debug("spawned process for agent runtime", extra={"agent": handle.name})
 
     def _wait_for_started(self, channel: Any) -> None:
         """Wait for subprocess to signal it has started."""
@@ -363,7 +365,7 @@ def _subprocess_entry(
     channel: Any,
     llm_config_dict: dict[str, Any],
     variables: dict[str, str],
-    log_queue: Queue[Any],
+    log_config: dict[str, Any],
 ) -> None:
     """Entry point for agent subprocess.
 
@@ -373,7 +375,7 @@ def _subprocess_entry(
 
     from llm_agent.runtime.runner import AgentRunner
 
-    lg = Logger.with_queue(log_queue, name=f"agent.{name}", level="debug")
+    lg = Logger.from_queue_config(log_config, name=f"agent.{name}")
 
     runner = AgentRunner(
         name=name,

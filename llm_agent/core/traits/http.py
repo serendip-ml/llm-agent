@@ -56,9 +56,9 @@ class HTTPTrait:
     - /feedback -> agent.feedback()
 
     Example:
-        from appinfra.log import Logger
+        from appinfra.log import quick_console_logger
 
-        lg = Logger.create("agent")
+        lg = quick_console_logger("agent", "info")
         agent = ConversationalAgent(lg, config)
         agent.add_trait(HTTPTrait(lg, HTTPConfig(port=8080)))
         agent.start()

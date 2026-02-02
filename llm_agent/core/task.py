@@ -75,7 +75,10 @@ class Task(BaseModel):
     """Override agent's default system prompt."""
 
     max_iterations: int = 10
-    """Maximum LLM round-trips before stopping."""
+    """Maximum LLM round-trips before stopping. 0 means no limit."""
+
+    timeout_secs: float = 0
+    """Maximum seconds for task execution. 0 means no limit."""
 
     model_config = {"arbitrary_types_allowed": True}
 

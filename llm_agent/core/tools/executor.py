@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from llm_agent.core.llm import Message
+from llm_agent.core.task import Task
 from llm_agent.core.tools.base import ToolCall, ToolCallResult, ToolResult
 from llm_agent.core.tools.registry import ToolRegistry
 
@@ -48,11 +49,9 @@ class ToolExecutor:
     it produces a final response.
 
     Example:
-        executor = ToolExecutor(llm, registry)
-        result = executor.run(
-            messages=[Message(role="user", content="List files in current dir")],
-            max_iterations=5,
-        )
+        task = Task(name="example", description="...", max_iterations=5, timeout_secs=60)
+        executor = ToolExecutor(lg, llm, registry, task)
+        result = executor.run(messages=[Message(role="user", content="List files")])
         print(result.content)  # LLM's final response
         print(result.tool_calls)  # Tools that were called
     """
@@ -62,7 +61,9 @@ class ToolExecutor:
         lg: Logger,
         llm: LLMBackend,
         registry: ToolRegistry,
+        task: Task,
         model: str | None = None,
+        temperature: float = 0.7,
     ) -> None:
         """Initialize executor.
 
@@ -70,48 +71,62 @@ class ToolExecutor:
             lg: Logger instance.
             llm: LLM backend for completions.
             registry: Registry of available tools.
+            task: Task being executed (provides iteration/timeout limits).
             model: Model to use for completions (optional).
+            temperature: Temperature for LLM completions.
         """
         self._lg = lg
         self._llm = llm
         self._registry = registry
+        self._task = task
         self._model = model
+        self._temperature = temperature
 
-    def run(
-        self,
-        messages: list[Message],
-        max_iterations: int = 10,
-        temperature: float = 0.7,
-    ) -> ToolExecutionResult:
+    def run(self, messages: list[Message]) -> ToolExecutionResult:
         """Run the tool execution loop.
 
         Args:
             messages: Initial messages to send to LLM.
-            max_iterations: Maximum number of LLM round-trips.
-            temperature: Temperature for LLM completions.
 
         Returns:
             ToolExecutionResult with final content and execution trace.
 
         Raises:
-            RuntimeError: If max_iterations exceeded without final response.
+            RuntimeError: If max_iterations or timeout exceeded without final response.
         """
+        import time
+
         working_messages = list(messages)
         all_tool_calls: list[ToolCallResult] = []
         total_tokens = 0
         tools = self._registry.to_openai_tools() or None
+        start_time = time.monotonic()
+        iteration = 0
 
-        for iteration in range(max_iterations):
+        while True:
+            self._check_limits(iteration, start_time)
             iteration_result, tokens = self._run_iteration(
-                working_messages, all_tool_calls, total_tokens, iteration, temperature, tools
+                working_messages, all_tool_calls, total_tokens, iteration, tools
             )
             total_tokens += tokens
             if iteration_result is not None:
                 return iteration_result
 
-        raise RuntimeError(
-            f"Tool execution exceeded {max_iterations} iterations without final response"
-        )
+            iteration += 1
+
+    def _check_limits(self, iteration: int, start_time: float) -> None:
+        """Check iteration and timeout limits, raise if exceeded."""
+        import time
+
+        task = self._task
+        if task.max_iterations > 0 and iteration >= task.max_iterations:
+            raise RuntimeError(
+                f"Tool execution exceeded {task.max_iterations} iterations without final response"
+            )
+        if task.timeout_secs > 0 and (time.monotonic() - start_time) >= task.timeout_secs:
+            raise RuntimeError(
+                f"Tool execution exceeded {task.timeout_secs}s timeout without final response"
+            )
 
     def _run_iteration(
         self,
@@ -119,24 +134,76 @@ class ToolExecutor:
         all_tool_calls: list[ToolCallResult],
         total_tokens: int,
         iteration: int,
-        temperature: float,
         tools: list[dict[str, Any]] | None,
     ) -> tuple[ToolExecutionResult | None, int]:
         """Run a single iteration. Returns (result, tokens_used). Result is None to continue."""
-        self._lg.debug("tool loop iteration", extra={"iteration": iteration + 1})
+        self._lg.trace("tool loop iteration", extra={"iteration": iteration + 1})
 
-        result = self._call_llm(working_messages, temperature, tools)
+        result = self._call_llm(working_messages, tools)
         tokens_used = result.tokens_used
         new_total = total_tokens + tokens_used
         tool_calls, parse_errors = self._extract_tool_calls(result)
 
         if not tool_calls:
-            self._lg.debug("tool loop finished", extra={"iterations": iteration + 1})
-            final = self._build_final_result(
-                result, all_tool_calls, working_messages, iteration + 1, new_total
+            return self._handle_no_tool_calls(
+                working_messages, result, all_tool_calls, iteration, tokens_used, new_total, tools
             )
-            return final, tokens_used
 
+        return self._handle_tool_calls(
+            working_messages,
+            result,
+            all_tool_calls,
+            tool_calls,
+            parse_errors,
+            iteration,
+            tokens_used,
+            new_total,
+        )
+
+    def _handle_no_tool_calls(
+        self,
+        working_messages: list[Message],
+        result: CompletionResult,
+        all_tool_calls: list[ToolCallResult],
+        iteration: int,
+        tokens_used: int,
+        new_total: int,
+        tools: list[dict[str, Any]] | None,
+    ) -> tuple[ToolExecutionResult | None, int]:
+        """Handle iteration where LLM made no tool calls."""
+        confirmation = self._confirm_completion(working_messages, result, all_tool_calls, tools)
+        if confirmation is not None:
+            extra_tokens, had_terminal = confirmation
+            if had_terminal:
+                terminal_data = self._find_terminal_data(all_tool_calls)
+                return self._build_terminal_result(
+                    result,
+                    all_tool_calls,
+                    working_messages,
+                    iteration + 1,
+                    new_total + extra_tokens,
+                    terminal_data or {},
+                ), tokens_used + extra_tokens
+            return None, tokens_used + extra_tokens
+
+        self._lg.debug("tool loop finished", extra={"iterations": iteration + 1})
+        final = self._build_final_result(
+            result, all_tool_calls, working_messages, iteration + 1, new_total
+        )
+        return final, tokens_used
+
+    def _handle_tool_calls(
+        self,
+        working_messages: list[Message],
+        result: CompletionResult,
+        all_tool_calls: list[ToolCallResult],
+        tool_calls: list[ToolCall],
+        parse_errors: dict[str, str],
+        iteration: int,
+        tokens_used: int,
+        new_total: int,
+    ) -> tuple[ToolExecutionResult | None, int]:
+        """Handle iteration where LLM made tool calls."""
         tool_results = self._execute_tool_calls(tool_calls, parse_errors)
         all_tool_calls.extend(tool_results)
 
@@ -171,19 +238,24 @@ class ToolExecutor:
         )
 
     def _call_llm(
-        self, messages: list[Message], temperature: float, tools: list[dict[str, Any]] | None
+        self, messages: list[Message], tools: list[dict[str, Any]] | None
     ) -> CompletionResult:
         """Call LLM with messages and tools."""
         tool_count = len(tools) if tools else 0
+        last_assistant_msg = self._find_last_assistant_message(messages)
         self._lg.debug(
-            "calling LLM",
-            extra={"message_count": len(messages), "tool_count": tool_count},
+            "calling LLM...",
+            extra={
+                "message_count": len(messages),
+                "last_assistant": last_assistant_msg,
+                "tool_count": tool_count,
+            },
         )
 
         result = self._llm.complete(
             messages=messages,
             model=self._model,
-            temperature=temperature,
+            temperature=self._temperature,
             tools=tools,
         )
 
@@ -193,7 +265,7 @@ class ToolExecutor:
     def _log_llm_response(self, result: CompletionResult) -> None:
         """Log LLM response details."""
         tool_call_count = len(result.tool_calls) if result.tool_calls else 0
-        self._lg.debug(
+        self._lg.trace(
             "LLM response",
             extra={
                 "tokens": result.tokens_used,
@@ -205,6 +277,8 @@ class ToolExecutor:
         if result.content:
             content_preview = self._truncate_str(result.content, 200)
             self._lg.debug("LLM content", extra={"content": content_preview})
+        else:
+            self._lg.trace("LLM response without content")
 
     def _build_final_result(
         self,
@@ -222,6 +296,61 @@ class ToolExecutor:
             iterations=iterations,
             total_tokens=total_tokens,
         )
+
+    _COMPLETION_CONFIRM_PROMPT = (
+        "You didn't call any tools in your last response. "
+        "If you're done, call the completion tool. "
+        "If you meant to take an action, call the appropriate tool now."
+    )
+
+    def _confirm_completion(
+        self,
+        working_messages: list[Message],
+        result: CompletionResult,
+        all_tool_calls: list[ToolCallResult],
+        tools: list[dict[str, Any]] | None,
+    ) -> tuple[int, bool] | None:
+        """Ask LLM to confirm completion when no tool calls were made.
+
+        Returns:
+            None if LLM confirms done (no tools called after prompt).
+            (tokens_used, had_terminal) if LLM called tools after prompt.
+        """
+        working_messages.append(Message(role="assistant", content=result.content or ""))
+        working_messages.append(Message(role="user", content=self._COMPLETION_CONFIRM_PROMPT))
+        self._lg.trace("requesting completion confirmation")
+
+        confirm_result = self._call_llm(working_messages, tools)
+        confirm_tool_calls, parse_errors = self._extract_tool_calls(confirm_result)
+
+        if not confirm_tool_calls:
+            self._lg.trace("completion confirmed")
+            return None
+
+        return self._execute_confirmation_tools(
+            working_messages, confirm_result, confirm_tool_calls, parse_errors, all_tool_calls
+        )
+
+    def _execute_confirmation_tools(
+        self,
+        working_messages: list[Message],
+        confirm_result: CompletionResult,
+        confirm_tool_calls: list[ToolCall],
+        parse_errors: dict[str, str],
+        all_tool_calls: list[ToolCallResult],
+    ) -> tuple[int, bool]:
+        """Execute tools called after confirmation prompt."""
+        self._lg.debug(
+            "tools called after confirmation", extra={"tool_count": len(confirm_tool_calls)}
+        )
+        tool_results = self._execute_tool_calls(confirm_tool_calls, parse_errors)
+        all_tool_calls.extend(tool_results)
+
+        terminal_data = self._find_terminal_data(tool_results)
+        self._append_tool_messages(
+            working_messages, confirm_result, confirm_tool_calls, tool_results
+        )
+        return confirm_result.tokens_used, terminal_data is not None
 
     def _append_tool_messages(
         self,
@@ -322,7 +451,7 @@ class ToolExecutor:
         """
         # Log what tools the LLM wants to call
         tool_names = [c.name for c in calls]
-        self._lg.debug("LLM requested tools", extra={"tools": tool_names})
+        self._lg.trace("LLM requested tools", extra={"tools": tool_names})
 
         results = []
         for call in calls:
@@ -351,12 +480,12 @@ class ToolExecutor:
             # Log result with actual output (truncated)
             if result.success:
                 output_preview = self._truncate_str(result.output, 300)
-                self._lg.debug(
+                self._lg.trace(
                     "tool result",
                     extra={"tool": call.name, "success": True, "output": output_preview},
                 )
             else:
-                self._lg.debug(
+                self._lg.trace(
                     "tool result",
                     extra={"tool": call.name, "success": False, "error": result.error},
                 )
@@ -364,6 +493,13 @@ class ToolExecutor:
         except Exception as e:
             self._lg.warning("tool error", extra={"tool": call.name, "exception": e})
             return ToolResult(success=False, output="", error=f"Tool execution error: {e}")
+
+    def _find_last_assistant_message(self, messages: list[Message], max_len: int = 200) -> str:
+        """Find and return the last assistant message content (truncated)."""
+        for msg in reversed(messages):
+            if msg.role == "assistant" and msg.content:
+                return self._truncate_str(msg.content, max_len)
+        return ""
 
     def _truncate_str(self, s: str | None, max_len: int = 200) -> str:
         """Truncate string for logging."""
