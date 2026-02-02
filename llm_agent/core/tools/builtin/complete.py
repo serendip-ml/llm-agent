@@ -26,6 +26,7 @@ class CompleteTaskTool(BaseTool):
     """
 
     name = "complete_task"
+    terminal = True  # Calling this tool ends the execution loop
     description = (
         "Signal that you have finished working on the current task. "
         "Call this when you have reached a conclusion OR when you cannot make further progress. "

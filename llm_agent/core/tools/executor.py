@@ -160,6 +160,7 @@ class ToolExecutor:
             iteration,
             tokens_used,
             new_total,
+            tools,
         )
 
     def _handle_no_tool_calls(
@@ -204,21 +205,194 @@ class ToolExecutor:
         iteration: int,
         tokens_used: int,
         new_total: int,
+        tools: list[dict[str, Any]] | None,
     ) -> tuple[ToolExecutionResult | None, int]:
         """Handle iteration where LLM made tool calls."""
+        # Check for premature completion before executing
+        if self._is_early_completion_attempt(all_tool_calls, tool_calls):
+            return self._handle_early_completion(
+                working_messages,
+                result,
+                all_tool_calls,
+                tool_calls,
+                iteration,
+                tokens_used,
+                new_total,
+                tools,
+            )
+
+        # Normal flow: execute tools and check for terminal
+        return self._execute_and_check_terminal(
+            working_messages,
+            result,
+            all_tool_calls,
+            tool_calls,
+            parse_errors,
+            iteration,
+            tokens_used,
+            new_total,
+        )
+
+    def _is_early_completion_attempt(
+        self, all_tool_calls: list[ToolCallResult], tool_calls: list[ToolCall]
+    ) -> bool:
+        """Check if this is an early completion attempt (terminal with no prior work)."""
+        has_prior_work = self._has_work_tools(all_tool_calls)
+        terminal_call = self._find_terminal_call(tool_calls)
+        return terminal_call is not None and not has_prior_work
+
+    def _execute_and_check_terminal(
+        self,
+        working_messages: list[Message],
+        result: CompletionResult,
+        all_tool_calls: list[ToolCallResult],
+        tool_calls: list[ToolCall],
+        parse_errors: dict[str, str],
+        iteration: int,
+        tokens_used: int,
+        new_total: int,
+    ) -> tuple[ToolExecutionResult | None, int]:
+        """Execute tools and return terminal result if applicable."""
         tool_results = self._execute_tool_calls(tool_calls, parse_errors)
         all_tool_calls.extend(tool_results)
 
         terminal_data = self._find_terminal_data(tool_results)
         if terminal_data is not None:
             self._lg.debug("terminal tool called", extra={"iterations": iteration + 1})
-            terminal = self._build_terminal_result(
+            return self._build_terminal_result(
                 result, all_tool_calls, working_messages, iteration + 1, new_total, terminal_data
-            )
-            return terminal, tokens_used
+            ), tokens_used
 
         self._append_tool_messages(working_messages, result, tool_calls, tool_results)
         return None, tokens_used
+
+    def _has_work_tools(self, tool_calls: list[ToolCallResult]) -> bool:
+        """Check if any non-terminal tools were called."""
+        return any(not tr.result.terminal for tr in tool_calls)
+
+    def _find_terminal_call(self, tool_calls: list[ToolCall]) -> ToolCall | None:
+        """Find a terminal tool call in the list, if any."""
+        for call in tool_calls:
+            tool = self._registry.get(call.name)
+            if tool is not None and getattr(tool, "terminal", False):
+                return call
+        return None
+
+    def _handle_early_completion(
+        self,
+        working_messages: list[Message],
+        result: CompletionResult,
+        all_tool_calls: list[ToolCallResult],
+        tool_calls: list[ToolCall],
+        iteration: int,
+        tokens_used: int,
+        new_total: int,
+        tools: list[dict[str, Any]] | None,
+    ) -> tuple[ToolExecutionResult | None, int]:
+        """Handle early completion attempt by asking for confirmation."""
+        self._lg.debug("early completion attempt, requesting confirmation")
+
+        # Add the original response and confirmation prompt
+        working_messages.append(self._build_assistant_message(result, tool_calls))
+        working_messages.append(Message(role="user", content=self._EARLY_COMPLETION_PROMPT))
+
+        # Get LLM's response to confirmation
+        confirm_result = self._call_llm(working_messages, tools)
+
+        return self._process_early_confirmation(
+            working_messages, confirm_result, all_tool_calls, iteration, tokens_used, new_total
+        )
+
+    def _process_early_confirmation(
+        self,
+        working_messages: list[Message],
+        confirm_result: CompletionResult,
+        all_tool_calls: list[ToolCallResult],
+        iteration: int,
+        tokens_used: int,
+        new_total: int,
+    ) -> tuple[ToolExecutionResult | None, int]:
+        """Process the LLM's response to early completion confirmation prompt."""
+        confirm_tool_calls, confirm_parse_errors = self._extract_tool_calls(confirm_result)
+        extra_tokens = confirm_result.tokens_used
+
+        if not confirm_tool_calls:
+            self._lg.debug("no tools after early completion prompt, continuing")
+            working_messages.append(Message(role="assistant", content=confirm_result.content or ""))
+            return None, tokens_used + extra_tokens
+
+        # Check if LLM confirmed by calling terminal again
+        if self._find_terminal_call(confirm_tool_calls) is not None:
+            return self._accept_early_completion(
+                working_messages,
+                confirm_result,
+                confirm_tool_calls,
+                confirm_parse_errors,
+                all_tool_calls,
+                iteration,
+                tokens_used,
+                new_total,
+            )
+
+        # LLM called work tools - execute and continue
+        return self._continue_after_early_prompt(
+            working_messages,
+            confirm_result,
+            confirm_tool_calls,
+            confirm_parse_errors,
+            all_tool_calls,
+            tokens_used,
+        )
+
+    def _accept_early_completion(
+        self,
+        working_messages: list[Message],
+        confirm_result: CompletionResult,
+        confirm_tool_calls: list[ToolCall],
+        confirm_parse_errors: dict[str, str],
+        all_tool_calls: list[ToolCallResult],
+        iteration: int,
+        tokens_used: int,
+        new_total: int,
+    ) -> tuple[ToolExecutionResult, int]:
+        """Accept confirmed early completion and build terminal result."""
+        self._lg.debug("early completion confirmed")
+        extra_tokens = confirm_result.tokens_used
+        tool_results = self._execute_tool_calls(confirm_tool_calls, confirm_parse_errors)
+        all_tool_calls.extend(tool_results)
+        terminal_data = self._find_terminal_data(tool_results)
+        self._append_tool_messages(
+            working_messages, confirm_result, confirm_tool_calls, tool_results
+        )
+        return self._build_terminal_result(
+            confirm_result,
+            all_tool_calls,
+            working_messages,
+            iteration + 1,
+            new_total + extra_tokens,
+            terminal_data or {},
+        ), tokens_used + extra_tokens
+
+    def _continue_after_early_prompt(
+        self,
+        working_messages: list[Message],
+        confirm_result: CompletionResult,
+        confirm_tool_calls: list[ToolCall],
+        confirm_parse_errors: dict[str, str],
+        all_tool_calls: list[ToolCallResult],
+        tokens_used: int,
+    ) -> tuple[None, int]:
+        """Execute work tools called after early completion prompt and continue."""
+        self._lg.debug(
+            "work tools called after early completion prompt",
+            extra={"tools": [c.name for c in confirm_tool_calls]},
+        )
+        tool_results = self._execute_tool_calls(confirm_tool_calls, confirm_parse_errors)
+        all_tool_calls.extend(tool_results)
+        self._append_tool_messages(
+            working_messages, confirm_result, confirm_tool_calls, tool_results
+        )
+        return None, tokens_used + confirm_result.tokens_used
 
     def _build_terminal_result(
         self,
@@ -303,6 +477,12 @@ class ToolExecutor:
         "You didn't call any tools in your last response. "
         "If you're done, call the completion tool. "
         "If you meant to take an action, call the appropriate tool now."
+    )
+
+    _EARLY_COMPLETION_PROMPT = (
+        "You're completing the task without having used any tools first. "
+        "If you truly cannot proceed, confirm by calling the completion tool again. "
+        "Otherwise, use the available tools to work on the task."
     )
 
     def _confirm_completion(
