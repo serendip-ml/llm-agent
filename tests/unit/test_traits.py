@@ -6,12 +6,13 @@ import pytest
 from pydantic import BaseModel
 
 from llm_agent import (
-    Agent,
     AgentConfig,
     BaseTrait,
     CompletionResult,
-    Directive,
-    DirectiveTrait,
+    ConversationalAgent,
+    Identity,
+    IdentityTrait,
+    MethodTrait,
     StructuredOutputError,
 )
 from llm_agent.core.llm.types import Message
@@ -78,37 +79,43 @@ class TestCustomTrait:
         assert trait.get_value() == "test-agent: test"
 
 
-class TestDirective:
-    """Tests for Directive."""
+class TestIdentity:
+    """Tests for Identity."""
 
-    def test_directive_with_prompt(self):
-        directive = Directive(prompt="You are a code reviewer.")
+    def test_identity_with_prompt(self):
+        identity = Identity(prompt="You are a code reviewer.")
 
-        assert directive.prompt == "You are a code reviewer."
-        assert directive.extensions == {}
+        assert identity.prompt == "You are a code reviewer."
+        assert identity.extensions == {}
 
-    def test_directive_with_extensions(self):
-        directive = Directive(
+    def test_identity_with_extensions(self):
+        identity = Identity(
             prompt="You are a code reviewer.",
             extensions={"custom_field": "value"},
         )
 
-        assert directive.prompt == "You are a code reviewer."
-        assert directive.extensions == {"custom_field": "value"}
+        assert identity.prompt == "You are a code reviewer."
+        assert identity.extensions == {"custom_field": "value"}
 
 
-class TestDirectiveTrait:
-    """Tests for DirectiveTrait."""
+class TestIdentityTrait:
+    """Tests for IdentityTrait."""
 
-    def test_init(self):
-        directive = Directive(prompt="Test directive")
-        trait = DirectiveTrait(directive)
+    def test_init_with_identity_object(self):
+        identity = Identity(prompt="Test identity")
+        trait = IdentityTrait(identity)
 
-        assert trait.directive == directive
+        assert trait.identity == identity
+
+    def test_init_with_string(self):
+        """IdentityTrait can be initialized with a string."""
+        trait = IdentityTrait("You are a code reviewer.")
+
+        assert trait.identity.prompt == "You are a code reviewer."
 
     def test_attach(self):
-        directive = Directive(prompt="Test directive")
-        trait = DirectiveTrait(directive)
+        identity = Identity(prompt="Test identity")
+        trait = IdentityTrait(identity)
         mock_agent = MagicMock()
 
         trait.attach(mock_agent)
@@ -116,14 +123,39 @@ class TestDirectiveTrait:
         assert trait._agent == mock_agent
 
     def test_build_prompt(self):
-        directive = Directive(prompt="You are a code reviewer. Be critical.")
-        trait = DirectiveTrait(directive)
+        identity = Identity(prompt="You are a code reviewer. Be critical.")
+        trait = IdentityTrait(identity)
 
         result = trait.build_prompt("Base system prompt.")
 
-        # Directive is prepended
+        # Identity is prepended
         assert result.startswith("You are a code reviewer.")
         assert "Base system prompt." in result
+
+
+class TestMethodTrait:
+    """Tests for MethodTrait."""
+
+    def test_init(self):
+        trait = MethodTrait("- Step 1\n- Step 2")
+
+        assert trait.method == "- Step 1\n- Step 2"
+
+    def test_build_prompt(self):
+        trait = MethodTrait("- Step 1\n- Step 2")
+
+        result = trait.build_prompt("Base prompt.")
+
+        assert "Base prompt." in result
+        assert "## Method" in result
+        assert "- Step 1\n- Step 2" in result
+
+    def test_update(self):
+        trait = MethodTrait("Original method")
+
+        trait.update("Updated method")
+
+        assert trait.method == "Updated method"
 
 
 class TestAgentTraits:
@@ -136,52 +168,50 @@ class TestAgentTraits:
 
     def test_add_trait(self, mock_logger):
         config = AgentConfig(name="test")
-        agent = Agent(lg=mock_logger, config=config)
+        agent = ConversationalAgent(lg=mock_logger, config=config)
 
-        directive = Directive(prompt="Test directive")
-        trait = DirectiveTrait(directive)
+        identity = Identity(prompt="Test identity")
+        trait = IdentityTrait(identity)
         agent.add_trait(trait)
 
-        assert agent.has_trait(DirectiveTrait)
-        assert agent.get_trait(DirectiveTrait) == trait
+        assert agent.has_trait(IdentityTrait)
+        assert agent.get_trait(IdentityTrait) == trait
 
     def test_add_trait_attaches(self, mock_logger):
         config = AgentConfig(name="test")
-        agent = Agent(lg=mock_logger, config=config)
+        agent = ConversationalAgent(lg=mock_logger, config=config)
 
-        directive = Directive(prompt="Test directive")
-        trait = DirectiveTrait(directive)
+        identity = Identity(prompt="Test identity")
+        trait = IdentityTrait(identity)
         agent.add_trait(trait)
 
         assert trait._agent == agent
 
     def test_add_duplicate_trait_raises(self, mock_logger):
         config = AgentConfig(name="test")
-        agent = Agent(lg=mock_logger, config=config)
+        agent = ConversationalAgent(lg=mock_logger, config=config)
 
-        directive = Directive(prompt="Test directive")
-        agent.add_trait(DirectiveTrait(directive))
+        identity = Identity(prompt="Test identity")
+        agent.add_trait(IdentityTrait(identity))
 
         with pytest.raises(ValueError, match="already added"):
-            agent.add_trait(DirectiveTrait(directive))
+            agent.add_trait(IdentityTrait(identity))
 
     def test_get_trait_returns_none_if_not_added(self, mock_logger):
         config = AgentConfig(name="test")
-        agent = Agent(lg=mock_logger, config=config)
+        agent = ConversationalAgent(lg=mock_logger, config=config)
 
-        assert agent.get_trait(DirectiveTrait) is None
+        assert agent.get_trait(IdentityTrait) is None
 
     def test_has_trait_returns_false_if_not_added(self, mock_logger):
         config = AgentConfig(name="test")
-        agent = Agent(lg=mock_logger, config=config)
+        agent = ConversationalAgent(lg=mock_logger, config=config)
 
-        assert not agent.has_trait(DirectiveTrait)
+        assert not agent.has_trait(IdentityTrait)
 
-    def test_complete_with_directive_trait(self, mock_logger):
-        from llm_agent.core.traits.llm import LLMTrait
-
+    def test_complete_with_identity_trait(self, mock_logger):
         config = AgentConfig(name="test", fact_injection="none")
-        agent = Agent(lg=mock_logger, config=config)
+        agent = ConversationalAgent(lg=mock_logger, config=config)
 
         # Add mock LLMTrait
         mock_llm_trait = MagicMock(spec=LLMTrait)
@@ -194,19 +224,45 @@ class TestAgentTraits:
         )
         agent._traits[LLMTrait] = mock_llm_trait
 
-        # Add DirectiveTrait
-        directive = Directive(prompt="You are a helpful assistant. Be friendly.")
-        agent.add_trait(DirectiveTrait(directive))
+        # Add IdentityTrait
+        identity = Identity(prompt="You are a helpful assistant. Be friendly.")
+        agent.add_trait(IdentityTrait(identity))
 
         agent.complete("Hello")
 
-        # Check that directive was injected into prompt
+        # Check that identity was injected into prompt
         call_args = mock_llm_trait.complete.call_args
         messages = call_args.kwargs["messages"]
         system_prompt = messages[0].content
 
         assert "You are a helpful assistant." in system_prompt
         assert "Be friendly." in system_prompt
+
+    def test_complete_with_method_trait(self, mock_logger):
+        """MethodTrait injects method into prompt."""
+        config = AgentConfig(name="test", fact_injection="none")
+        agent = ConversationalAgent(lg=mock_logger, config=config)
+
+        mock_llm_trait = MagicMock(spec=LLMTrait)
+        mock_llm_trait.complete.return_value = CompletionResult(
+            id="resp-1",
+            content="Response",
+            model="default",
+            tokens_used=10,
+            latency_ms=100,
+        )
+        agent._traits[LLMTrait] = mock_llm_trait
+
+        agent.add_trait(MethodTrait("- Step 1\n- Step 2"))
+
+        agent.complete("Hello")
+
+        call_args = mock_llm_trait.complete.call_args
+        messages = call_args.kwargs["messages"]
+        system_prompt = messages[0].content
+
+        assert "## Method" in system_prompt
+        assert "- Step 1" in system_prompt
 
 
 class TestLLMTraitStructuredOutput:

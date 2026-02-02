@@ -1,5 +1,6 @@
 """Tests for HTTP trait and server components."""
 
+from queue import Empty
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -197,8 +198,8 @@ class TestProtocolMessages:
         assert req.correction is None
 
 
-class TestAgentHandleRequest:
-    """Tests for Agent.handle_request method."""
+class TestHTTPTraitHandleRequest:
+    """Tests for HTTPTrait.handle_request method."""
 
     @pytest.fixture
     def mock_logger(self):
@@ -233,30 +234,37 @@ class TestAgentHandleRequest:
     @pytest.fixture
     def agent(self, mock_logger, mock_llm_trait, mock_learn_trait):
         """Create a test agent with mocked traits."""
-        from llm_agent import Agent, AgentConfig
+        from llm_agent import AgentConfig, ConversationalAgent
         from llm_agent.core.traits.learn import LearnTrait
         from llm_agent.core.traits.llm import LLMTrait
 
         config = AgentConfig(name="test-agent", fact_injection="none")
-        agent = Agent(lg=mock_logger, config=config)
+        agent = ConversationalAgent(lg=mock_logger, config=config)
         agent._traits[LLMTrait] = mock_llm_trait
         agent._traits[LearnTrait] = mock_learn_trait
         return agent
 
-    def test_handle_health_request(self, agent):
+    @pytest.fixture
+    def http_trait(self, mock_logger, agent):
+        """Create HTTPTrait attached to agent."""
+        trait = HTTPTrait(lg=mock_logger)
+        trait._agent = agent
+        return trait
+
+    def test_handle_health_request(self, http_trait):
         req = HealthRequest(id="req-1")
 
-        resp = agent.handle_request(req)
+        resp = http_trait.handle_request(req)
 
         assert isinstance(resp, HealthResponse)
         assert resp.id == "req-1"
         assert resp.status == "ok"
         assert resp.agent_name == "test-agent"
 
-    def test_handle_complete_request(self, agent):
+    def test_handle_complete_request(self, http_trait):
         req = CompleteRequest(id="req-1", query="Hello")
 
-        resp = agent.handle_request(req)
+        resp = http_trait.handle_request(req)
 
         assert isinstance(resp, CompleteResponse)
         assert resp.id == "req-1"
@@ -264,11 +272,11 @@ class TestAgentHandleRequest:
         assert resp.response_id == "resp-123"
         assert resp.content == "Hello!"
 
-    def test_handle_remember_request(self, agent, mock_learn_trait):
+    def test_handle_remember_request(self, http_trait, mock_learn_trait):
         mock_learn_trait.remember.return_value = 42
         req = RememberRequest(id="req-1", fact="User likes Python", category="preferences")
 
-        resp = agent.handle_request(req)
+        resp = http_trait.handle_request(req)
 
         assert isinstance(resp, RememberResponse)
         assert resp.success is True
@@ -277,29 +285,29 @@ class TestAgentHandleRequest:
             "User likes Python", category="preferences"
         )
 
-    def test_handle_forget_request(self, agent, mock_learn_trait):
+    def test_handle_forget_request(self, http_trait, mock_learn_trait):
         req = ForgetRequest(id="req-1", fact_id=42)
 
-        resp = agent.handle_request(req)
+        resp = http_trait.handle_request(req)
 
         assert isinstance(resp, ForgetResponse)
         assert resp.success is True
         mock_learn_trait.forget.assert_called_once_with(42)
 
-    def test_handle_feedback_request(self, agent, mock_learn_trait):
+    def test_handle_feedback_request(self, http_trait, mock_learn_trait):
         # First complete a request to track the response
         complete_req = CompleteRequest(id="req-1", query="Hello")
-        agent.handle_request(complete_req)
+        http_trait.handle_request(complete_req)
 
         # Then provide feedback
         feedback_req = FeedbackRequest(id="req-2", response_id="resp-123", signal="positive")
-        resp = agent.handle_request(feedback_req)
+        resp = http_trait.handle_request(feedback_req)
 
         assert isinstance(resp, FeedbackResponse)
         assert resp.success is True
         mock_learn_trait.record_feedback.assert_called_once()
 
-    def test_handle_unknown_message_type(self, agent):
+    def test_handle_unknown_message_type(self, http_trait):
         # Create a request with unknown message type
         from llm_agent.runtime.server.protocol.base import Request
 
@@ -307,49 +315,49 @@ class TestAgentHandleRequest:
             message_type = "unknown_type"
 
         req = UnknownRequest(id="req-1")
-        resp = agent.handle_request(req)
+        resp = http_trait.handle_request(req)
 
         assert resp.success is False
         assert "Unknown message type" in resp.error
 
-    def test_handle_complete_request_error(self, agent, mock_llm_trait):
+    def test_handle_complete_request_error(self, http_trait, mock_llm_trait):
         # Make LLM raise an exception
         mock_llm_trait.complete.side_effect = ValueError("LLM error")
         req = CompleteRequest(id="req-1", query="Hello")
 
-        resp = agent.handle_request(req)
+        resp = http_trait.handle_request(req)
 
         assert isinstance(resp, CompleteResponse)
         assert resp.success is False
         assert "LLM error" in resp.error
 
-    def test_handle_remember_request_error(self, agent, mock_learn_trait):
+    def test_handle_remember_request_error(self, http_trait, mock_learn_trait):
         mock_learn_trait.remember.side_effect = ValueError("Storage error")
         req = RememberRequest(id="req-1", fact="test fact")
 
-        resp = agent.handle_request(req)
+        resp = http_trait.handle_request(req)
 
         assert isinstance(resp, RememberResponse)
         assert resp.success is False
         assert "Storage error" in resp.error
         assert resp.fact_id == -1
 
-    def test_handle_forget_request_error(self, agent, mock_learn_trait):
+    def test_handle_forget_request_error(self, http_trait, mock_learn_trait):
         mock_learn_trait.forget.side_effect = ValueError("Fact not found")
         req = ForgetRequest(id="req-1", fact_id=999)
 
-        resp = agent.handle_request(req)
+        resp = http_trait.handle_request(req)
 
         assert isinstance(resp, ForgetResponse)
         assert resp.success is False
         assert "Fact not found" in resp.error
 
-    def test_handle_recall_request_error(self, agent, mock_learn_trait):
+    def test_handle_recall_request_error(self, http_trait, mock_learn_trait):
         # recall() raises when embedder not configured
         mock_learn_trait.recall.side_effect = ValueError("recall() requires embedder")
         req = RecallRequest(id="req-1", query="test query")
 
-        resp = agent.handle_request(req)
+        resp = http_trait.handle_request(req)
 
         from llm_agent.runtime.server.protocol.v1 import RecallResponse
 
@@ -359,7 +367,7 @@ class TestAgentHandleRequest:
 
     def test_handle_recall_request_success(self, mock_logger):
         """Verify successful recall returns facts serialized correctly."""
-        from llm_agent import Agent, AgentConfig
+        from llm_agent import AgentConfig, ConversationalAgent
         from llm_agent.core.traits.learn import LearnTrait
         from llm_agent.core.traits.llm import LLMTrait
         from llm_agent.runtime.server.protocol.v1 import RecallResponse
@@ -381,12 +389,16 @@ class TestAgentHandleRequest:
 
         # Create agent with traits
         config = AgentConfig(name="test-agent", fact_injection="none")
-        agent = Agent(lg=mock_logger, config=config)
+        agent = ConversationalAgent(lg=mock_logger, config=config)
         agent._traits[LLMTrait] = mock_llm_trait
         agent._traits[LearnTrait] = mock_learn_trait
 
+        # Create HTTPTrait and attach agent
+        http_trait = HTTPTrait(lg=mock_logger)
+        http_trait._agent = agent
+
         req = RecallRequest(id="req-1", query="programming")
-        resp = agent.handle_request(req)
+        resp = http_trait.handle_request(req)
 
         assert isinstance(resp, RecallResponse)
         assert resp.success is True
@@ -397,15 +409,31 @@ class TestAgentHandleRequest:
         assert resp.facts[0]["category"] == "preferences"
         assert resp.facts[0]["similarity"] == 0.85
 
-    def test_handle_feedback_request_error(self, agent):
+    def test_handle_feedback_request_error(self, http_trait):
         # Feedback on unknown response_id
         req = FeedbackRequest(id="req-1", response_id="nonexistent", signal="positive")
 
-        resp = agent.handle_request(req)
+        resp = http_trait.handle_request(req)
 
         assert isinstance(resp, FeedbackResponse)
         assert resp.success is False
         assert "Unknown response_id" in resp.error
+
+    def test_handle_complete_agent_without_complete(self, mock_logger):
+        """Verify error when agent doesn't support complete()."""
+        # Create agent without complete method
+        mock_agent = MagicMock(spec=["name"])
+        mock_agent.name = "test-agent"
+
+        http_trait = HTTPTrait(lg=mock_logger)
+        http_trait._agent = mock_agent
+
+        req = CompleteRequest(id="req-1", query="Hello")
+        resp = http_trait.handle_request(req)
+
+        assert isinstance(resp, CompleteResponse)
+        assert resp.success is False
+        assert "does not support complete()" in resp.error
 
 
 class TestHTTPTraitLifecycle:
@@ -425,7 +453,10 @@ class TestHTTPTraitLifecycle:
     @patch("appinfra.app.fastapi.ServerBuilder")
     def test_on_start_creates_server(self, mock_builder_cls, mock_queue, mock_logger, mock_agent):
         """Verify on_start creates server with correct configuration."""
-        mock_queue.return_value = MagicMock()
+        # Configure mock queue to raise Empty on get() so IPC loop doesn't process mock requests
+        queue_instance = MagicMock()
+        queue_instance.get.side_effect = Empty
+        mock_queue.return_value = queue_instance
         mock_server = MagicMock()
         mock_server.start_subprocess.return_value = MagicMock()
 
@@ -458,7 +489,10 @@ class TestHTTPTraitLifecycle:
     @patch("appinfra.app.fastapi.ServerBuilder")
     def test_on_stop_stops_server(self, mock_builder_cls, mock_queue, mock_logger, mock_agent):
         """Verify on_stop stops server and cleans up."""
-        mock_queue.return_value = MagicMock()
+        # Configure mock queue to raise Empty on get() so IPC loop doesn't process mock requests
+        queue_instance = MagicMock()
+        queue_instance.get.side_effect = Empty
+        mock_queue.return_value = queue_instance
         mock_process = MagicMock()
         mock_server = MagicMock()
         mock_server.start_subprocess.return_value = mock_process
@@ -495,34 +529,6 @@ class TestHTTPTraitIPCLoop:
     def mock_logger(self):
         return MagicMock()
 
-    def test_default_handler_returns_error_response(self, mock_logger):
-        """Verify default handler returns error instead of None."""
-        trait = HTTPTrait(lg=mock_logger)
-
-        # Create a mock request
-        mock_request = MagicMock()
-        mock_request.id = "req-123"
-
-        response = trait._default_handler(mock_request)
-
-        assert response is not None
-        assert response.success is False
-        assert response.id == "req-123"
-        assert "does not implement handle_request" in response.error
-
-    def test_default_handler_handles_missing_id(self, mock_logger):
-        """Verify default handler handles request without id attribute."""
-        trait = HTTPTrait(lg=mock_logger)
-
-        # Create a mock request without id
-        mock_request = MagicMock(spec=[])  # Empty spec means no attributes
-
-        response = trait._default_handler(mock_request)
-
-        assert response is not None
-        assert response.success is False
-        assert response.id == "unknown"
-
     def test_ipc_loop_handles_handler_exception(self, mock_logger):
         """Verify IPC loop sends error response when handler raises."""
         from queue import Queue
@@ -536,13 +542,19 @@ class TestHTTPTraitIPCLoop:
         mock_server.request_queue = Queue()
         mock_server.response_queue = Queue()
         trait._server = mock_server
-        trait._agent = MagicMock()
 
-        # Make handle_request raise an exception
+        # Create mock agent that will cause handle_request to fail
+        mock_agent = MagicMock()
+        mock_agent.name = "test-agent"
+        trait._agent = mock_agent
+
+        # Patch handle_request to raise an exception
+        original_handle = trait.handle_request
+
         def failing_handler(request):
             raise RuntimeError("Handler crashed")
 
-        trait._agent.handle_request = failing_handler
+        trait.handle_request = failing_handler
 
         # Put a request on the queue
         req = HealthRequest(id="req-1")
@@ -563,6 +575,9 @@ class TestHTTPTraitIPCLoop:
         # Run the IPC loop (will process one request then exit)
         trait._ipc_loop(poll_timeout=0.05)
         shutdown_thread.join()
+
+        # Restore original handler
+        trait.handle_request = original_handle
 
         # Verify error response was sent
         assert not mock_server.response_queue.empty()

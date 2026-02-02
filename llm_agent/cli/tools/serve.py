@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import multiprocessing as mp
 import signal
 from collections.abc import Callable
+from queue import Empty
 from typing import TYPE_CHECKING, Any
 
 from appinfra.app.fastapi import ServerBuilder
@@ -12,9 +14,12 @@ from appinfra.app.tools import Tool, ToolConfig
 
 
 if TYPE_CHECKING:
+    from multiprocessing.queues import Queue
+
     from llm_agent.core.traits.learn import LearnTrait
-    from llm_agent.runtime import AgentRegistry, Core
+    from llm_agent.runtime import AgentInfo, AgentRegistry, Core
     from llm_agent.runtime.server import AgentServerConfig
+    from llm_agent.runtime.server.protocol.base import Request, Response
 
 
 class ServeTool(Tool):
@@ -131,24 +136,40 @@ class ServeTool(Tool):
         if learn_trait is not None:
             learn_trait.on_start()
 
-        shutdown_done = False
+        request_q: Queue[Any] = mp.Queue()
+        response_q: Queue[Any] = mp.Queue()
+        shutdown_state = {"requested": False}
 
         def do_shutdown() -> None:
-            nonlocal shutdown_done
-            if shutdown_done:
-                return
-            shutdown_done = True
-            core.shutdown()
-            if learn_trait is not None:
-                learn_trait.on_stop()
+            self._do_shutdown(shutdown_state, core, learn_trait)
 
         self._install_signal_handlers(do_shutdown)
-        server = self._build_server(config, core)
+        server = self._build_server(config, request_q, response_q)
 
         try:
-            server.start()
+            process = server.start_subprocess()
+
+            def is_shutdown() -> bool:
+                return shutdown_state["requested"] or not process.is_alive()
+
+            self._ipc_loop(core, request_q, response_q, is_shutdown)
+            process.join()
         finally:
             do_shutdown()
+
+    def _do_shutdown(
+        self,
+        state: dict[str, bool],
+        core: Core,
+        learn_trait: LearnTrait | None,
+    ) -> None:
+        """Execute shutdown sequence (idempotent)."""
+        if state["requested"]:
+            return
+        state["requested"] = True
+        core.shutdown()
+        if learn_trait is not None:
+            learn_trait.on_stop()
 
     def _install_signal_handlers(self, do_shutdown: Callable[[], None]) -> None:
         """Install signal handlers for graceful shutdown.
@@ -164,8 +185,13 @@ class ServeTool(Tool):
         signal.signal(signal.SIGTERM, shutdown_handler)
         signal.signal(signal.SIGINT, shutdown_handler)
 
-    def _build_server(self, config: AgentServerConfig, core: Core) -> Any:
-        """Build the FastAPI server with routes."""
+    def _build_server(
+        self,
+        config: AgentServerConfig,
+        request_q: Queue[Any],
+        response_q: Queue[Any],
+    ) -> Any:
+        """Build the FastAPI server with subprocess mode and IPC."""
         from appinfra.app.fastapi.runtime.server import Server
 
         from llm_agent.runtime.server.management import create_management_routes
@@ -173,14 +199,279 @@ class ServeTool(Tool):
         server: Server = (
             ServerBuilder("agent-gateway")
             .with_config(config.server)
+            .subprocess.with_ipc(request_q, response_q)
+            .done()
             .routes.with_router(create_management_routes())
             .done()
             .uvicorn.with_config(config.server.uvicorn)
             .done()
             .build()
         )
-        server.app.state.core = core
         return server
+
+    def _ipc_loop(
+        self,
+        core: Core,
+        request_q: Queue[Any],
+        response_q: Queue[Any],
+        is_shutdown: Callable[[], bool],
+        poll_timeout: float = 0.1,
+    ) -> None:
+        """Process IPC requests from FastAPI subprocess."""
+        while not is_shutdown():
+            request = None
+            try:
+                request = request_q.get(timeout=poll_timeout)
+                response = self._handle_request(core, request)
+                response_q.put(response)
+            except Empty:
+                pass
+            except Exception:
+                self.lg.exception("IPC processing error")
+                if request is not None:
+                    from llm_agent.runtime.server.protocol.base import Response
+
+                    error_resp = Response(
+                        id=getattr(request, "id", "unknown"),
+                        success=False,
+                        error="Internal server error",
+                    )
+                    response_q.put(error_resp)
+
+    def _get_ipc_handlers(self) -> dict[str, Callable[[Core, Request], Response]]:
+        """Get mapping of message types to handlers."""
+        from llm_agent.runtime.server.protocol.management import (
+            AskAgentRequest,
+            FeedbackAgentRequest,
+            GetAgentRequest,
+            GetInsightsRequest,
+            ListAgentsRequest,
+            MgmtHealthRequest,
+            StartAgentRequest,
+            StopAgentRequest,
+        )
+
+        return {
+            MgmtHealthRequest.message_type: self._handle_health,
+            ListAgentsRequest.message_type: self._handle_list_agents,
+            GetAgentRequest.message_type: self._handle_get_agent,
+            StartAgentRequest.message_type: self._handle_start_agent,
+            StopAgentRequest.message_type: self._handle_stop_agent,
+            AskAgentRequest.message_type: self._handle_ask_agent,
+            FeedbackAgentRequest.message_type: self._handle_feedback_agent,
+            GetInsightsRequest.message_type: self._handle_get_insights,
+        }
+
+    def _handle_request(self, core: Core, request: Request) -> Response:
+        """Dispatch IPC request to appropriate handler."""
+        from llm_agent.runtime.server.protocol.base import Response
+
+        handler = self._get_ipc_handlers().get(request.message_type)
+        if handler is None:
+            return Response(
+                id=request.id,
+                success=False,
+                error=f"Unknown message type: {request.message_type}",
+            )
+
+        return handler(core, request)
+
+    def _handle_health(self, core: Core, request: Request) -> Response:
+        """Handle health check request."""
+        from llm_agent.runtime.server.protocol.management import MgmtHealthResponse
+
+        return MgmtHealthResponse(
+            id=request.id,
+            status="ok",
+            agent_count=len(core.registry.list_agents()),
+        )
+
+    def _handle_list_agents(self, core: Core, request: Request) -> Response:
+        """Handle list agents request."""
+        from llm_agent.runtime.server.protocol.management import ListAgentsResponse
+
+        agents = core.registry.list_agents()
+        return ListAgentsResponse(
+            id=request.id,
+            agents=[self._agent_info_to_dict(a) for a in agents],
+        )
+
+    def _handle_get_agent(self, core: Core, request: Request) -> Response:
+        """Handle get agent request."""
+        from llm_agent.runtime.handle import AgentInfo
+        from llm_agent.runtime.server.protocol.management import (
+            GetAgentRequest,
+            GetAgentResponse,
+        )
+
+        req = (
+            request
+            if isinstance(request, GetAgentRequest)
+            else GetAgentRequest(**request.model_dump())
+        )
+        handle = core.registry.get(req.agent_name)
+        if handle is None:
+            return GetAgentResponse(
+                id=req.id,
+                success=False,
+                error=f"Agent not found: {req.agent_name}",
+            )
+
+        info = AgentInfo.from_handle(handle)
+        return GetAgentResponse(
+            id=req.id,
+            name=info.name,
+            status=info.status,
+            cycle_count=info.cycle_count,
+            last_run=info.last_run.isoformat() if info.last_run else None,
+            error=info.error,
+            schedule_interval=info.schedule_interval,
+        )
+
+    def _handle_start_agent(self, core: Core, request: Request) -> Response:
+        """Handle start agent request."""
+        from llm_agent.runtime.server.protocol.management import (
+            StartAgentRequest,
+            StartAgentResponse,
+        )
+
+        req = (
+            request
+            if isinstance(request, StartAgentRequest)
+            else StartAgentRequest(**request.model_dump())
+        )
+        try:
+            info = core.start(req.agent_name)
+            return StartAgentResponse(
+                id=req.id,
+                name=info.name,
+                status=info.status,
+                cycle_count=info.cycle_count,
+                last_run=info.last_run.isoformat() if info.last_run else None,
+                error=info.error,
+                schedule_interval=info.schedule_interval,
+            )
+        except KeyError:
+            return StartAgentResponse(
+                id=req.id,
+                success=False,
+                error=f"Agent not found: {req.agent_name}",
+            )
+        except ValueError as e:
+            return StartAgentResponse(id=req.id, success=False, error=str(e))
+
+    def _handle_stop_agent(self, core: Core, request: Request) -> Response:
+        """Handle stop agent request."""
+        from llm_agent.runtime.server.protocol.management import (
+            StopAgentRequest,
+            StopAgentResponse,
+        )
+
+        req = (
+            request
+            if isinstance(request, StopAgentRequest)
+            else StopAgentRequest(**request.model_dump())
+        )
+        try:
+            info = core.stop(req.agent_name)
+            return StopAgentResponse(
+                id=req.id,
+                name=info.name,
+                status=info.status,
+                cycle_count=info.cycle_count,
+                last_run=info.last_run.isoformat() if info.last_run else None,
+                error=info.error,
+                schedule_interval=info.schedule_interval,
+            )
+        except KeyError:
+            return StopAgentResponse(
+                id=req.id,
+                success=False,
+                error=f"Agent not found: {req.agent_name}",
+            )
+
+    def _handle_ask_agent(self, core: Core, request: Request) -> Response:
+        """Handle ask agent request."""
+        from llm_agent.runtime.server.protocol.management import (
+            AskAgentRequest,
+            AskAgentResponse,
+        )
+
+        req = (
+            request
+            if isinstance(request, AskAgentRequest)
+            else AskAgentRequest(**request.model_dump())
+        )
+        try:
+            response = core.ask(req.agent_name, req.question)
+            return AskAgentResponse(id=req.id, response=response)
+        except KeyError:
+            return AskAgentResponse(
+                id=req.id,
+                success=False,
+                error=f"Agent not found: {req.agent_name}",
+            )
+        except RuntimeError as e:
+            return AskAgentResponse(id=req.id, success=False, error=str(e))
+
+    def _handle_feedback_agent(self, core: Core, request: Request) -> Response:
+        """Handle feedback request."""
+        from llm_agent.runtime.server.protocol.management import (
+            FeedbackAgentRequest,
+            FeedbackAgentResponse,
+        )
+
+        req = (
+            request
+            if isinstance(request, FeedbackAgentRequest)
+            else FeedbackAgentRequest(**request.model_dump())
+        )
+        try:
+            core.feedback(req.agent_name, req.message)
+            return FeedbackAgentResponse(id=req.id)
+        except KeyError:
+            return FeedbackAgentResponse(
+                id=req.id,
+                success=False,
+                error=f"Agent not found: {req.agent_name}",
+            )
+        except RuntimeError as e:
+            return FeedbackAgentResponse(id=req.id, success=False, error=str(e))
+
+    def _handle_get_insights(self, core: Core, request: Request) -> Response:
+        """Handle get insights request."""
+        from llm_agent.runtime.server.protocol.management import (
+            GetInsightsRequest,
+            GetInsightsResponse,
+        )
+
+        req = (
+            request
+            if isinstance(request, GetInsightsRequest)
+            else GetInsightsRequest(**request.model_dump())
+        )
+        try:
+            insights = core.get_insights(req.agent_name, req.limit)
+            return GetInsightsResponse(id=req.id, insights=insights)
+        except KeyError:
+            return GetInsightsResponse(
+                id=req.id,
+                success=False,
+                error=f"Agent not found: {req.agent_name}",
+            )
+        except RuntimeError as e:
+            return GetInsightsResponse(id=req.id, success=False, error=str(e))
+
+    def _agent_info_to_dict(self, info: AgentInfo) -> dict[str, Any]:
+        """Convert AgentInfo to dict for response."""
+        return {
+            "name": info.name,
+            "status": info.status,
+            "cycle_count": info.cycle_count,
+            "last_run": info.last_run.isoformat() if info.last_run else None,
+            "error": info.error,
+            "schedule_interval": info.schedule_interval,
+        }
 
     def _register_agents(
         self, registry: AgentRegistry, core: Core, config: AgentServerConfig
@@ -205,13 +496,25 @@ class ServeTool(Tool):
 
     def _build_agent_config_dict(self, name: str, agent_config: Any) -> dict[str, Any]:
         """Build config dict for agent registration."""
-        return {
+        config_dict: dict[str, Any] = {
             "name": name,
-            "directive": agent_config.directive.model_dump(),
             "task": agent_config.task.model_dump(),
             "tools": agent_config.tools,
-            "schedule": agent_config.schedule.model_dump() if agent_config.schedule else None,
+            "conversation": agent_config.conversation,
         }
+
+        # Add identity (can be string or Identity object)
+        if agent_config.identity is not None:
+            if isinstance(agent_config.identity, str):
+                config_dict["identity"] = agent_config.identity
+            else:
+                config_dict["identity"] = agent_config.identity.model_dump()
+
+        # Add method if specified
+        if agent_config.method is not None:
+            config_dict["method"] = agent_config.method
+
+        return config_dict
 
     def _apply_cli_overrides(self, config: Any) -> None:
         """Apply command-line overrides to config."""

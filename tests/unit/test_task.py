@@ -7,9 +7,9 @@ import pytest
 from pydantic import BaseModel
 
 from llm_agent import (
-    Agent,
     AgentConfig,
     CompletionResult,
+    ConversationalAgent,
     ShellTool,
     Task,
     TaskResult,
@@ -136,12 +136,14 @@ class TestAgentExecuteSimple:
     def agent_with_llm(self, mock_logger, mock_llm_trait):
         from llm_agent.core.traits.llm import LLMTrait
 
-        agent = Agent(lg=mock_logger, config=AgentConfig(name="test", fact_injection="none"))
+        agent = ConversationalAgent(
+            lg=mock_logger, config=AgentConfig(name="test", fact_injection="none")
+        )
         agent._traits[LLMTrait] = mock_llm_trait
         return agent
 
     def test_execute_requires_llm_trait(self, mock_logger):
-        agent = Agent(lg=mock_logger, config=AgentConfig(name="test"))
+        agent = ConversationalAgent(lg=mock_logger, config=AgentConfig(name="test"))
         task = Task(name="test", description="Do something")
 
         with pytest.raises(RuntimeError, match="LLMTrait required"):
@@ -204,7 +206,9 @@ class TestAgentExecuteStructured:
     def agent_with_llm(self, mock_logger, mock_llm_trait):
         from llm_agent.core.traits.llm import LLMTrait
 
-        agent = Agent(lg=mock_logger, config=AgentConfig(name="test", fact_injection="none"))
+        agent = ConversationalAgent(
+            lg=mock_logger, config=AgentConfig(name="test", fact_injection="none")
+        )
         agent._traits[LLMTrait] = mock_llm_trait
         return agent
 
@@ -278,7 +282,9 @@ class TestAgentExecuteWithTools:
         from llm_agent.core.traits.llm import LLMTrait
         from llm_agent.core.traits.tools import ToolsTrait
 
-        agent = Agent(lg=mock_logger, config=AgentConfig(name="test", fact_injection="none"))
+        agent = ConversationalAgent(
+            lg=mock_logger, config=AgentConfig(name="test", fact_injection="none")
+        )
         agent._traits[LLMTrait] = mock_llm_trait
         agent._traits[ToolsTrait] = mock_tools_trait
         return agent
@@ -341,7 +347,9 @@ class TestAgentExecuteWithTools:
         empty_tools_trait = MagicMock(spec=ToolsTrait)
         empty_tools_trait.has_tools.return_value = False
 
-        agent = Agent(lg=mock_logger, config=AgentConfig(name="test", fact_injection="none"))
+        agent = ConversationalAgent(
+            lg=mock_logger, config=AgentConfig(name="test", fact_injection="none")
+        )
         agent._traits[LLMTrait] = mock_llm_trait
         agent._traits[ToolsTrait] = empty_tools_trait
 
@@ -414,7 +422,9 @@ class TestAgentExecuteToolsAndSchema:
         from llm_agent.core.traits.llm import LLMTrait
         from llm_agent.core.traits.tools import ToolsTrait
 
-        agent = Agent(lg=mock_logger, config=AgentConfig(name="test", fact_injection="none"))
+        agent = ConversationalAgent(
+            lg=mock_logger, config=AgentConfig(name="test", fact_injection="none")
+        )
         agent._traits[LLMTrait] = mock_llm_trait
         agent._traits[ToolsTrait] = mock_tools_trait
         return agent

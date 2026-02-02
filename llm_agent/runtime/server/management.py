@@ -1,22 +1,39 @@
 """Agent management routes.
 
 REST API for managing agent lifecycle via Core.
+Routes use IPC to communicate with main process where Core runs.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-
-if TYPE_CHECKING:
-    from llm_agent.runtime import AgentInfo, Core
+from llm_agent.runtime.server.protocol.management import (
+    AskAgentRequest,
+    AskAgentResponse,
+    FeedbackAgentRequest,
+    FeedbackAgentResponse,
+    GetAgentRequest,
+    GetAgentResponse,
+    GetInsightsRequest,
+    GetInsightsResponse,
+    ListAgentsRequest,
+    ListAgentsResponse,
+    MgmtHealthRequest,
+    MgmtHealthResponse,
+    StartAgentRequest,
+    StartAgentResponse,
+    StopAgentRequest,
+    StopAgentResponse,
+)
 
 
 # ============================================================================
-# Request/Response Models
+# Response Models (for OpenAPI docs)
 # ============================================================================
 
 
@@ -88,26 +105,17 @@ class HealthResponse(BaseModel):
 # ============================================================================
 
 
-def _to_response(info: AgentInfo) -> AgentInfoResponse:
-    """Convert AgentInfo to response model."""
-    return AgentInfoResponse(
-        name=info.name,
-        status=info.status,
-        cycle_count=info.cycle_count,
-        last_run=info.last_run.isoformat() if info.last_run else None,
-        error=info.error,
-        schedule_interval=info.schedule_interval,
-    )
-
-
-def _get_core(request: Request) -> Core:
-    """Get Core from request app state."""
-    return cast("Core", request.app.state.core)
-
-
-def _agent_not_found(name: str) -> HTTPException:
-    """Create 404 exception for agent not found."""
-    return HTTPException(status_code=404, detail=f"Agent not found: {name}")
+def _check_response(resp: Any, agent_name: str | None = None) -> None:
+    """Check IPC response and raise HTTP exceptions as needed."""
+    if not resp.success:
+        error = resp.error or "Unknown error"
+        if agent_name and "not found" in error.lower():
+            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_name}")
+        # Internal IPC errors (from exception handling) are server errors
+        if "internal server error" in error.lower():
+            raise HTTPException(status_code=500, detail=error)
+        # Business logic errors (e.g., "not running", "invalid transition") are client errors
+        raise HTTPException(status_code=400, detail=error)
 
 
 # ============================================================================
@@ -115,86 +123,97 @@ def _agent_not_found(name: str) -> HTTPException:
 # ============================================================================
 
 
-def _health(request: Request) -> HealthResponse:
+async def _health(request: Request) -> HealthResponse:
     """Health check endpoint."""
-    core = _get_core(request)
-    return HealthResponse(status="ok", agent_count=len(core.registry.list_agents()))
+    req = MgmtHealthRequest(id=str(uuid4()))
+    resp = await request.app.state.ipc_channel.submit(req.id, req)
+    resp = cast(MgmtHealthResponse, resp)
+    _check_response(resp)
+    return HealthResponse(status=resp.status, agent_count=resp.agent_count)
 
 
-def _list_agents(request: Request) -> AgentListResponse:
+async def _list_agents(request: Request) -> AgentListResponse:
     """List all registered agents."""
-    core = _get_core(request)
-    agents = core.registry.list_agents()
-    return AgentListResponse(agents=[_to_response(a) for a in agents])
+    req = ListAgentsRequest(id=str(uuid4()))
+    resp = await request.app.state.ipc_channel.submit(req.id, req)
+    resp = cast(ListAgentsResponse, resp)
+    _check_response(resp)
+    return AgentListResponse(agents=[AgentInfoResponse(**a) for a in resp.agents])
 
 
-def _get_agent(name: str, request: Request) -> AgentInfoResponse:
+async def _get_agent(name: str, request: Request) -> AgentInfoResponse:
     """Get agent information by name."""
-    core = _get_core(request)
-    handle = core.registry.get(name)
-    if handle is None:
-        raise _agent_not_found(name)
-    from llm_agent.runtime.handle import AgentInfo
+    req = GetAgentRequest(id=str(uuid4()), agent_name=name)
+    resp = await request.app.state.ipc_channel.submit(req.id, req)
+    resp = cast(GetAgentResponse, resp)
+    _check_response(resp, name)
+    return AgentInfoResponse(
+        name=resp.name,
+        status=resp.status,
+        cycle_count=resp.cycle_count,
+        last_run=resp.last_run,
+        error=resp.error,
+        schedule_interval=resp.schedule_interval,
+    )
 
-    return _to_response(AgentInfo.from_handle(handle))
 
-
-def _start_agent(name: str, request: Request) -> AgentInfoResponse:
+async def _start_agent(name: str, request: Request) -> AgentInfoResponse:
     """Start an agent process."""
-    core = _get_core(request)
-    try:
-        info = core.start(name)
-        return _to_response(info)
-    except KeyError:
-        raise _agent_not_found(name) from None
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+    req = StartAgentRequest(id=str(uuid4()), agent_name=name)
+    resp = await request.app.state.ipc_channel.submit(req.id, req)
+    resp = cast(StartAgentResponse, resp)
+    _check_response(resp, name)
+    return AgentInfoResponse(
+        name=resp.name,
+        status=resp.status,
+        cycle_count=resp.cycle_count,
+        last_run=resp.last_run,
+        error=resp.error,
+        schedule_interval=resp.schedule_interval,
+    )
 
 
-def _stop_agent(name: str, request: Request) -> AgentInfoResponse:
+async def _stop_agent(name: str, request: Request) -> AgentInfoResponse:
     """Stop an agent process."""
-    core = _get_core(request)
-    try:
-        info = core.stop(name)
-        return _to_response(info)
-    except KeyError:
-        raise _agent_not_found(name) from None
+    req = StopAgentRequest(id=str(uuid4()), agent_name=name)
+    resp = await request.app.state.ipc_channel.submit(req.id, req)
+    resp = cast(StopAgentResponse, resp)
+    _check_response(resp, name)
+    return AgentInfoResponse(
+        name=resp.name,
+        status=resp.status,
+        cycle_count=resp.cycle_count,
+        last_run=resp.last_run,
+        error=resp.error,
+        schedule_interval=resp.schedule_interval,
+    )
 
 
-def _ask_agent(name: str, body: AskRequest, request: Request) -> AskResponse:
+async def _ask_agent(name: str, body: AskRequest, request: Request) -> AskResponse:
     """Ask an agent a question."""
-    core = _get_core(request)
-    try:
-        response = core.ask(name, body.question)
-        return AskResponse(response=response)
-    except KeyError:
-        raise _agent_not_found(name) from None
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+    req = AskAgentRequest(id=str(uuid4()), agent_name=name, question=body.question)
+    resp = await request.app.state.ipc_channel.submit(req.id, req)
+    resp = cast(AskAgentResponse, resp)
+    _check_response(resp, name)
+    return AskResponse(response=resp.response)
 
 
-def _feedback_agent(name: str, body: FeedbackRequest, request: Request) -> FeedbackResponse:
+async def _feedback_agent(name: str, body: FeedbackRequest, request: Request) -> FeedbackResponse:
     """Send feedback to an agent."""
-    core = _get_core(request)
-    try:
-        core.feedback(name, body.message)
-        return FeedbackResponse(success=True)
-    except KeyError:
-        raise _agent_not_found(name) from None
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+    req = FeedbackAgentRequest(id=str(uuid4()), agent_name=name, message=body.message)
+    resp = await request.app.state.ipc_channel.submit(req.id, req)
+    resp = cast(FeedbackAgentResponse, resp)
+    _check_response(resp, name)
+    return FeedbackResponse(success=True)
 
 
-def _get_insights(name: str, request: Request, limit: int = 10) -> InsightsResponse:
+async def _get_insights(name: str, request: Request, limit: int = 10) -> InsightsResponse:
     """Get recent insights from an agent."""
-    core = _get_core(request)
-    try:
-        insights = core.get_insights(name, limit)
-        return InsightsResponse(insights=[InsightResponse(**i) for i in insights])
-    except KeyError:
-        raise _agent_not_found(name) from None
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+    req = GetInsightsRequest(id=str(uuid4()), agent_name=name, limit=limit)
+    resp = await request.app.state.ipc_channel.submit(req.id, req)
+    resp = cast(GetInsightsResponse, resp)
+    _check_response(resp, name)
+    return InsightsResponse(insights=[InsightResponse(**i) for i in resp.insights])
 
 
 # ============================================================================
@@ -208,7 +227,7 @@ def create_management_routes() -> APIRouter:
     Returns a new router instance each time, allowing safe mounting
     to multiple apps or test isolation.
 
-    Routes delegate to Core stored in app.state.
+    Routes use IPC to communicate with main process where Core runs.
     """
     router = APIRouter(tags=["Agent Management"])
 

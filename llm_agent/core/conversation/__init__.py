@@ -33,6 +33,7 @@ from llm_agent.core.conversation.compactor import (
     SummarizingCompactor,
 )
 from llm_agent.core.conversation.conversation import Conversation, ConversationConfig
+from llm_agent.core.conversation.runner import ConversationRunner
 from llm_agent.core.conversation.tokens import (
     DEFAULT_CHARS_PER_TOKEN,
     estimate_message_tokens,
@@ -44,6 +45,7 @@ __all__ = [
     # Core
     "Conversation",
     "ConversationConfig",
+    "ConversationRunner",
     # Compactors
     "Compactor",
     "SlidingWindowCompactor",
