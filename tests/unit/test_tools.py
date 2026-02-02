@@ -1549,51 +1549,244 @@ class TestToolExecutor:
         assert result.tool_calls[0].result.success is False
         assert "Failed to parse arguments" in result.tool_calls[0].result.error
 
-    def test_run_terminal_tool_ends_early(self, mock_logger, mock_llm, default_task):
-        """Terminal tool ends execution immediately."""
+    def test_run_terminal_tool_early_requires_confirmation(
+        self, mock_logger, mock_llm, default_task
+    ):
+        """Terminal tool without prior work requires confirmation."""
         from llm_agent.core.tools.builtin.complete import CompleteTaskTool
 
         registry = ToolRegistry()
         registry.register(CompleteTaskTool())
 
-        # LLM calls complete_task - should end immediately without second call
-        mock_llm.complete.return_value = CompletionResult(
-            id="resp-1",
-            content="I've figured it out.",
-            model="test",
-            tokens_used=10,
-            latency_ms=100,
-            tool_calls=[
-                {
-                    "id": "call-1",
-                    "type": "function",
-                    "function": {
-                        "name": "complete_task",
-                        "arguments": json.dumps(
-                            {
-                                "status": "done",
-                                "conclusion": "The answer is 42.",
-                            }
-                        ),
-                    },
-                }
-            ],
-        )
+        # First call: LLM calls complete_task (early - no prior work)
+        # Second call: LLM confirms by calling complete_task again
+        mock_llm.complete.side_effect = [
+            CompletionResult(
+                id="resp-1",
+                content="I've figured it out.",
+                model="test",
+                tokens_used=10,
+                latency_ms=100,
+                tool_calls=[
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "complete_task",
+                            "arguments": json.dumps(
+                                {"status": "done", "conclusion": "The answer is 42."}
+                            ),
+                        },
+                    }
+                ],
+            ),
+            # Confirmation response - LLM confirms by calling complete_task again
+            CompletionResult(
+                id="resp-2",
+                content="Yes, I'm done.",
+                model="test",
+                tokens_used=5,
+                latency_ms=50,
+                tool_calls=[
+                    {
+                        "id": "call-2",
+                        "type": "function",
+                        "function": {
+                            "name": "complete_task",
+                            "arguments": json.dumps(
+                                {"status": "done", "conclusion": "The answer is 42."}
+                            ),
+                        },
+                    }
+                ],
+            ),
+        ]
 
         executor = ToolExecutor(mock_logger, mock_llm, registry, default_task)
         result = executor.run(messages=[Message(role="user", content="Solve this")])
 
-        # Should return immediately after terminal tool
+        # Should complete after confirmation
         assert result.iterations == 1
         assert result.terminal_data == {
             "status": "done",
             "conclusion": "The answer is 42.",
         }
+        # Two complete_task calls (first rejected, second confirmed)
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].name == "complete_task"
-        assert result.tool_calls[0].result.terminal is True
-        # LLM should only be called once
-        assert mock_llm.complete.call_count == 1
+        # LLM called twice (initial + confirmation)
+        assert mock_llm.complete.call_count == 2
+
+    def test_run_terminal_tool_after_work_ends_immediately(
+        self, mock_logger, mock_llm, registry_with_shell, default_task
+    ):
+        """Terminal tool after prior work ends immediately (no confirmation)."""
+        from llm_agent.core.tools.builtin.complete import CompleteTaskTool
+
+        registry_with_shell.register(CompleteTaskTool())
+
+        # First call: LLM uses shell tool (does work)
+        # Second call: LLM returns result (no tools)
+        # Third call: Confirmation prompt - LLM calls complete_task
+        mock_llm.complete.side_effect = [
+            CompletionResult(
+                id="resp-1",
+                content="Let me check.",
+                model="test",
+                tokens_used=10,
+                latency_ms=100,
+                tool_calls=[
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "shell",
+                            "arguments": json.dumps({"command": "echo hello"}),
+                        },
+                    }
+                ],
+            ),
+            CompletionResult(
+                id="resp-2",
+                content="The output is hello.",
+                model="test",
+                tokens_used=10,
+                latency_ms=100,
+                tool_calls=None,
+            ),
+            # Confirmation - LLM calls complete_task
+            CompletionResult(
+                id="resp-3",
+                content="Done.",
+                model="test",
+                tokens_used=5,
+                latency_ms=50,
+                tool_calls=[
+                    {
+                        "id": "call-2",
+                        "type": "function",
+                        "function": {
+                            "name": "complete_task",
+                            "arguments": json.dumps(
+                                {"status": "done", "conclusion": "Output was hello."}
+                            ),
+                        },
+                    }
+                ],
+            ),
+        ]
+
+        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell, default_task)
+        result = executor.run(messages=[Message(role="user", content="Run echo hello")])
+
+        # Should complete - terminal tool after work needs no extra confirmation
+        assert result.terminal_data == {
+            "status": "done",
+            "conclusion": "Output was hello.",
+        }
+        assert len(result.tool_calls) == 2  # shell + complete_task
+        assert result.tool_calls[0].name == "shell"
+        assert result.tool_calls[1].name == "complete_task"
+        # 3 LLM calls: initial, no-tools response, confirmation with terminal
+        assert mock_llm.complete.call_count == 3
+
+    def test_run_early_completion_rejected_then_work(
+        self, mock_logger, mock_llm, registry_with_shell, default_task
+    ):
+        """Early completion prompt causes LLM to do work instead of confirming.
+
+        This tests the scenario where an agent tries to complete immediately
+        (e.g., stuck) but after the confirmation prompt, decides to actually
+        try working on the task.
+        """
+        from llm_agent.core.tools.builtin.complete import CompleteTaskTool
+
+        registry_with_shell.register(CompleteTaskTool())
+
+        mock_llm.complete.side_effect = [
+            # First: LLM tries to complete immediately with "stuck"
+            CompletionResult(
+                id="resp-1",
+                content="",
+                model="test",
+                tokens_used=10,
+                latency_ms=100,
+                tool_calls=[
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "complete_task",
+                            "arguments": json.dumps(
+                                {"status": "stuck", "conclusion": "I need to explore first."}
+                            ),
+                        },
+                    }
+                ],
+            ),
+            # Second: After confirmation prompt, LLM decides to do work instead
+            CompletionResult(
+                id="resp-2",
+                content="Let me try.",
+                model="test",
+                tokens_used=10,
+                latency_ms=100,
+                tool_calls=[
+                    {
+                        "id": "call-2",
+                        "type": "function",
+                        "function": {
+                            "name": "shell",
+                            "arguments": json.dumps({"command": "echo hello"}),
+                        },
+                    }
+                ],
+            ),
+            # Third: LLM returns result
+            CompletionResult(
+                id="resp-3",
+                content="Found the answer: hello",
+                model="test",
+                tokens_used=10,
+                latency_ms=100,
+                tool_calls=None,
+            ),
+            # Fourth: Confirmation prompt - LLM confirms done
+            CompletionResult(
+                id="resp-4",
+                content="Done.",
+                model="test",
+                tokens_used=5,
+                latency_ms=50,
+                tool_calls=[
+                    {
+                        "id": "call-3",
+                        "type": "function",
+                        "function": {
+                            "name": "complete_task",
+                            "arguments": json.dumps(
+                                {"status": "done", "conclusion": "The answer is hello."}
+                            ),
+                        },
+                    }
+                ],
+            ),
+        ]
+
+        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell, default_task)
+        result = executor.run(messages=[Message(role="user", content="Find the answer")])
+
+        # Should complete successfully after doing work
+        assert result.terminal_data == {
+            "status": "done",
+            "conclusion": "The answer is hello.",
+        }
+        # Two tool calls: shell (work) + complete_task (final)
+        assert len(result.tool_calls) == 2
+        assert result.tool_calls[0].name == "shell"
+        assert result.tool_calls[1].name == "complete_task"
+        # 4 LLM calls total
+        assert mock_llm.complete.call_count == 4
 
 
 class TestRememberTool:

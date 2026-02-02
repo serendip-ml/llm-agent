@@ -127,6 +127,8 @@ class BaseTool:
     name: str
     description: str
     parameters: dict[str, Any]
+    terminal: bool = False
+    """If True, calling this tool ends the execution loop."""
 
     def execute(self, **kwargs: Any) -> ToolResult:
         """Execute the tool. Must be implemented by subclasses."""
