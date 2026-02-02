@@ -156,9 +156,8 @@ class DecisionExecutor:
         confirm_interpreted = self._interpreter.interpret(confirm_result, has_prior_work=False)
 
         if confirm_interpreted.event == ResponseEvent.TEXT_ONLY:
-            # LLM confirmed done - remove confirmation messages
+            # LLM confirmed done - remove confirmation prompt but keep assistant response
             working_messages.pop()  # Remove confirmation prompt
-            working_messages.pop()  # Remove assistant echo
             self._lg.trace("completion confirmed")
             return interpreted.raw.content, confirm_result.tokens_used, None
 
