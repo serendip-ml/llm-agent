@@ -33,7 +33,6 @@ from llm_agent.core.tools import (
     ToolCall,
     ToolCallResult,
     ToolExecutionResult,
-    ToolExecutor,
     ToolRegistry,
     ToolResult,
 )
@@ -74,7 +73,6 @@ __all__ = [
     "ToolCall",
     "ToolCallResult",
     "ToolExecutionResult",
-    "ToolExecutor",
     "ToolRegistry",
     "ToolResult",
     # Traits
