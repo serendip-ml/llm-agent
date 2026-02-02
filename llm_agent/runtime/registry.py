@@ -69,7 +69,7 @@ class AgentRegistry:
             schedule_interval=schedule_interval,
         )
         self._agents[name] = handle
-        self._lg.info("agent registered", extra={"agent": name})
+        self._lg.debug("registered agent", extra={"agent": name})
         return handle
 
     def get(self, name: str) -> AgentHandle | None:

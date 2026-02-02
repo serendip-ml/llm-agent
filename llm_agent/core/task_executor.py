@@ -147,11 +147,12 @@ class TaskExecutor:
             lg=self.lg,
             llm=LLMTraitBackend(self.llm_trait),
             registry=self.tools_trait.registry,
+            task=task,
             model=self.model,
         )
 
         try:
-            result = executor.run(messages=messages, max_iterations=task.max_iterations)
+            result = executor.run(messages=messages)
             self.lg.debug("tool loop completed", extra={"iterations": result.iterations})
             return result, None
         except RuntimeError as e:

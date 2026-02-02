@@ -303,7 +303,7 @@ class LLMTraitBackend:
     Example:
         llm_trait = agent.require_trait(LLMTrait)
         backend = LLMTraitBackend(llm_trait)
-        executor = ToolExecutor(lg=lg, llm=backend, registry=registry)
+        executor = ToolExecutor(lg=lg, llm=backend, registry=registry, task=task)
     """
 
     def __init__(self, llm_trait: LLMTrait) -> None:

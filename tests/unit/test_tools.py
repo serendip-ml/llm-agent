@@ -1295,7 +1295,13 @@ class TestToolExecutor:
         registry.register(ShellTool())
         return registry
 
-    def test_run_no_tools_called(self, mock_logger, mock_llm, registry_with_shell):
+    @pytest.fixture
+    def default_task(self):
+        from llm_agent.core.task import Task
+
+        return Task(name="test", description="test task")
+
+    def test_run_no_tools_called(self, mock_logger, mock_llm, registry_with_shell, default_task):
         """LLM returns final response without calling tools."""
         mock_llm.complete.return_value = CompletionResult(
             id="resp-1",
@@ -1306,14 +1312,14 @@ class TestToolExecutor:
             tool_calls=None,
         )
 
-        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell)
+        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell, default_task)
         result = executor.run(messages=[Message(role="user", content="Hello")])
 
         assert result.content == "Here is the answer"
         assert result.tool_calls == []
         assert result.iterations == 1
 
-    def test_run_with_tool_call(self, mock_logger, mock_llm, registry_with_shell):
+    def test_run_with_tool_call(self, mock_logger, mock_llm, registry_with_shell, default_task):
         """LLM calls a tool, then returns final response."""
         # First call: LLM wants to call shell tool
         mock_llm.complete.side_effect = [
@@ -1334,7 +1340,7 @@ class TestToolExecutor:
                     }
                 ],
             ),
-            # Second call: LLM returns final response
+            # Second call: LLM returns final response (no tools)
             CompletionResult(
                 id="resp-2",
                 content="The command output was: hello",
@@ -1343,9 +1349,18 @@ class TestToolExecutor:
                 latency_ms=100,
                 tool_calls=None,
             ),
+            # Third call: Confirmation - LLM confirms done (no tools)
+            CompletionResult(
+                id="resp-3",
+                content="I'm done.",
+                model="test",
+                tokens_used=5,
+                latency_ms=50,
+                tool_calls=None,
+            ),
         ]
 
-        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell)
+        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell, default_task)
         result = executor.run(messages=[Message(role="user", content="Run echo hello")])
 
         assert result.content == "The command output was: hello"
@@ -1354,10 +1369,12 @@ class TestToolExecutor:
         assert result.tool_calls[0].result.success is True
         assert "hello" in result.tool_calls[0].result.output
         assert result.iterations == 2
-        assert result.total_tokens == 25
+        assert result.total_tokens == 25  # Confirmation tokens not counted in iterations
 
     def test_run_max_iterations_exceeded(self, mock_logger, mock_llm, registry_with_shell):
         """Error when max iterations exceeded."""
+        from llm_agent.core.task import Task
+
         # LLM keeps calling tools forever
         mock_llm.complete.return_value = CompletionResult(
             id="resp-1",
@@ -1377,15 +1394,13 @@ class TestToolExecutor:
             ],
         )
 
-        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell)
+        task = Task(name="test", description="test", max_iterations=3)
+        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell, task)
 
         with pytest.raises(RuntimeError, match="exceeded.*iterations"):
-            executor.run(
-                messages=[Message(role="user", content="Loop forever")],
-                max_iterations=3,
-            )
+            executor.run(messages=[Message(role="user", content="Loop forever")])
 
-    def test_run_unknown_tool(self, mock_logger, mock_llm, registry_with_shell):
+    def test_run_unknown_tool(self, mock_logger, mock_llm, registry_with_shell, default_task):
         """Handle unknown tool gracefully."""
         mock_llm.complete.side_effect = [
             CompletionResult(
@@ -1413,16 +1428,25 @@ class TestToolExecutor:
                 latency_ms=100,
                 tool_calls=None,
             ),
+            # Confirmation response
+            CompletionResult(
+                id="resp-3",
+                content="Done.",
+                model="test",
+                tokens_used=5,
+                latency_ms=50,
+                tool_calls=None,
+            ),
         ]
 
-        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell)
+        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell, default_task)
         result = executor.run(messages=[Message(role="user", content="Call unknown")])
 
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].result.success is False
         assert "Unknown tool" in result.tool_calls[0].result.error
 
-    def test_run_tool_execution_error(self, mock_logger, mock_llm):
+    def test_run_tool_execution_error(self, mock_logger, mock_llm, default_task):
         """Handle tool execution errors gracefully."""
 
         class FailingTool(BaseTool):
@@ -1459,15 +1483,26 @@ class TestToolExecutor:
                 latency_ms=100,
                 tool_calls=None,
             ),
+            # Confirmation response
+            CompletionResult(
+                id="resp-3",
+                content="Done.",
+                model="test",
+                tokens_used=5,
+                latency_ms=50,
+                tool_calls=None,
+            ),
         ]
 
-        executor = ToolExecutor(mock_logger, mock_llm, registry)
+        executor = ToolExecutor(mock_logger, mock_llm, registry, default_task)
         result = executor.run(messages=[Message(role="user", content="Call failing")])
 
         assert result.tool_calls[0].result.success is False
         assert "Tool exploded" in result.tool_calls[0].result.error
 
-    def test_run_malformed_json_arguments(self, mock_logger, mock_llm, registry_with_shell):
+    def test_run_malformed_json_arguments(
+        self, mock_logger, mock_llm, registry_with_shell, default_task
+    ):
         """Malformed JSON arguments return parse error to LLM instead of silently failing."""
         mock_llm.complete.side_effect = [
             CompletionResult(
@@ -1495,9 +1530,18 @@ class TestToolExecutor:
                 latency_ms=100,
                 tool_calls=None,
             ),
+            # Confirmation response
+            CompletionResult(
+                id="resp-3",
+                content="Done.",
+                model="test",
+                tokens_used=5,
+                latency_ms=50,
+                tool_calls=None,
+            ),
         ]
 
-        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell)
+        executor = ToolExecutor(mock_logger, mock_llm, registry_with_shell, default_task)
         result = executor.run(messages=[Message(role="user", content="Run command")])
 
         # The parse error should be returned as a tool error
@@ -1505,7 +1549,7 @@ class TestToolExecutor:
         assert result.tool_calls[0].result.success is False
         assert "Failed to parse arguments" in result.tool_calls[0].result.error
 
-    def test_run_terminal_tool_ends_early(self, mock_logger, mock_llm):
+    def test_run_terminal_tool_ends_early(self, mock_logger, mock_llm, default_task):
         """Terminal tool ends execution immediately."""
         from llm_agent.core.tools.builtin.complete import CompleteTaskTool
 
@@ -1536,7 +1580,7 @@ class TestToolExecutor:
             ],
         )
 
-        executor = ToolExecutor(mock_logger, mock_llm, registry)
+        executor = ToolExecutor(mock_logger, mock_llm, registry, default_task)
         result = executor.run(messages=[Message(role="user", content="Solve this")])
 
         # Should return immediately after terminal tool

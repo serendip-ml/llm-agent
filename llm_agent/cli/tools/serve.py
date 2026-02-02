@@ -118,7 +118,7 @@ class ServeTool(Tool):
     def _log_startup(self, config: AgentServerConfig) -> None:
         """Log server startup information."""
         self.lg.info(
-            "starting agent gateway",
+            "agent server started",
             extra={
                 "host": config.server.host,
                 "port": config.server.port,
@@ -513,6 +513,10 @@ class ServeTool(Tool):
         # Add method if specified
         if agent_config.method is not None:
             config_dict["method"] = agent_config.method
+
+        # Add schedule if specified
+        if agent_config.schedule is not None:
+            config_dict["schedule"] = agent_config.schedule.model_dump()
 
         return config_dict
 

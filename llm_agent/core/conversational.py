@@ -16,11 +16,11 @@ from llm_agent.core.conversation import (
 )
 from llm_agent.core.helpers import ResponseContext
 from llm_agent.core.llm import CompletionResult, Message
+from llm_agent.core.task import Task, TaskResult
 
 
 if TYPE_CHECKING:
     from llm_agent.core.conversation.runner import ConversationRunner
-    from llm_agent.core.task import Task, TaskResult
     from llm_agent.core.traits.learn import LearnTrait
 
 
@@ -44,11 +44,11 @@ class ConversationalAgent(Agent):
     - HTTPTrait: HTTP server
 
     Example:
-        from appinfra.log import Logger
+        from appinfra.log import quick_console_logger
         from llm_agent import ConversationalAgent, AgentConfig
         from llm_agent.core.traits import LLMTrait, LLMConfig
 
-        lg = Logger.create("agent")
+        lg = quick_console_logger("agent", "info")
         config = AgentConfig(name="my-agent")
 
         agent = ConversationalAgent(lg, config)
@@ -64,6 +64,7 @@ class ConversationalAgent(Agent):
         config: AgentConfig,
         conversation: Conversation | None = None,
         compactor: Compactor | None = None,
+        default_task: Task | None = None,
     ) -> None:
         """Initialize agent.
 
@@ -72,6 +73,7 @@ class ConversationalAgent(Agent):
             config: Agent configuration.
             conversation: Optional conversation for persistent context.
             compactor: Optional compaction strategy (defaults to SlidingWindowCompactor).
+            default_task: Default task for execution (used when no task is provided).
         """
         super().__init__(lg)
         self._config = config
@@ -84,6 +86,12 @@ class ConversationalAgent(Agent):
         self._max_results = 100
         self._cycle_count = 0
         self._pending_task: Task | None = None
+
+        # Default task (created from config if not provided)
+        self._default_task = default_task or Task(
+            name="default",
+            description=config.default_prompt,
+        )
 
     @property
     def name(self) -> str:
@@ -116,7 +124,7 @@ class ConversationalAgent(Agent):
 
         self._start_traits()
         self._started = True
-        self._lg.info("Agent started", extra={"agent": self.name})
+        self._lg.info("agent started", extra={"agent": self.name})
 
     def stop(self) -> None:
         """Stop the agent and all traits."""
@@ -368,7 +376,7 @@ class ConversationalAgent(Agent):
             llm_trait=self.require_trait(LLMTrait),
             tools_trait=self.get_trait(ToolsTrait),
             model=self._config.model,
-            default_prompt=self._config.default_prompt,
+            default_task=self._default_task,
             identity_builder=self._build_identity_prompt,
             _agent_name=self.name,
         )

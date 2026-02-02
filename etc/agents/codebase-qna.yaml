@@ -35,6 +35,8 @@ task:
     - complete_task(done): You found a concrete insight with evidence
     - complete_task(stuck): You explored but couldn't find anything
     - NEVER end without calling complete_task
+  max_iterations: 0   # No limit (use timeout instead)
+  timeout_secs: 300   # 5 minute timeout per cycle
   output_schema:
     type: object
     properties:

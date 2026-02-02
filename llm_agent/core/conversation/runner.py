@@ -40,6 +40,7 @@ class ConversationRunner:
             llm_trait=llm_trait,
             tools_trait=tools_trait,
             model="gpt-4",
+            default_task=Task(name="default", description="..."),
             identity_builder=lambda: agent._build_identity_prompt(),
         )
         result = runner.run(task=task, is_first_run=True)
@@ -51,8 +52,9 @@ class ConversationRunner:
     llm_trait: LLMTrait
     tools_trait: ToolsTrait | None
     model: str | None
-    default_prompt: str
+    default_task: Task
     identity_builder: IdentityBuilder
+    temperature: float = 0.7
 
     _agent_name: str = field(default="agent", repr=False)
 
@@ -89,9 +91,9 @@ class ConversationRunner:
         system_prompt = self.identity_builder()
         self.conversation.add_system(system_prompt)
 
-        # Use task description or default prompt
-        task_description = task.description if task else self.default_prompt
-        self.conversation.add_user(task_description)
+        # Use task description or default task description
+        effective_task = task or self.default_task
+        self.conversation.add_user(effective_task.description)
 
     def _continue_conversation(self, task: Task | None) -> None:
         """Add continuation prompt for subsequent runs."""
@@ -163,19 +165,19 @@ class ConversationRunner:
 
         assert self.tools_trait is not None
 
-        effective_task = task or Task(name="default", description=self.default_prompt)
+        effective_task = task or self.default_task
         executor = ToolExecutor(
             lg=self.lg,
             llm=LLMTraitBackend(self.llm_trait),
             registry=self.tools_trait.registry,
+            task=effective_task,
             model=self.model,
+            temperature=self.temperature,
         )
 
         try:
             messages = self.conversation.messages()
-            exec_result = executor.run(
-                messages=messages, max_iterations=effective_task.max_iterations
-            )
+            exec_result = executor.run(messages=messages)
             self._update_conversation_from_execution(exec_result.messages, len(messages))
             return self._build_task_result(effective_task, exec_result)
         except RuntimeError as e:
