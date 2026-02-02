@@ -14,8 +14,8 @@ from llm_agent.core.task import Task, TaskResult
 
 
 if TYPE_CHECKING:
+    from llm_agent.core.governor import GovernorLoop
     from llm_agent.core.traits.llm import LLMTrait
-    from llm_agent.core.traits.tools import ToolsTrait
 
 
 # Type alias for identity prompt builder
@@ -29,7 +29,7 @@ class ConversationRunner:
 
     Manages the conversation lifecycle:
     - Prepares conversation (compaction, initialization/continuation)
-    - Runs tool execution loop
+    - Runs tool execution loop via injected GovernorLoop
     - Builds results with optional structured output extraction
 
     Example:
@@ -38,8 +38,7 @@ class ConversationRunner:
             conversation=conversation,
             compactor=compactor,
             llm_trait=llm_trait,
-            tools_trait=tools_trait,
-            model="gpt-4",
+            governor_loop=loop,
             default_task=Task(name="default", description="..."),
             identity_builder=lambda: agent._build_identity_prompt(),
         )
@@ -50,11 +49,9 @@ class ConversationRunner:
     conversation: Conversation
     compactor: Compactor
     llm_trait: LLMTrait
-    tools_trait: ToolsTrait | None
-    model: str | None
+    governor_loop: GovernorLoop | None
     default_task: Task
     identity_builder: IdentityBuilder
-    temperature: float = 0.7
 
     _agent_name: str = field(default="agent", repr=False)
 
@@ -129,16 +126,13 @@ class ConversationRunner:
 
     def _run_conversation_loop(self, task: Task | None) -> TaskResult:
         """Run tool executor with current conversation state."""
-        if self.tools_trait is None or not self.tools_trait.has_tools():
+        if self.governor_loop is None:
             return self._run_simple_completion(task)
         return self._run_with_tools(task)
 
     def _run_simple_completion(self, task: Task | None) -> TaskResult:
         """Run simple completion without tools."""
-        result = self.llm_trait.complete(
-            messages=self.conversation.messages(),
-            model=self.model,
-        )
+        result = self.llm_trait.complete(messages=self.conversation.messages())
         self.conversation.add_assistant(result.content)
 
         # Handle structured output extraction if requested
@@ -159,25 +153,14 @@ class ConversationRunner:
         )
 
     def _run_with_tools(self, task: Task | None) -> TaskResult:
-        """Run tool executor loop."""
-        from llm_agent.core.tools.executor import ToolExecutor
-        from llm_agent.core.traits.llm import LLMTraitBackend
-
-        assert self.tools_trait is not None
+        """Run governor loop with tools."""
+        assert self.governor_loop is not None
 
         effective_task = task or self.default_task
-        executor = ToolExecutor(
-            lg=self.lg,
-            llm=LLMTraitBackend(self.llm_trait),
-            registry=self.tools_trait.registry,
-            task=effective_task,
-            model=self.model,
-            temperature=self.temperature,
-        )
 
         try:
             messages = self.conversation.messages()
-            exec_result = executor.run(messages=messages)
+            exec_result = self.governor_loop.run(task=effective_task, messages=messages)
             self._update_conversation_from_execution(exec_result.messages, len(messages))
             return self._build_task_result(effective_task, exec_result)
         except RuntimeError as e:
@@ -246,7 +229,6 @@ class ConversationRunner:
         try:
             result = self.llm_trait.complete(
                 messages=messages,
-                model=self.model,
                 output_schema=output_schema,
             )
             return result.parsed, result.content, result.tokens_used
@@ -271,7 +253,6 @@ class ConversationRunner:
         try:
             result = self.llm_trait.complete(
                 messages=messages,
-                model=self.model,
                 output_schema=output_schema,
             )
             return result.parsed, result.tokens_used

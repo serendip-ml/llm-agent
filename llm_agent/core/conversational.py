@@ -21,6 +21,7 @@ from llm_agent.core.task import Task, TaskResult
 
 if TYPE_CHECKING:
     from llm_agent.core.conversation.runner import ConversationRunner
+    from llm_agent.core.governor import GovernorLoop
     from llm_agent.core.traits.learn import LearnTrait
 
 
@@ -93,6 +94,9 @@ class ConversationalAgent(Agent):
             description=config.default_prompt,
         )
 
+        # Governor loop (lazy-created when tools are available)
+        self._governor_loop: GovernorLoop | None = None
+
     @property
     def name(self) -> str:
         """Agent name."""
@@ -146,6 +150,32 @@ class ConversationalAgent(Agent):
         """
         self._pending_task = task
         self._lg.debug("task submitted", extra={"agent": self.name, "task": task.name})
+
+    def _get_governor_loop(self) -> GovernorLoop | None:
+        """Get or create the governor loop if tools are available.
+
+        Returns:
+            GovernorLoop if ToolsTrait is attached and has tools, None otherwise.
+        """
+        from llm_agent.core.governor import GovernorLoop
+        from llm_agent.core.traits.llm import LLMTrait, LLMTraitBackend
+        from llm_agent.core.traits.tools import ToolsTrait
+
+        tools_trait = self.get_trait(ToolsTrait)
+        if tools_trait is None or not tools_trait.has_tools():
+            return None
+
+        # Create loop lazily on first use
+        if self._governor_loop is None:
+            llm_trait = self.require_trait(LLMTrait)
+            self._governor_loop = GovernorLoop(
+                lg=self._lg,
+                llm=LLMTraitBackend(llm_trait),
+                registry=tools_trait.registry,
+                model=self._config.model,
+            )
+
+        return self._governor_loop
 
     # =========================================================================
     # Core operations
@@ -301,16 +331,11 @@ class ConversationalAgent(Agent):
         """
         from llm_agent.core.task_executor import TaskExecutor
         from llm_agent.core.traits.llm import LLMTrait
-        from llm_agent.core.traits.tools import ToolsTrait
-
-        llm_trait = self.require_trait(LLMTrait)
-        tools_trait = self.get_trait(ToolsTrait)
 
         executor = TaskExecutor(
             lg=self._lg,
-            llm_trait=llm_trait,
-            tools_trait=tools_trait,
-            model=self._config.model,
+            llm_trait=self.require_trait(LLMTrait),
+            governor_loop=self._get_governor_loop(),
             prompt_builder=self._build_prompt,
         )
         return executor.execute(task)
@@ -365,7 +390,6 @@ class ConversationalAgent(Agent):
         """Create a ConversationRunner for this agent."""
         from llm_agent.core.conversation.runner import ConversationRunner
         from llm_agent.core.traits.llm import LLMTrait
-        from llm_agent.core.traits.tools import ToolsTrait
 
         assert self._conversation is not None
 
@@ -374,8 +398,7 @@ class ConversationalAgent(Agent):
             conversation=self._conversation,
             compactor=self._compactor,
             llm_trait=self.require_trait(LLMTrait),
-            tools_trait=self.get_trait(ToolsTrait),
-            model=self._config.model,
+            governor_loop=self._get_governor_loop(),
             default_task=self._default_task,
             identity_builder=self._build_identity_prompt,
             _agent_name=self.name,

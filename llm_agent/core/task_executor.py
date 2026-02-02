@@ -14,8 +14,8 @@ from llm_agent.core.task import Task, TaskResult
 
 
 if TYPE_CHECKING:
+    from llm_agent.core.governor import GovernorLoop
     from llm_agent.core.traits.llm import LLMTrait
-    from llm_agent.core.traits.tools import ToolsTrait
 
 
 # Type alias for prompt builder function
@@ -28,12 +28,12 @@ class TaskExecutor:
     """Executes tasks with optional tools and structured output.
 
     Provides task execution with:
-    - Tool use via ToolsTrait (iterative tool loop)
+    - Tool use via GovernorLoop (iterative tool loop)
     - Structured output extraction via output_schema
     - Task context injection into prompts
 
-    The executor is decoupled from the agent - it receives traits and a prompt
-    builder function rather than depending on the agent directly.
+    The executor is decoupled from the agent - it receives a governor loop
+    and prompt builder function rather than depending on the agent directly.
 
     Example:
         from llm_agent.core.task_executor import TaskExecutor
@@ -41,8 +41,7 @@ class TaskExecutor:
         executor = TaskExecutor(
             lg=lg,
             llm_trait=llm_trait,
-            tools_trait=tools_trait,
-            model="gpt-4",
+            governor_loop=loop,
             prompt_builder=agent._build_prompt,
         )
         result = executor.execute(task)
@@ -50,8 +49,7 @@ class TaskExecutor:
 
     lg: Logger
     llm_trait: LLMTrait
-    tools_trait: ToolsTrait | None
-    model: str | None
+    governor_loop: GovernorLoop | None
     prompt_builder: PromptBuilder
 
     def execute(self, task: Task) -> TaskResult:
@@ -81,8 +79,8 @@ class TaskExecutor:
             Message(role="user", content=task.description),
         ]
 
-        # Use tool loop if tools available, otherwise simple completion
-        if self.tools_trait is not None and self.tools_trait.has_tools():
+        # Use tool loop if available, otherwise simple completion
+        if self.governor_loop is not None:
             return self._execute_with_tools(task, messages)
         return self._execute_simple(task, messages)
 
@@ -106,7 +104,6 @@ class TaskExecutor:
         try:
             result = self.llm_trait.complete(
                 messages=messages,
-                model=self.model,
                 output_schema=task.output_schema,
             )
             return TaskResult(
@@ -126,33 +123,20 @@ class TaskExecutor:
 
     def _execute_with_tools(self, task: Task, messages: list[Message]) -> TaskResult:
         """Execute task with tool loop and optional structured extraction."""
-        # Phase 1: Run tool loop
         exec_result, error = self._run_tool_loop(task, messages)
         if error:
             return TaskResult(success=False, content="", error=error)
 
-        # Phase 2: Structured extraction if output_schema provided
         return self._build_tool_result(task, exec_result)
 
     def _run_tool_loop(self, task: Task, messages: list[Message]) -> tuple[Any, str | None]:
         """Run the tool execution loop. Returns (result, error)."""
-        from llm_agent.core.tools.executor import ToolExecutor
-        from llm_agent.core.traits.llm import LLMTraitBackend
-
-        assert self.tools_trait is not None
+        assert self.governor_loop is not None
 
         self.lg.debug("starting tool loop", extra={"task": task.name})
 
-        executor = ToolExecutor(
-            lg=self.lg,
-            llm=LLMTraitBackend(self.llm_trait),
-            registry=self.tools_trait.registry,
-            task=task,
-            model=self.model,
-        )
-
         try:
-            result = executor.run(messages=messages)
+            result = self.governor_loop.run(task=task, messages=messages)
             self.lg.debug("tool loop completed", extra={"iterations": result.iterations})
             return result, None
         except RuntimeError as e:
@@ -206,7 +190,6 @@ class TaskExecutor:
         try:
             result = self.llm_trait.complete(
                 messages=messages,
-                model=self.model,
                 output_schema=output_schema,
             )
             return {

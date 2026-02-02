@@ -10,7 +10,7 @@ from llm_agent.core.tools.builtin import (
     RememberTool,
     ShellTool,
 )
-from llm_agent.core.tools.executor import ToolExecutionResult, ToolExecutor
+from llm_agent.core.tools.executor import SimpleToolExecutor, ToolExecutionResult
 from llm_agent.core.tools.registry import ToolRegistry
 
 
@@ -24,8 +24,8 @@ __all__ = [
     # Registry
     "ToolRegistry",
     # Executor
+    "SimpleToolExecutor",
     "ToolExecutionResult",
-    "ToolExecutor",
     # Built-in tools
     "CompleteTaskTool",
     "FileReadTool",
