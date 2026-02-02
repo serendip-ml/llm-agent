@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -93,9 +94,12 @@ class ToolExecutor:
 
         Raises:
             RuntimeError: If max_iterations or timeout exceeded without final response.
-        """
-        import time
 
+        Note:
+            The completion confirmation prompt (when LLM returns without tool calls)
+            makes an additional LLM call that is not counted toward max_iterations.
+            Use timeout_secs for a hard limit on total execution time.
+        """
         working_messages = list(messages)
         all_tool_calls: list[ToolCallResult] = []
         total_tokens = 0
@@ -116,8 +120,6 @@ class ToolExecutor:
 
     def _check_limits(self, iteration: int, start_time: float) -> None:
         """Check iteration and timeout limits, raise if exceeded."""
-        import time
-
         task = self._task
         if task.max_iterations > 0 and iteration >= task.max_iterations:
             raise RuntimeError(
@@ -312,6 +314,10 @@ class ToolExecutor:
     ) -> tuple[int, bool] | None:
         """Ask LLM to confirm completion when no tool calls were made.
 
+        Appends confirmation prompt to working_messages. If LLM confirms done,
+        removes the confirmation messages to keep history clean. If LLM calls
+        tools, the messages remain for context.
+
         Returns:
             None if LLM confirms done (no tools called after prompt).
             (tokens_used, had_terminal) if LLM called tools after prompt.
@@ -324,6 +330,9 @@ class ToolExecutor:
         confirm_tool_calls, parse_errors = self._extract_tool_calls(confirm_result)
 
         if not confirm_tool_calls:
+            # LLM confirmed done - remove confirmation messages to keep history clean
+            working_messages.pop()  # Remove confirmation prompt
+            working_messages.pop()  # Remove assistant echo
             self._lg.trace("completion confirmed")
             return None
 

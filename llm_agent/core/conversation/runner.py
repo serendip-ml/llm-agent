@@ -54,6 +54,7 @@ class ConversationRunner:
     model: str | None
     default_task: Task
     identity_builder: IdentityBuilder
+    temperature: float = 0.7
 
     _agent_name: str = field(default="agent", repr=False)
 
@@ -171,6 +172,7 @@ class ConversationRunner:
             registry=self.tools_trait.registry,
             task=effective_task,
             model=self.model,
+            temperature=self.temperature,
         )
 
         try:
