@@ -21,7 +21,6 @@ def make_context(
     iteration: int = 0,
     elapsed_secs: float = 0.0,
     tokens_used: int = 0,
-    has_work: bool = False,
     max_iterations: int = 10,
     timeout_secs: float = 0,
     wrap_up_injected: bool = False,
@@ -33,20 +32,13 @@ def make_context(
         max_iterations=max_iterations,
         timeout_secs=timeout_secs,
     )
-    tool_calls = (
-        (
-            # Create mock tool call result if has_work
-        )
-        if not has_work
-        else ()
-    )
 
     return GovernorContext(
         task=task,
         iteration=iteration,
         elapsed_secs=elapsed_secs,
         tokens_used=tokens_used,
-        tool_calls_so_far=tool_calls,
+        tool_calls_so_far=(),
         wrap_up_injected=wrap_up_injected,
     )
 
