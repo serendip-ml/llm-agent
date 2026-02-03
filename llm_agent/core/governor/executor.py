@@ -184,6 +184,9 @@ class DecisionExecutor:
         accepts as confirmed to prevent infinite loops.
         """
         working_messages.append(Message(role="assistant", content=first_result.content or ""))
+        working_messages.append(
+            Message(role="user", content="Please use the complete_task tool to confirm completion.")
+        )
         self._lg.trace("no confirmation tool called, retrying")
 
         retry_result = self._llm_caller.call(working_messages, tools)
