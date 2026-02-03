@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from llm_agent.core.tools.base import ToolCallResult
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     """Status of a completed task.
 
     The agent uses this to signal whether it reached a conclusion
