@@ -99,7 +99,7 @@ class AgentServerConfig(BaseModel):
         llm: !include './llm.yaml'
 
         learn:
-          profile_id: 1
+          profile_id: "1"
           db: !include './infra.yaml#dbs.main'
 
         agents:
