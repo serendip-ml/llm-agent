@@ -658,7 +658,7 @@ Answer the user's question based on your purpose and what you've learned."""
             categories: Filter to these categories.
 
         Returns:
-            List of ScoredFact sorted by similarity (highest first).
+            List of ScoredEntity[Fact] sorted by similarity (highest first).
         """
         from llm_agent.core.traits.learn import LearnTrait
 

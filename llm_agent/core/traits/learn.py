@@ -61,7 +61,7 @@ class LearnTrait:
         from llm_agent.core.traits import LearnTrait, LearnConfig, LLMConfig
 
         learn_trait = LearnTrait(lg, LearnConfig(
-            profile_id=123,
+            profile_id="123",
             llm=LLMConfig(base_url="http://localhost:8000/v1"),
             embedder_url="http://localhost:8001/v1",
         ))

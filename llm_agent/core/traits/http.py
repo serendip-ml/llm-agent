@@ -362,10 +362,10 @@ class HTTPTrait:
         """Serialize scored facts for recall response."""
         return [
             {
-                "fact_id": sf.fact.id,
-                "content": sf.fact.content,
-                "category": sf.fact.category,
-                "similarity": sf.similarity,
+                "fact_id": sf.entity.id,
+                "content": sf.entity.content,
+                "category": sf.entity.category,
+                "similarity": sf.score,
             }
             for sf in scored_facts
         ]
