@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from appinfra.log import Logger
 
     from llm_agent.core.governor.interpreter import ResponseInterpreter
-    from llm_agent.core.llm import LLMCaller
+    from llm_agent.core.llm import CompletionResult, LLMCaller
     from llm_agent.core.tools.registry import ToolRegistry
 
 
@@ -154,16 +154,56 @@ class DecisionExecutor:
         # Get LLM's response
         confirm_result = self._llm_caller.call(working_messages, tools)
         confirm_interpreted = self._interpreter.interpret(confirm_result, has_prior_work=False)
+        original_content = interpreted.raw.content or ""
 
         if confirm_interpreted.event == ResponseEvent.TEXT_ONLY:
-            # LLM confirmed done - remove confirmation prompt but keep assistant response
-            working_messages.pop()  # Remove confirmation prompt
-            self._lg.trace("completion confirmed")
-            return interpreted.raw.content, confirm_result.tokens_used, None
+            return self._retry_text_only_confirmation(
+                confirm_result, working_messages, all_tool_calls, tools, original_content
+            )
 
         # LLM called tools - execute them
         return self._execute_confirmation_tools(
-            confirm_interpreted, working_messages, all_tool_calls, confirm_result.tokens_used
+            confirm_interpreted,
+            working_messages,
+            all_tool_calls,
+            confirm_result.tokens_used,
+            original_content,
+        )
+
+    def _retry_text_only_confirmation(
+        self,
+        first_result: CompletionResult,
+        working_messages: list[Message],
+        all_tool_calls: list[ToolCallResult],
+        tools: list[dict[str, Any]] | None,
+        original_content: str,
+    ) -> tuple[str | None, int, dict[str, Any] | None]:
+        """Retry confirmation when LLM responds with text only.
+
+        Gives the LLM one more chance to call a tool. If still text-only,
+        accepts as confirmed to prevent infinite loops.
+        """
+        working_messages.append(Message(role="assistant", content=first_result.content or ""))
+        working_messages.append(
+            Message(role="user", content="Please use the complete_task tool to confirm completion.")
+        )
+        self._lg.trace("no confirmation tool called, retrying")
+
+        retry_result = self._llm_caller.call(working_messages, tools)
+        retry_interpreted = self._interpreter.interpret(retry_result, has_prior_work=False)
+        extra_tokens = first_result.tokens_used + retry_result.tokens_used
+
+        if retry_interpreted.event == ResponseEvent.TEXT_ONLY:
+            self._lg.debug("accepted text-only confirmation after retry")
+            return original_content, extra_tokens, None
+
+        # LLM called tools on retry - execute them
+        return self._execute_confirmation_tools(
+            retry_interpreted,
+            working_messages,
+            all_tool_calls,
+            extra_tokens,
+            original_content,
         )
 
     def _handle_confirm_early(
@@ -267,8 +307,21 @@ class DecisionExecutor:
         working_messages: list[Message],
         all_tool_calls: list[ToolCallResult],
         extra_tokens: int,
+        original_content: str,
     ) -> tuple[str | None, int, dict[str, Any] | None]:
-        """Execute tools called after confirmation prompt."""
+        """Execute tools called after confirmation prompt.
+
+        Args:
+            interpreted: The confirmation response (with tool calls).
+            working_messages: Message list (modified in place).
+            all_tool_calls: Tool call accumulator (modified in place).
+            extra_tokens: Tokens used by confirmation LLM call.
+            original_content: The original LLM response content to return on completion.
+
+        Returns:
+            Tuple of (content, tokens, terminal_data). Content is the original response,
+            not the confirmation response.
+        """
         self._lg.debug(
             "tools called after confirmation",
             extra={"tool_count": len(interpreted.tool_calls)},
@@ -283,7 +336,8 @@ class DecisionExecutor:
         )
 
         if terminal_data is not None:
-            return interpreted.raw.content or "", extra_tokens, terminal_data
+            # Return original content, not confirmation content
+            return original_content, extra_tokens, terminal_data
 
         return None, extra_tokens, None
 

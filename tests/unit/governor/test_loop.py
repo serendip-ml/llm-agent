@@ -116,15 +116,23 @@ class TestGovernorLoop:
         """LLM returns final response without calling tools."""
         mock_llm.complete.side_effect = [
             make_completion(content="Here is the answer"),
-            # Confirmation - confirms done
-            make_completion(content="Yes, I'm done."),
+            # Confirmation - must call complete_task to confirm
+            make_completion(
+                content="Done.",
+                tool_calls=[
+                    make_tool_call(
+                        "complete_task", arguments={"status": "done", "conclusion": "Answered"}
+                    )
+                ],
+            ),
         ]
 
         loop = GovernorLoop(mock_logger, mock_llm, registry)
         result = loop.run(default_task, [Message(role="user", content="Hello")])
 
         assert result.content == "Here is the answer"
-        assert result.tool_calls == []
+        assert len(result.tool_calls) == 1  # complete_task is counted
+        assert result.tool_calls[0].name == "complete_task"
         assert result.iterations == 1
 
     def test_run_with_tool_call(self, mock_logger, mock_llm, registry, default_task):
@@ -136,15 +144,22 @@ class TestGovernorLoop:
             ),
             # Second: no tools
             make_completion(content="The command output was: hello"),
-            # Third: confirmation - confirms done
-            make_completion(content="Done."),
+            # Third: confirmation - must call complete_task
+            make_completion(
+                content="Done.",
+                tool_calls=[
+                    make_tool_call(
+                        "complete_task", arguments={"status": "done", "conclusion": "Ran command"}
+                    )
+                ],
+            ),
         ]
 
         loop = GovernorLoop(mock_logger, mock_llm, registry)
         result = loop.run(default_task, [Message(role="user", content="Run echo hello")])
 
         assert result.content == "The command output was: hello"
-        assert len(result.tool_calls) == 1
+        assert len(result.tool_calls) == 2  # shell + complete_task
         assert result.tool_calls[0].name == "shell"
         assert result.tool_calls[0].result.success is True
         assert "Executed: echo hello" in result.tool_calls[0].result.output
@@ -226,15 +241,22 @@ class TestGovernorLoop:
             make_completion(tool_calls=[make_tool_call("shell", arguments={"command": "ls"})]),
             # Third: reports result
             make_completion(content="Found the files."),
-            # Fourth: confirmation - done
-            make_completion(content="All done."),
+            # Fourth: confirmation - must call complete_task
+            make_completion(
+                content="All done.",
+                tool_calls=[
+                    make_tool_call(
+                        "complete_task", arguments={"status": "done", "conclusion": "Found files"}
+                    )
+                ],
+            ),
         ]
 
         loop = GovernorLoop(mock_logger, mock_llm, registry)
         result = loop.run(default_task, [Message(role="user", content="Find files")])
 
         assert result.content == "Found the files."
-        assert len(result.tool_calls) == 1
+        assert len(result.tool_calls) == 2  # shell + complete_task
         assert result.tool_calls[0].name == "shell"
 
     def test_run_max_iterations_exceeded(self, mock_logger, mock_llm, registry):
@@ -257,14 +279,21 @@ class TestGovernorLoop:
             make_completion(tool_calls=[make_tool_call("unknown_tool")]),
             # Second: no tools after error
             make_completion(content="Tool not found"),
-            # Third: confirmation
-            make_completion(content="Done."),
+            # Third: confirmation - must call complete_task
+            make_completion(
+                content="Done.",
+                tool_calls=[
+                    make_tool_call(
+                        "complete_task", arguments={"status": "done", "conclusion": "Tool failed"}
+                    )
+                ],
+            ),
         ]
 
         loop = GovernorLoop(mock_logger, mock_llm, registry)
         result = loop.run(default_task, [Message(role="user", content="Call unknown")])
 
-        assert len(result.tool_calls) == 1
+        assert len(result.tool_calls) == 2  # unknown_tool + complete_task
         assert result.tool_calls[0].result.success is False
         assert "Unknown tool" in result.tool_calls[0].result.error
 
@@ -281,13 +310,21 @@ class TestGovernorLoop:
                 ]
             ),
             make_completion(content="Got error"),
-            make_completion(content="Done."),
+            # Confirmation - must call complete_task
+            make_completion(
+                content="Done.",
+                tool_calls=[
+                    make_tool_call(
+                        "complete_task", arguments={"status": "done", "conclusion": "Parse error"}
+                    )
+                ],
+            ),
         ]
 
         loop = GovernorLoop(mock_logger, mock_llm, registry)
         result = loop.run(default_task, [Message(role="user", content="Run command")])
 
-        assert len(result.tool_calls) == 1
+        assert len(result.tool_calls) == 2  # malformed shell + complete_task
         assert result.tool_calls[0].result.success is False
         assert "Failed to parse" in result.tool_calls[0].result.error
 
@@ -296,7 +333,15 @@ class TestGovernorLoop:
         mock_llm.complete.side_effect = [
             make_completion(tool_calls=[make_tool_call("shell", arguments={"command": "ls"})]),
             make_completion(content="Done."),
-            make_completion(content="Yes."),
+            # Confirmation - must call complete_task
+            make_completion(
+                content="Yes.",
+                tool_calls=[
+                    make_tool_call(
+                        "complete_task", arguments={"status": "done", "conclusion": "Listed"}
+                    )
+                ],
+            ),
         ]
 
         initial_messages = [Message(role="user", content="List files")]
@@ -319,7 +364,16 @@ class TestGovernorLoop:
                 tokens=10,
             ),
             make_completion(content="Done.", tokens=15),
-            make_completion(content="Yes.", tokens=5),
+            # Confirmation - must call complete_task
+            make_completion(
+                content="Yes.",
+                tool_calls=[
+                    make_tool_call(
+                        "complete_task", arguments={"status": "done", "conclusion": "Listed"}
+                    )
+                ],
+                tokens=5,
+            ),
         ]
 
         loop = GovernorLoop(mock_logger, mock_llm, registry)
