@@ -1,0 +1,17 @@
+# PostgreSQL configuration for llm-agent
+# Connects to same database as llm-learn
+
+pgserver:
+  name: learn-pg               # Same server as llm-learn
+  port: 7632                   # Same port as llm-learn
+  user: postgres
+  pass: ''
+
+dbs:
+  main:
+    url: "postgresql://${pgserver.user}:${pgserver.pass}@127.0.0.1:${pgserver.port}/learn"
+    create_db: false            # Database already created by llm-learn
+    readonly: false
+    pool_pre_ping: true
+    extensions:
+      - vector

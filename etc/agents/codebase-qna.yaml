@@ -75,9 +75,8 @@ tools:
       - "{{CODEBASE_PATH}}"
     max_lines: 1000
   complete_task: {}
-  # Uncomment when learn backend is configured:
-  # remember: {}
-  # recall: {}
+  remember: {}
+  recall: {}
 
 schedule:
   interval: 600  # Run every 10 minutes
