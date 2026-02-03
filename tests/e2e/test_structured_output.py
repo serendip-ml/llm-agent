@@ -6,6 +6,7 @@ Tests are skipped if no server is available.
 
 import httpx
 import pytest
+from appinfra.log import LogConfig, LoggerFactory
 from pydantic import BaseModel
 
 from llm_agent.core.llm.types import Message
@@ -54,13 +55,15 @@ class TestStructuredOutputE2E:
     @pytest.fixture
     def trait(self):
         """Create LLMTrait connected to LLM server."""
+        lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
         trait = LLMTrait(
+            lg,
             config={
                 "type": "openai_compatible",
                 "base_url": LLM_BASE_URL,
                 "model": LLM_MODEL,
                 "temperature": 0.0,
-            }
+            },
         )
         trait.on_start()
         yield trait

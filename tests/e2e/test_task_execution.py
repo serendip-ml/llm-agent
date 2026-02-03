@@ -68,12 +68,13 @@ class TestTaskExecutionE2E:
         )
         agent.add_trait(
             LLMTrait(
+                mock_logger,
                 config={
                     "type": "openai_compatible",
                     "base_url": LLM_BASE_URL,
                     "model": LLM_MODEL,
                     "temperature": 0.0,
-                }
+                },
             )
         )
         agent.start()
@@ -89,12 +90,13 @@ class TestTaskExecutionE2E:
         )
         agent.add_trait(
             LLMTrait(
+                mock_logger,
                 config={
                     "type": "openai_compatible",
                     "base_url": LLM_BASE_URL,
                     "model": LLM_MODEL,
                     "temperature": 0.0,
-                }
+                },
             )
         )
         tools_trait = ToolsTrait()

@@ -277,7 +277,7 @@ class TestLLMTraitStructuredOutput:
     @pytest.fixture
     def trait(self):
         """Create LLMTrait with mocked client."""
-        trait = LLMTrait(LLMConfig())
+        trait = LLMTrait(MagicMock(), LLMConfig())
         trait._client = MagicMock()
         return trait
 

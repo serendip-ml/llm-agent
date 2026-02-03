@@ -55,7 +55,7 @@ class ConversationalAgent(Agent):
         config = AgentConfig(name="my-agent")
 
         agent = ConversationalAgent(lg, config)
-        agent.add_trait(LLMTrait(LLMConfig(base_url="http://localhost:8000/v1")))
+        agent.add_trait(LLMTrait(lg, LLMConfig(base_url="http://localhost:8000/v1")))
         agent.start()
 
         result = agent.complete("Hello!")

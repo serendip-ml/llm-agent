@@ -144,11 +144,11 @@ class TestConversationalAgentTraits:
         from llm_agent.core.traits.llm import LLMConfig, LLMTrait
 
         agent = ConversationalAgent(lg=mock_logger, config=AgentConfig(name="test"))
-        trait1 = LLMTrait(LLMConfig())
+        trait1 = LLMTrait(mock_logger, LLMConfig())
         agent.add_trait(trait1)
 
         with pytest.raises(ValueError, match="already added"):
-            trait2 = LLMTrait(LLMConfig())
+            trait2 = LLMTrait(mock_logger, LLMConfig())
             agent.add_trait(trait2)
 
     def test_get_trait(self, mock_logger):
