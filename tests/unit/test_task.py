@@ -18,9 +18,34 @@ from llm_agent import (
     ToolResult,
 )
 from llm_agent.core.llm.backend import StructuredOutputError
+from llm_agent.core.tools.base import BaseTool
 
 
 pytestmark = pytest.mark.unit
+
+
+class MockCompleteTaskTool(BaseTool):
+    """Mock complete_task tool for testing."""
+
+    name = "complete_task"
+    description = "Complete the task"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["done", "stuck"]},
+            "conclusion": {"type": "string"},
+        },
+        "required": ["status", "conclusion"],
+    }
+    terminal = True
+
+    def execute(self, status: str, conclusion: str) -> ToolResult:
+        return ToolResult(
+            success=True,
+            output=f"Task completed with status: {status}",
+            terminal=True,
+            terminal_data={"status": status, "conclusion": conclusion},
+        )
 
 
 class Answer(BaseModel):
@@ -273,6 +298,7 @@ class TestAgentExecuteWithTools:
         trait = MagicMock(spec=ToolsTrait)
         registry = ToolRegistry()
         registry.register(ShellTool())
+        registry.register(MockCompleteTaskTool())
         trait.registry = registry
         trait.has_tools.return_value = True
         return trait
@@ -292,7 +318,7 @@ class TestAgentExecuteWithTools:
     def test_execute_calls_tools(self, agent_with_tools, mock_llm_trait, mock_tools_trait):
         # First call: LLM wants to call shell tool
         # Second call: LLM returns final response
-        # Third call: Confirmation
+        # Third call: Confirmation - must call complete_task
         mock_llm_trait.complete.side_effect = [
             CompletionResult(
                 id="resp-1",
@@ -319,14 +345,23 @@ class TestAgentExecuteWithTools:
                 latency_ms=100,
                 tool_calls=None,
             ),
-            # Confirmation response
+            # Confirmation response - must call complete_task
             CompletionResult(
                 id="resp-3",
                 content="Done.",
                 model="test",
                 tokens_used=5,
                 latency_ms=50,
-                tool_calls=None,
+                tool_calls=[
+                    {
+                        "id": "call-2",
+                        "type": "function",
+                        "function": {
+                            "name": "complete_task",
+                            "arguments": json.dumps({"status": "done", "conclusion": "Ran"}),
+                        },
+                    }
+                ],
             ),
         ]
 
@@ -336,7 +371,7 @@ class TestAgentExecuteWithTools:
 
         assert result.success is True
         assert result.content == "The output was: hello"
-        assert len(result.tool_calls) == 1
+        assert len(result.tool_calls) == 2  # shell + complete_task
         assert result.tool_calls[0].name == "shell"
         assert result.iterations == 2
         assert result.tokens_used == 30  # 10 + 15 + 5 (confirmation)
@@ -423,6 +458,7 @@ class TestAgentExecuteToolsAndSchema:
         trait = MagicMock(spec=ToolsTrait)
         registry = ToolRegistry()
         registry.register(ShellTool())
+        registry.register(MockCompleteTaskTool())
         trait.registry = registry
         trait.has_tools.return_value = True
         return trait
@@ -475,14 +511,23 @@ class TestAgentExecuteToolsAndSchema:
                 latency_ms=100,
                 tool_calls=None,
             ),
-            # Confirmation response
+            # Confirmation response - must call complete_task
             CompletionResult(
                 id="resp-3",
                 content="Done.",
                 model="test",
                 tokens_used=5,
                 latency_ms=50,
-                tool_calls=None,
+                tool_calls=[
+                    {
+                        "id": "call-2",
+                        "type": "function",
+                        "function": {
+                            "name": "complete_task",
+                            "arguments": json.dumps({"status": "done", "conclusion": "Got output"}),
+                        },
+                    }
+                ],
             ),
             # Structured extraction phase
             CompletionResult(
@@ -507,7 +552,7 @@ class TestAgentExecuteToolsAndSchema:
         assert result.parsed.answer == "hello"
         assert result.parsed.confidence == 0.9
         # Tool calls from phase 1
-        assert len(result.tool_calls) == 1
+        assert len(result.tool_calls) == 2  # shell + complete_task
         # Tokens from both phases (including confirmation)
         assert result.tokens_used == 50  # 10 + 15 + 5 (confirmation) + 20
 
@@ -541,14 +586,23 @@ class TestAgentExecuteToolsAndSchema:
                 latency_ms=100,
                 tool_calls=None,
             ),
-            # Confirmation response
+            # Confirmation response - must call complete_task
             CompletionResult(
                 id="resp-3",
                 content="Done.",
                 model="test",
                 tokens_used=5,
                 latency_ms=50,
-                tool_calls=None,
+                tool_calls=[
+                    {
+                        "id": "call-2",
+                        "type": "function",
+                        "function": {
+                            "name": "complete_task",
+                            "arguments": json.dumps({"status": "done", "conclusion": "Ran shell"}),
+                        },
+                    }
+                ],
             ),
             # Extraction fails
             StructuredOutputError("Invalid schema"),
@@ -565,7 +619,7 @@ class TestAgentExecuteToolsAndSchema:
         assert result.success is False
         assert "Structured output error" in result.error
         # Tool calls should still be present from phase 1
-        assert len(result.tool_calls) == 1
+        assert len(result.tool_calls) == 2  # shell + complete_task
 
 
 class TestToolsTrait:
