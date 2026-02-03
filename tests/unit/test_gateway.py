@@ -69,25 +69,25 @@ class TestLearnBackendConfig:
     """Tests for LearnBackendConfig."""
 
     def test_defaults(self):
-        """LearnBackendConfig has defaults."""
-        config = LearnBackendConfig(profile_id=1)
-        assert config.profile_id == 1
-        assert config.db_config_path == "etc/infra.yaml"
-        assert config.db_key == "main"
+        """LearnBackendConfig has defaults for optional fields."""
+        db_config = {"url": "postgresql://localhost/learn"}
+        config = LearnBackendConfig(profile_id="1", db=db_config)
+        assert config.profile_id == "1"
+        assert config.db == db_config
         assert config.embedder_model == "default"
+        assert config.embedder_url is None
 
     def test_custom_values(self):
         """LearnBackendConfig accepts custom values."""
+        db_config = {"url": "postgresql://localhost/custom", "extensions": ["vector"]}
         config = LearnBackendConfig(
-            profile_id=42,
-            db_config_path="/custom/path.yaml",
-            db_key="custom",
+            profile_id="42",
+            db=db_config,
             embedder_url="http://embedder:8000",
             embedder_model="custom-model",
         )
-        assert config.profile_id == 42
-        assert config.db_config_path == "/custom/path.yaml"
-        assert config.db_key == "custom"
+        assert config.profile_id == "42"
+        assert config.db == db_config
         assert config.embedder_url == "http://embedder:8000"
         assert config.embedder_model == "custom-model"
 
