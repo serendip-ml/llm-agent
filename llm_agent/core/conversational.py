@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from appinfra.log import Logger
-from llm_learn.collection import ScoredFact
+from llm_learn.core.types import ScoredEntity
+from llm_learn.memory.atomic import Fact
 
 from llm_agent.core.agent import Agent
 from llm_agent.core.config import AgentConfig
@@ -22,6 +23,7 @@ from llm_agent.core.task import Task, TaskResult
 if TYPE_CHECKING:
     from llm_agent.core.conversation.runner import ConversationRunner
     from llm_agent.core.governor import GovernorLoop
+    from llm_agent.core.tools.base import ToolCallResult
     from llm_agent.core.traits.learn import LearnTrait
 
 
@@ -338,7 +340,9 @@ class ConversationalAgent(Agent):
             governor_loop=self._get_governor_loop(),
             prompt_builder=self._build_prompt,
         )
-        return executor.execute(task)
+        result = executor.execute(task)
+        self._record_solution(task, result)
+        return result
 
     # =========================================================================
     # Scheduled Execution (run_once)
@@ -364,6 +368,9 @@ class ConversationalAgent(Agent):
         self._cycle_count += 1
         is_first_run = self._cycle_count == 1
 
+        # Determine which task will be executed
+        task = self._pending_task or self._default_task
+
         self._log_run_start(is_first_run)
         result = self._create_conversation_runner().run(
             task=self._pending_task, is_first_run=is_first_run
@@ -371,6 +378,8 @@ class ConversationalAgent(Agent):
         self._log_run_complete(result)
 
         self._store_result(result)
+        if task is not None:
+            self._record_solution(task, result)
         self._pending_task = None
         return result
 
@@ -452,6 +461,65 @@ class ConversationalAgent(Agent):
         self._results.append(result)
         if len(self._results) > self._max_results:
             self._results = self._results[-self._max_results :]
+
+    def _record_solution(self, task: Task, result: TaskResult) -> None:
+        """Record task execution as a solution in llm-learn.
+
+        Only records if LearnTrait is available. Logs but doesn't raise on failure.
+        """
+        from llm_agent.core.traits.learn import LearnTrait
+
+        learn_trait = self.get_trait(LearnTrait)
+        if learn_trait is None:
+            return
+
+        try:
+            learn_trait.learn.solutions.record(
+                agent_name=self.name,
+                problem=task.description,
+                problem_context=self._build_problem_context(task),
+                answer=self._build_answer_dict(result),
+                answer_text=result.content[:1000] if result.content else None,
+                tokens_used=result.tokens_used,
+                latency_ms=0,
+                tool_calls=self._serialize_tool_calls(result.tool_calls),
+                category=task.name,
+            )
+            self._lg.debug("solution recorded", extra={"agent": self.name, "task": task.name})
+        except Exception as e:
+            self._lg.warning(
+                "failed to record solution",
+                extra={"agent": self.name, "task": task.name, "exception": e},
+            )
+
+    def _build_answer_dict(self, result: TaskResult) -> dict[str, Any]:
+        """Build answer dict from task result for solution recording."""
+        answer: dict[str, Any] = {"success": result.success, "content": result.content}
+        if result.parsed is not None:
+            if hasattr(result.parsed, "model_dump"):
+                answer["parsed"] = result.parsed.model_dump()
+            else:
+                answer["parsed"] = result.parsed
+        if result.completion is not None:
+            answer["completion"] = result.completion.model_dump()
+        if result.error:
+            answer["error"] = result.error
+        return answer
+
+    def _build_problem_context(self, task: Task) -> dict[str, Any]:
+        """Build problem context dict for solution recording."""
+        context: dict[str, Any] = {"task_name": task.name, "task_context": task.context}
+        if task.output_schema is not None:
+            context["output_schema"] = task.output_schema.__name__
+        return context
+
+    def _serialize_tool_calls(
+        self, tool_calls: list[ToolCallResult] | None
+    ) -> list[dict[str, Any]] | None:
+        """Convert tool calls to serializable format for solution recording."""
+        if not tool_calls:
+            return None
+        return [{"name": tc.name, "success": tc.result.success} for tc in tool_calls]
 
     # =========================================================================
     # Conversation Management
@@ -578,7 +646,7 @@ Answer the user's question based on your purpose and what you've learned."""
         top_k: int | None = None,
         min_similarity: float | None = None,
         categories: list[str] | None = None,
-    ) -> list[ScoredFact]:
+    ) -> list[ScoredEntity[Fact]]:
         """Search facts by semantic similarity to query.
 
         Requires LearnTrait with embedder configured.
@@ -590,7 +658,7 @@ Answer the user's question based on your purpose and what you've learned."""
             categories: Filter to these categories.
 
         Returns:
-            List of ScoredFact sorted by similarity (highest first).
+            List of ScoredEntity[Fact] sorted by similarity (highest first).
         """
         from llm_agent.core.traits.learn import LearnTrait
 

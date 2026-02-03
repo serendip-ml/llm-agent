@@ -1,6 +1,7 @@
 """Agent framework with learning capabilities."""
 
-from llm_learn.collection import ScoredFact
+from llm_learn.core.types import ScoredEntity
+from llm_learn.memory.atomic import Fact
 
 from llm_agent.core.agent import Agent
 from llm_agent.core.config import AgentConfig
@@ -92,7 +93,8 @@ __all__ = [
     "Message",
     "StructuredOutputError",
     # Memory
-    "ScoredFact",
+    "Fact",
+    "ScoredEntity",
     # Tasks
     "Task",
     "TaskCompletion",

@@ -24,7 +24,7 @@ class RememberTool(BaseTool):
         from llm_agent.core.traits.learn import LearnTrait, LearnConfig
         from llm_agent.core.tools.builtin.learn import RememberTool
 
-        learn_trait = LearnTrait(LearnConfig(...))
+        learn_trait = LearnTrait(lg, LearnConfig(...))
         tool = RememberTool(learn_trait)
         result = tool.execute(fact="User prefers Python", category="preferences")
     """
@@ -85,7 +85,7 @@ class RecallTool(BaseTool):
         from llm_agent.core.traits.learn import LearnTrait, LearnConfig
         from llm_agent.core.tools.builtin.learn import RecallTool
 
-        learn_trait = LearnTrait(LearnConfig(...))
+        learn_trait = LearnTrait(lg, LearnConfig(...))
         tool = RecallTool(learn_trait)
         result = tool.execute(query="user preferences", limit=5)
     """
@@ -149,7 +149,7 @@ class RecallTool(BaseTool):
             return ToolResult(success=True, output="No matching facts found.")
 
         lines = [
-            f"- [{sf.fact.category}] {sf.fact.content} (similarity: {sf.similarity:.2f})"
+            f"- [{sf.entity.category}] {sf.entity.content} (similarity: {sf.score:.2f})"
             for sf in scored_facts
         ]
         return ToolResult(

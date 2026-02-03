@@ -16,9 +16,9 @@ from llm_agent.core.traits.identity import Identity
 class LearnBackendConfig(BaseModel):
     """Learn trait backend configuration."""
 
-    profile_id: int
-    db_config_path: str = "etc/infra.yaml"
-    db_key: str = "main"
+    profile_id: str
+    db: dict[str, Any]
+    """Database configuration dict (url, extensions, etc.)."""
     embedder_url: str | None = None
     embedder_model: str = "default"
 
@@ -99,8 +99,8 @@ class AgentServerConfig(BaseModel):
         llm: !include './llm.yaml'
 
         learn:
-          profile_id: 1
-          db_config_path: etc/infra.yaml
+          profile_id: "1"
+          db: !include './infra.yaml#dbs.main'
 
         agents:
           codebase-explorer:

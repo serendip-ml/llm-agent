@@ -130,7 +130,7 @@ class ToolFactory:
         """
         self._creators[tool_type] = creator
 
-    def create(self, tool_type: str, config: dict[str, Any] | None = None) -> Tool:
+    def create(self, tool_type: str, config: dict[str, Any] | None = None) -> Tool | None:
         """Create a tool from type and configuration.
 
         Args:
@@ -138,10 +138,11 @@ class ToolFactory:
             config: Tool-specific configuration.
 
         Returns:
-            Configured Tool instance.
+            Configured Tool instance, or None if tool cannot be created
+            (e.g., memory tools without LearnTrait).
 
         Raises:
-            ValueError: If tool type is unknown or requirements not met.
+            ValueError: If tool type is unknown.
         """
         config = config or {}
         canonical_type = self._ALIASES.get(tool_type, tool_type)
@@ -156,12 +157,15 @@ class ToolFactory:
 
         return creator(config)
 
-    def _create_memory_tool(self, tool_type: str) -> Tool:
-        """Create remember or recall tool."""
+    def _create_memory_tool(self, tool_type: str) -> Tool | None:
+        """Create remember or recall tool.
+
+        Returns None if LearnTrait not available (tool will be skipped).
+        """
         from llm_agent.core.tools.builtin import RecallTool, RememberTool
 
         if self._learn_trait is None:
-            raise ValueError(f"{tool_type} tool requires LearnTrait - call set_learn_trait() first")
+            return None  # Caller should skip this tool
 
         if tool_type == self.REMEMBER:
             return RememberTool(self._learn_trait)
@@ -245,11 +249,14 @@ class TraitFactory:
 
         return MethodTrait(method)
 
-    def create_tools_trait(self, tools_config: dict[str, dict[str, Any]]) -> ToolsTrait:
+    def create_tools_trait(
+        self, tools_config: dict[str, dict[str, Any]], lg: Logger | None = None
+    ) -> ToolsTrait:
         """Create ToolsTrait with tools from configuration.
 
         Args:
             tools_config: Tool configurations keyed by tool type.
+            lg: Optional logger for warnings about skipped tools.
 
         Returns:
             ToolsTrait with all configured tools registered.
@@ -260,6 +267,11 @@ class TraitFactory:
 
         for tool_type, tool_config in tools_config.items():
             tool = self._tool_factory.create(tool_type, tool_config)
+            if tool is None:
+                # Tool could not be created (e.g., memory tool without LearnTrait)
+                if lg is not None:
+                    lg.debug(f"skipping {tool_type} tool (LearnTrait not available)")
+                continue
             tools_trait.register(tool)
 
         return tools_trait

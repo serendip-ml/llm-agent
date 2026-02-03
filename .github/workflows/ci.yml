@@ -34,7 +34,7 @@ jobs:
           # Install pinned appinfra AFTER main install to ensure it wins.
           # This is needed for unreleased features (queue_config, from_queue_config).
           # TODO: Remove once appinfra is released with these changes.
-          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@67d67acc3499fd2cba874b09a9b4aa793d9a85d8"
+          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@489a265966d392546590d8ba4df74bdaae027ef9"
 
       - name: Check formatting
         run: python -m ruff format --check .
@@ -68,7 +68,7 @@ jobs:
           # Install pinned appinfra AFTER main install to ensure it wins.
           # This is needed for unreleased features (queue_config, from_queue_config).
           # TODO: Remove once appinfra is released with these changes.
-          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@67d67acc3499fd2cba874b09a9b4aa793d9a85d8"
+          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@489a265966d392546590d8ba4df74bdaae027ef9"
 
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short
@@ -96,7 +96,7 @@ jobs:
           # Install pinned appinfra AFTER main install to ensure it wins.
           # This is needed for unreleased features (queue_config, from_queue_config).
           # TODO: Remove once appinfra is released with these changes.
-          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@67d67acc3499fd2cba874b09a9b4aa793d9a85d8"
+          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@489a265966d392546590d8ba4df74bdaae027ef9"
 
       - name: Run tests with coverage
         run: python -m pytest tests/ --cov=llm_agent --cov-report=xml --cov-report=term

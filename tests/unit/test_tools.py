@@ -1354,13 +1354,13 @@ class TestRecallTool:
         mock_fact.content = "User prefers Python"
         mock_fact.category = "preferences"
 
-        mock_scored_fact = MagicMock()
-        mock_scored_fact.fact = mock_fact
-        mock_scored_fact.similarity = 0.85
+        mock_scored_entity = MagicMock()
+        mock_scored_entity.entity = mock_fact
+        mock_scored_entity.score = 0.85
 
         mock_learn_trait = MagicMock()
         mock_learn_trait.has_embedder = True
-        mock_learn_trait.recall.return_value = [mock_scored_fact]
+        mock_learn_trait.recall.return_value = [mock_scored_entity]
 
         tool = RecallTool(mock_learn_trait)
         result = tool.execute(query="programming language")

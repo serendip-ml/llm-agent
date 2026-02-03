@@ -5,11 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from appinfra.db.pg import PG
+from appinfra.log import Logger
 from llm_infer.client import ChatResponse, LLMClient
 from llm_learn import LearnClient
-from llm_learn.collection import ScoredFact
 from llm_learn.core import Database
+from llm_learn.core.types import ScoredEntity
 from llm_learn.inference import ContextBuilder, Embedder
+from llm_learn.memory.atomic import Fact
 
 from llm_agent.core.llm.types import CompletionResult
 from llm_agent.core.traits.llm import LLMConfig, _resolve_llm_defaults
@@ -26,17 +29,15 @@ class LearnConfig:
     Attributes:
         profile_id: Profile ID for scoping all learn operations.
         llm: LLM configuration for learned completions.
-        db_config_path: Path to database config file (default: etc/infra.yaml).
-        db_key: Database config key (default: main).
+        db: Database configuration dict (with url, extensions, etc.).
         embedder_url: URL for embedding service (None = no RAG).
         embedder_model: Model name for embeddings.
         embedder_timeout: Embedder timeout in seconds.
     """
 
-    profile_id: int
+    profile_id: str
     llm: LLMConfig
-    db_config_path: str = "etc/infra.yaml"
-    db_key: str = "main"
+    db: dict[str, Any]
     embedder_url: str | None = None
     embedder_model: str = "default"
     embedder_timeout: float = 30.0
@@ -59,12 +60,13 @@ class LearnTrait:
     Example:
         from llm_agent.core.traits import LearnTrait, LearnConfig, LLMConfig
 
-        agent = Agent(lg, config)
-        agent.add_trait(LearnTrait(LearnConfig(
-            profile_id=123,
+        learn_trait = LearnTrait(lg, LearnConfig(
+            profile_id="123",
             llm=LLMConfig(base_url="http://localhost:8000/v1"),
             embedder_url="http://localhost:8001/v1",
-        )))
+        ))
+        agent = Agent(lg, config)
+        agent.add_trait(learn_trait)
         agent.start()
 
         # Learned completion with fact injection
@@ -79,6 +81,7 @@ class LearnTrait:
         - on_stop(): Closes LLMClient and Embedder
     """
 
+    _lg: Logger
     config: LearnConfig
 
     _agent: Agent | None = field(default=None, repr=False, compare=False)
@@ -99,8 +102,11 @@ class LearnTrait:
 
     def on_start(self) -> None:
         """Create learn client, LLM client, and embedder on agent start."""
-        # Create database and learn client
-        self._database = Database.from_config(self.config.db_config_path, self.config.db_key)
+        # Create database from config
+        pg = PG(self._lg, self.config.db)
+        self._database = Database.from_pg(pg)
+
+        # Create learn client
         self._learn = LearnClient(
             profile_id=self.config.profile_id,
             database=self._database,
@@ -288,7 +294,7 @@ class LearnTrait:
         # Embed for semantic search if embedder available
         if self._embedder is not None:
             embedding = self._embedder.embed(fact)
-            self.learn.facts.set_embedding(
+            self.learn.embeddings.set_embedding(
                 fact_id=fact_id,
                 embedding=embedding.embedding,
                 model_name=self._embedder.model,
@@ -310,7 +316,7 @@ class LearnTrait:
         top_k: int = 10,
         min_similarity: float = 0.5,
         categories: list[str] | None = None,
-    ) -> list[ScoredFact]:
+    ) -> list[ScoredEntity[Fact]]:
         """Search facts by semantic similarity.
 
         Args:
@@ -320,7 +326,7 @@ class LearnTrait:
             categories: Filter to these categories (None = all).
 
         Returns:
-            List of ScoredFact sorted by similarity.
+            List of ScoredEntity[Fact] sorted by similarity.
 
         Raises:
             ValueError: If embedder not configured.
@@ -329,8 +335,8 @@ class LearnTrait:
             raise ValueError("recall() requires embedder - configure embedder_url in LearnConfig")
 
         embedding = self._embedder.embed(query)
-        return self.learn.facts.search_similar(
-            embedding=embedding.embedding,
+        return self.learn.embeddings.search_similar(
+            query=embedding.embedding,
             model_name=self._embedder.model,
             top_k=top_k,
             min_similarity=min_similarity,
@@ -393,7 +399,7 @@ class LearnTrait:
             raise ValueError("build_prompt_rag() requires embedder")
 
         scored_facts = self.recall(query, top_k=top_k, min_similarity=min_similarity)
-        facts = [sf.fact for sf in scored_facts]
+        facts = [sf.entity for sf in scored_facts]
 
         return self._context.build_system_prompt_from_facts(
             base_prompt=base_prompt,
@@ -421,8 +427,8 @@ class LearnTrait:
             Feedback ID.
         """
         return self.learn.feedback.record(
-            content_text=content,
             signal=signal,
+            comment=content,
             context=context,
         )
 

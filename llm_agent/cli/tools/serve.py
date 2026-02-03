@@ -82,14 +82,14 @@ class ServeTool(Tool):
             return None
 
         return LearnTrait(
+            self.lg,
             LearnConfig(
                 profile_id=config.learn.profile_id,
                 llm=config.llm,
-                db_config_path=config.learn.db_config_path,
-                db_key=config.learn.db_key,
+                db=config.learn.db,
                 embedder_url=config.learn.embedder_url,
                 embedder_model=config.learn.embedder_model,
-            )
+            ),
         )
 
     def _create_registry(self) -> AgentRegistry:
