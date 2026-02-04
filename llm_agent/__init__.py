@@ -5,12 +5,9 @@ from llm_learn.memory.atomic import Fact
 
 from llm_agent.core.agent import Agent
 from llm_agent.core.config import AgentConfig
-from llm_agent.core.conversational import ConversationalAgent
 from llm_agent.core.factory import (
-    AgentFactory,
     ToolFactory,
     TraitFactory,
-    create_agent_from_config,
 )
 from llm_agent.core.llm import (
     CompletionResult,
@@ -43,7 +40,13 @@ from llm_agent.core.traits import (
     HTTPTrait,
     Identity,
     IdentityTrait,
+    LearnConfig,
+    LearnTrait,
+    LLMConfig,
+    LLMTrait,
     MethodTrait,
+    SAIAConfig,
+    SAIATrait,
     ToolsTrait,
     Trait,
 )
@@ -55,10 +58,7 @@ __all__ = [
     # Agents
     "Agent",
     "AgentConfig",
-    "ConversationalAgent",
-    "create_agent_from_config",
     # Factories
-    "AgentFactory",
     "ToolFactory",
     "TraitFactory",
     # Tools
@@ -80,7 +80,13 @@ __all__ = [
     "BaseTrait",
     "Identity",
     "IdentityTrait",
+    "LearnConfig",
+    "LearnTrait",
+    "LLMConfig",
+    "LLMTrait",
     "MethodTrait",
+    "SAIAConfig",
+    "SAIATrait",
     "Trait",
     # HTTP
     "HTTPConfig",

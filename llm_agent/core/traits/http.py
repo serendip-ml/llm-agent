@@ -59,7 +59,7 @@ class HTTPTrait:
         from appinfra.log import quick_console_logger
 
         lg = quick_console_logger("agent", "info")
-        agent = ConversationalAgent(lg, config)
+        agent = MyAgent(lg, config)  # Your Agent subclass
         agent.add_trait(HTTPTrait(lg, HTTPConfig(port=8080)))
         agent.start()
 

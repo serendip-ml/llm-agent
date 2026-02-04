@@ -47,6 +47,7 @@ class Core:
         llm_config: LLMConfig,
         learn_trait: LearnTrait | None = None,
         variables: dict[str, str] | None = None,
+        factory_module: str = "llm_agent.agents.default",
     ) -> None:
         """Initialize the runtime core.
 
@@ -56,12 +57,14 @@ class Core:
             llm_config: LLM configuration for agents.
             learn_trait: Optional shared LearnTrait.
             variables: Variable substitutions for agent configs.
+            factory_module: Module containing the agent Factory class.
         """
         self._lg = lg
         self._registry = registry
         self._llm_config = llm_config
         self._learn_trait = learn_trait
         self._variables = variables or {}
+        self._factory_module = factory_module
 
         # Queue-based logging for subprocesses
         self._log_queue: Queue[Any] = Queue()
@@ -315,6 +318,7 @@ class Core:
                 self._llm_config,  # Already a dict, no need for asdict()
                 self._variables,
                 self._log_config,
+                self._factory_module,
             ),
             name=f"agent-{handle.name}",
             daemon=True,
@@ -363,27 +367,43 @@ def _subprocess_entry(
     name: str,
     config: dict[str, Any],
     channel: Any,
-    llm_config_dict: dict[str, Any],
+    llm_config: dict[str, Any],
     variables: dict[str, str],
     log_config: dict[str, Any],
+    factory_module: str,
 ) -> None:
     """Entry point for agent subprocess.
 
-    This runs in the subprocess - creates logger and runner, then runs.
+    This runs in the subprocess - creates logger, agent, and runner, then runs.
     """
+    import importlib
+
     from appinfra.log import Logger
 
     from llm_agent.runtime.runner import AgentRunner
 
     lg = Logger.from_queue_config(log_config, name=f"agent.{name}")
 
-    runner = AgentRunner(
-        name=name,
-        config=config,
-        channel=channel,
-        lg=lg,
-        llm_config=llm_config_dict,
-        learn_trait=None,  # LearnTrait can't be passed across processes
-        variables=variables,
-    )
+    # Import factory from specified module
+    module = importlib.import_module(factory_module)
+    factory = module.Factory(lg=lg, llm_config=llm_config)
+
+    # Create and start agent
+    agent = factory.create(config, variables=variables)
+    agent.start()
+
+    # Extract schedule interval from config
+    schedule_interval = _extract_schedule_interval(config)
+
+    runner = AgentRunner(lg=lg, agent=agent, channel=channel, schedule_interval=schedule_interval)
     runner.run()
+
+
+def _extract_schedule_interval(config: dict[str, Any]) -> float | None:
+    """Extract schedule interval from agent config."""
+    schedule = config.get("schedule")
+    if schedule and isinstance(schedule, dict):
+        interval = schedule.get("interval")
+        if interval is not None:
+            return float(interval)
+    return None

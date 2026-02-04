@@ -1274,8 +1274,8 @@ class TestHTTPFetchTool:
         assert "dns" in result.error.lower() or "resolution" in result.error.lower()
 
 
-# Note: ToolExecutor tests have been moved to tests/unit/governor/test_loop.py
-# as the functionality is now in GovernorLoop.
+# Note: Tool execution loop tests have been moved to llm-saia.
+# SAIA now handles the LLM ↔ tool interaction loop.
 
 
 class TestRememberTool:

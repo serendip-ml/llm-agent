@@ -6,8 +6,8 @@ from __future__ import annotations
 class ResponseContext:
     """Tracks response context for feedback.
 
-    Used internally by ConversationalAgent to store the context needed
-    to record feedback on a previous completion.
+    TODO: Review after ConversationalAgent removal - may not be needed,
+    or could be useful for other feedback tracking patterns.
     """
 
     __slots__ = ("system_prompt", "query", "response", "model")

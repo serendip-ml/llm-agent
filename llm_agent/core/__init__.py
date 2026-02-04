@@ -1,14 +1,14 @@
 """Core agent framework components.
 
 This package contains the core abstractions for building agents:
-- agent: Base Agent class
-- conversational: ConversationalAgent with LLM and tool capabilities
+- runnable: Runnable interface for executable agents
+- agent: Base Agent class with trait composition
 - config: Agent configuration
-- conversation: Conversation management with context window awareness
-- factory: Factory classes for creating agents, traits, and tools
+- conversation: Conversation management utilities
+- factory: Factory classes for creating traits and tools
 - task: Task definitions and results
-- traits: Composable agent behaviors (LLM, HTTP, Learn, etc.)
-- tools: Tool definitions and execution
+- traits: Composable agent behaviors (SAIA, LLM, HTTP, Learn, etc.)
+- tools: Tool definitions and registry
 - llm: LLM backend abstractions
 """
 
@@ -21,26 +21,24 @@ from llm_agent.core.conversation import (
     SlidingWindowCompactor,
     SummarizingCompactor,
 )
-from llm_agent.core.conversational import ConversationalAgent
 from llm_agent.core.factory import (
-    AgentFactory,
     ToolFactory,
     TraitFactory,
-    create_agent_from_config,
 )
+from llm_agent.core.runnable import ExecutionResult, Runnable
 from llm_agent.core.task import Task, TaskResult
 
 
 __all__ = [
+    # Runnable
+    "ExecutionResult",
+    "Runnable",
     # Agents
     "Agent",
     "AgentConfig",
-    "ConversationalAgent",
     # Factories
-    "AgentFactory",
     "ToolFactory",
     "TraitFactory",
-    "create_agent_from_config",
     # Conversation
     "Compactor",
     "Conversation",
