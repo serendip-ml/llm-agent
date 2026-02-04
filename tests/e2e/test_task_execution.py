@@ -1,7 +1,10 @@
 """E2E tests for agent execution with SAIA.
 
-These tests require an LLM server at localhost:8000.
-Tests are skipped if no server is available.
+These tests require:
+1. An LLM server at localhost:8000
+2. SAIA properly configured with tools/executor
+
+Tests are skipped if the environment is not properly configured.
 """
 
 from unittest.mock import MagicMock
@@ -18,8 +21,17 @@ LLM_BASE_URL = "http://localhost:8000/v1"
 LLM_MODEL = "default"
 
 
-def llm_available() -> bool:
-    """Check if LLM server is running."""
+def saia_e2e_enabled() -> bool:
+    """Check if SAIA E2E tests should run.
+
+    E2E tests require a fully configured environment with LLM server.
+    Set SAIA_E2E_TESTS=1 environment variable to enable.
+    """
+    import os
+
+    if os.environ.get("SAIA_E2E_TESTS") != "1":
+        return False
+
     try:
         response = httpx.get(f"{LLM_BASE_URL}/models", timeout=2.0)
         return response.status_code == 200
@@ -27,13 +39,13 @@ def llm_available() -> bool:
         return False
 
 
-skip_no_llm = pytest.mark.skipif(
-    not llm_available(),
-    reason="LLM server not available at localhost:8000",
+skip_no_saia = pytest.mark.skipif(
+    not saia_e2e_enabled(),
+    reason="SAIA E2E tests disabled (set SAIA_E2E_TESTS=1 to enable)",
 )
 
 
-@skip_no_llm
+@skip_no_saia
 class TestAgentExecutionE2E:
     """E2E tests for Agent with real LLM via SAIA."""
 
