@@ -6,7 +6,9 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from appinfra.log import Logger
 from llm_infer.client import ChatResponse, LLMClient
+from llm_infer.client import Factory as LLMClientFactory
 from pydantic import BaseModel, ValidationError
 
 from llm_agent.core.llm.backend import StructuredOutputError
@@ -79,7 +81,7 @@ class LLMTrait:
             }
         }
         agent = Agent(lg, config)
-        agent.add_trait(LLMTrait(llm_config))
+        agent.add_trait(LLMTrait(lg, llm_config))
 
         # Agent can now use complete()
         result = agent.complete("What is 2+2?")
@@ -90,6 +92,7 @@ class LLMTrait:
         - on_stop(): Closes LLMClient
     """
 
+    _lg: Logger
     config: LLMConfig = field(default_factory=dict)
 
     _agent: Agent | None = field(default=None, repr=False, compare=False)
@@ -106,7 +109,7 @@ class LLMTrait:
 
     def on_start(self) -> None:
         """Create LLM client on agent start."""
-        self._client = LLMClient.from_config(self.config)
+        self._client = LLMClientFactory(self._lg).from_config(self.config)
         self._defaults = _resolve_llm_defaults(self.config)
 
     def on_stop(self) -> None:

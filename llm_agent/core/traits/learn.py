@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from appinfra.db.pg import PG
 from appinfra.log import Logger
 from llm_infer.client import ChatResponse, LLMClient
+from llm_infer.client import Factory as LLMClientFactory
 from llm_learn import LearnClient
 from llm_learn.core import Database
 from llm_learn.core.types import ScoredEntity
@@ -104,19 +105,21 @@ class LearnTrait:
         """Create learn client, LLM client, and embedder on agent start."""
         # Create database from config
         pg = PG(self._lg, self.config.db)
-        self._database = Database.from_pg(pg)
+        self._database = Database(self._lg, pg)
 
-        # Create learn client
+        # Create learn client (ensure_schema=True triggers auto-migration)
         self._learn = LearnClient(
+            lg=self._lg,
             profile_id=self.config.profile_id,
             database=self._database,
+            ensure_schema=True,
         )
 
         # Create context builder
         self._context = ContextBuilder(self._learn.facts)
 
         # Create LLM client for completions
-        self._client = LLMClient.from_config(self.config.llm)
+        self._client = LLMClientFactory(self._lg).from_config(self.config.llm)
         self._llm_defaults = _resolve_llm_defaults(self.config.llm)
 
         # Create embedder if URL provided

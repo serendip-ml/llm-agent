@@ -14,7 +14,7 @@ Example:
     llm_config = LLMConfig(base_url="http://localhost:8000/v1")
 
     tool_factory = ToolFactory()
-    trait_factory = TraitFactory(tool_factory, llm_config)
+    trait_factory = TraitFactory(lg, tool_factory, llm_config)
     agent_factory = AgentFactory(lg, trait_factory)
 
     config = {
@@ -35,6 +35,8 @@ import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from appinfra.log import Logger
+
 from llm_agent.core.config import AgentConfig
 from llm_agent.core.conversation import (
     Compactor,
@@ -46,8 +48,6 @@ from llm_agent.core.conversational import ConversationalAgent
 
 
 if TYPE_CHECKING:
-    from appinfra.log import Logger
-
     from llm_agent.core.tools.base import Tool
     from llm_agent.core.traits.identity import IdentityTrait, MethodTrait
     from llm_agent.core.traits.learn import LearnTrait
@@ -177,7 +177,7 @@ class TraitFactory:
 
     Example:
         tool_factory = ToolFactory()
-        trait_factory = TraitFactory(tool_factory, llm_config)
+        trait_factory = TraitFactory(lg, tool_factory, llm_config)
 
         # Create individual traits
         llm_trait = trait_factory.create_llm_trait()
@@ -187,6 +187,7 @@ class TraitFactory:
 
     def __init__(
         self,
+        lg: Logger,
         tool_factory: ToolFactory,
         llm_config: LLMConfig,
         learn_trait: LearnTrait | None = None,
@@ -194,10 +195,12 @@ class TraitFactory:
         """Initialize factory.
 
         Args:
+            lg: Logger instance.
             tool_factory: Factory for creating tools.
             llm_config: LLM backend configuration.
             learn_trait: Optional LearnTrait for memory capabilities.
         """
+        self._lg = lg
         self._tool_factory = tool_factory
         self._llm_config = llm_config
         self._learn_trait = learn_trait
@@ -214,7 +217,7 @@ class TraitFactory:
         """Create LLMTrait with configured LLM backend."""
         from llm_agent.core.traits.llm import LLMTrait
 
-        return LLMTrait(self._llm_config)
+        return LLMTrait(self._lg, self._llm_config)
 
     def create_identity_trait(self, config: str | dict[str, Any]) -> IdentityTrait:
         """Create IdentityTrait from string or dict config.
@@ -282,7 +285,7 @@ class AgentFactory:
 
     Example:
         tool_factory = ToolFactory()
-        trait_factory = TraitFactory(tool_factory, llm_config)
+        trait_factory = TraitFactory(lg, tool_factory, llm_config)
         agent_factory = AgentFactory(lg, trait_factory)
 
         config = {
@@ -480,6 +483,6 @@ def create_agent_from_config(
         agent.start()
     """
     tool_factory = ToolFactory()
-    trait_factory = TraitFactory(tool_factory, llm_config, learn_trait)
+    trait_factory = TraitFactory(lg, tool_factory, llm_config, learn_trait)
     agent_factory = AgentFactory(lg, trait_factory, compactor)
     return agent_factory.create(config_dict, variables)
