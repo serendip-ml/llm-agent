@@ -142,9 +142,7 @@ class Agent(BaseAgent):
             return ExecutionResult(success=False, content="SAIATrait not attached")
 
         try:
-            saia_result = asyncio.get_event_loop().run_until_complete(
-                saia_trait.saia.complete(prompt)
-            )
+            saia_result = asyncio.run(saia_trait.saia.complete(prompt))
             return ExecutionResult(
                 success=saia_result.completed,
                 content=saia_result.output,
@@ -175,13 +173,20 @@ class Agent(BaseAgent):
         Raises:
             RuntimeError: If LLMTrait is not attached.
         """
+        from llm_agent.core.llm.types import Message
         from llm_agent.core.traits.llm import LLMTrait
 
         llm_trait = self.get_trait(LLMTrait)
         if llm_trait is None:
             raise RuntimeError("LLMTrait not attached")
-        # HTTP protocol interface - tests mock this to accept query/system_prompt
-        result = llm_trait.complete(query=query, system_prompt=system_prompt)  # type: ignore[call-arg]
+
+        # Build messages from HTTP API format
+        messages: list[Message] = []
+        if system_prompt:
+            messages.append(Message(role="system", content=system_prompt))
+        messages.append(Message(role="user", content=query))
+
+        result = llm_trait.complete(messages=messages)
         # Track response_id for feedback validation
         if hasattr(result, "id") and result.id:
             self._response_ids.add(result.id)
@@ -259,24 +264,34 @@ class Agent(BaseAgent):
 
         Args:
             response_id: ID of the response being rated.
-            signal: Feedback signal (e.g., "positive", "negative").
+            signal: Feedback signal ("positive" or "negative").
             correction: Optional correction text.
 
         Raises:
-            ValueError: If response_id is not recognized.
+            ValueError: If response_id is not recognized or signal is invalid.
             RuntimeError: If LearnTrait is not attached.
         """
         if response_id not in self._response_ids:
             raise ValueError(f"Unknown response_id: {response_id}")
+
+        if signal not in ("positive", "negative"):
+            raise ValueError(f"Invalid signal: {signal}. Must be 'positive' or 'negative'")
+
+        from typing import Literal, cast
 
         from llm_agent.core.traits.learn import LearnTrait
 
         learn_trait = self.get_trait(LearnTrait)
         if learn_trait is None:
             raise RuntimeError("LearnTrait not attached")
-        # HTTP protocol interface - tests mock this with HTTP protocol args
-        learn_trait.record_feedback(  # type: ignore[call-arg]
-            response_id=response_id,
-            signal=signal,  # type: ignore[arg-type]
-            correction=correction,
+
+        # Convert HTTP API format to LearnTrait.record_feedback format
+        context: dict[str, Any] = {"response_id": response_id}
+        if correction:
+            context["correction"] = correction
+
+        learn_trait.record_feedback(
+            content=correction or "",
+            signal=cast(Literal["positive", "negative"], signal),
+            context=context,
         )

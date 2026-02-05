@@ -265,6 +265,29 @@ class TestAgentExecution:
 
         assert "SAIATrait not attached" in result
 
+    def test_run_once_incomplete_when_saia_not_completed(self, agent_with_saia, mock_saia_trait):
+        """Agent reports failure when SAIA returns completed=False (TEXT_ONLY scenario).
+
+        This tests the case where the LLM responds with text but doesn't call
+        the terminal tool (complete_task). SAIA sets completed=False in this case.
+        """
+        from llm_saia import TaskResult
+
+        mock_saia_trait.saia.complete = AsyncMock(
+            return_value=TaskResult(
+                completed=False,  # LLM didn't call terminal tool
+                output="I tried but couldn't complete the task",
+                iterations=5,  # Hit max iterations
+                history=[],
+            )
+        )
+
+        result = agent_with_saia.run_once()
+
+        assert result.success is False
+        assert result.content == "I tried but couldn't complete the task"
+        assert result.iterations == 5
+
 
 class TestAgentRecentResults:
     """Tests for Agent.get_recent_results() method."""

@@ -169,9 +169,7 @@ class ConversationRunner:
             task_context = self._build_task_from_conversation(messages, effective_task)
 
             # Run SAIA complete (async)
-            saia_result = asyncio.get_event_loop().run_until_complete(
-                self.saia.complete(task_context)
-            )
+            saia_result = asyncio.run(self.saia.complete(task_context))
 
             # Update conversation with result
             self.conversation.add_assistant(saia_result.output)
@@ -229,9 +227,7 @@ class ConversationRunner:
             return None
 
         try:
-            return asyncio.get_event_loop().run_until_complete(
-                self.saia.extract(content, output_schema)
-            )
+            return asyncio.run(self.saia.extract(content, output_schema))
         except Exception as e:
             self.lg.warning(
                 "SAIA extraction failed",

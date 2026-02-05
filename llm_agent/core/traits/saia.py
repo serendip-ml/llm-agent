@@ -145,7 +145,7 @@ class SAIATrait(Trait):
             return [], None
 
         tools = [_tool_to_tooldef(t) for t in tools_trait.registry.list_tools()]
-        executor = _create_executor(tools_trait.registry)
+        executor = _create_executor(tools_trait.registry, self._lg)
 
         return tools, executor
 
@@ -159,7 +159,7 @@ def _tool_to_tooldef(tool: Any) -> ToolDef:
     )
 
 
-def _create_executor(registry: ToolRegistry) -> Any:
+def _create_executor(registry: ToolRegistry, lg: Logger) -> Any:
     """Create async tool executor for SAIA."""
 
     async def executor(name: str, arguments: dict[str, Any]) -> str:
@@ -173,6 +173,7 @@ def _create_executor(registry: ToolRegistry) -> Any:
                 return result.output
             return f"Error: {result.error or 'Tool execution failed'}"
         except Exception as e:
+            lg.warning("tool execution failed", extra={"tool": name, "exception": e})
             return f"Error executing {name}: {e}"
 
     return executor
