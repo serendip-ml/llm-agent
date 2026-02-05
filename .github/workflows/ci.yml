@@ -31,9 +31,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-          # Pin internal deps for CI reproducibility (local dev uses editable installs)
-          python -m pip install "git+https://github.com/serendip-ml/llm-learn.git@e68b8e862a7a2fdcb061d71e43709944cc7c20da"
-          python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@60dd91dc0b3b3a823b28d8bbcdde527cfc48cd8b"
+          # Internal deps: use develop branch until release, then pin to versions
+          python -m pip install "git+https://github.com/serendip-ml/llm-infer.git@develop"
+          python -m pip install "git+https://github.com/serendip-ml/llm-learn.git@develop"
+          python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@develop"
 
       - name: Check formatting
         run: python -m ruff format --check .
@@ -64,9 +65,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-          # Pin internal deps for CI reproducibility (local dev uses editable installs)
-          python -m pip install "git+https://github.com/serendip-ml/llm-learn.git@e68b8e862a7a2fdcb061d71e43709944cc7c20da"
-          python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@60dd91dc0b3b3a823b28d8bbcdde527cfc48cd8b"
+          # Internal deps: use develop branch until release, then pin to versions
+          python -m pip install "git+https://github.com/serendip-ml/llm-infer.git@develop"
+          python -m pip install "git+https://github.com/serendip-ml/llm-learn.git@develop"
+          python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@develop"
 
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short
@@ -91,9 +93,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-          # Pin internal deps for CI reproducibility (local dev uses editable installs)
-          python -m pip install "git+https://github.com/serendip-ml/llm-learn.git@e68b8e862a7a2fdcb061d71e43709944cc7c20da"
-          python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@60dd91dc0b3b3a823b28d8bbcdde527cfc48cd8b"
+          # Internal deps: use develop branch until release, then pin to versions
+          python -m pip install "git+https://github.com/serendip-ml/llm-infer.git@develop"
+          python -m pip install "git+https://github.com/serendip-ml/llm-learn.git@develop"
+          python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@develop"
 
       - name: Run tests with coverage
         run: python -m pytest tests/ --cov=llm_agent --cov-report=xml --cov-report=term
