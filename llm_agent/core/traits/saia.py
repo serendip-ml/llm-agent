@@ -157,7 +157,12 @@ def _tool_to_tooldef(tool: Any) -> ToolDef:
 
 
 def _create_executor(registry: ToolRegistry, lg: Logger) -> Any:
-    """Create async tool executor for SAIA."""
+    """Create async tool executor for SAIA.
+
+    Runs sync tool.execute() in a thread pool to avoid blocking the event loop.
+    """
+    import asyncio
+    import inspect
 
     async def executor(name: str, arguments: dict[str, Any]) -> str:
         tool = registry.get(name)
@@ -165,7 +170,13 @@ def _create_executor(registry: ToolRegistry, lg: Logger) -> Any:
             return f"Error: Unknown tool '{name}'"
 
         try:
-            result = tool.execute(**arguments)
+            # Run sync tool.execute in thread pool to avoid blocking event loop
+            result = await asyncio.to_thread(tool.execute, **arguments)
+
+            # Handle case where tool.execute might be async (future-proofing)
+            if inspect.isawaitable(result):
+                result = await result
+
             if result.success:
                 return result.output
             return f"Error: {result.error or 'Tool execution failed'}"

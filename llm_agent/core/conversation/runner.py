@@ -168,8 +168,8 @@ class ConversationRunner:
             messages = self.conversation.messages()
             task_context = self._build_task_from_conversation(messages, effective_task)
 
-            # Run SAIA complete (async)
-            saia_result = asyncio.run(self.saia.complete(task_context))
+            # Run SAIA complete - handle sync/async boundary
+            saia_result = self._run_saia_complete(task_context)
 
             # Update conversation with result
             self.conversation.add_assistant(saia_result.output)
@@ -177,12 +177,38 @@ class ConversationRunner:
             # Build result
             return self._build_saia_result(effective_task, saia_result)
 
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except Exception as e:
             self.lg.warning(
                 "SAIA execution failed",
                 extra={"agent": self._agent_name, "exception": e},
             )
             return TaskResult(success=False, content="", error=str(e))
+
+    def _run_saia_complete(self, task_context: str) -> Any:
+        """Run SAIA complete, handling sync/async boundary.
+
+        Detects whether we're already in an async context and handles
+        accordingly to avoid nested asyncio.run() errors.
+        """
+        assert self.saia is not None
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None:
+            # Already in async context - create task in existing loop
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, self.saia.complete(task_context))
+                return future.result()
+        else:
+            # Not in async context - safe to use asyncio.run
+            return asyncio.run(self.saia.complete(task_context))
 
     def _build_task_from_conversation(self, messages: list[Message], task: Task) -> str:
         """Build task description incorporating conversation context."""

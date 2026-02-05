@@ -7,6 +7,7 @@ These tests require:
 Tests are skipped if the environment is not properly configured.
 """
 
+import os
 from unittest.mock import MagicMock
 
 import httpx
@@ -27,8 +28,6 @@ def saia_e2e_enabled() -> bool:
     E2E tests require a fully configured environment with LLM server.
     Set SAIA_E2E_TESTS=1 environment variable to enable.
     """
-    import os
-
     if os.environ.get("SAIA_E2E_TESTS") != "1":
         return False
 

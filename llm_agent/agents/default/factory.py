@@ -106,8 +106,22 @@ class Factory(AgentFactory):
         self._add_identity_traits(agent, config)
         # SAIA needs system prompt from identity/method traits
         self._add_saia_trait(agent, config)
-        if self._learn_trait is not None:
-            agent.add_trait(self._learn_trait)
+        self._add_learn_trait(agent)
+
+    def _add_learn_trait(self, agent: Agent) -> None:
+        """Add LearnTrait if configured.
+
+        Creates a new LearnTrait instance for each agent to avoid sharing
+        the _agent reference across multiple agents.
+        """
+        if self._learn_trait is None:
+            return
+
+        from llm_agent.core.traits.learn import LearnTrait
+
+        # Create new instance from config to avoid sharing _agent reference
+        learn_trait = LearnTrait(_lg=self._lg, config=self._learn_trait.config)
+        agent.add_trait(learn_trait)
 
     def _add_tools_trait(self, agent: Agent, tools_config: dict[str, Any]) -> None:
         """Add ToolsTrait with configured tools."""

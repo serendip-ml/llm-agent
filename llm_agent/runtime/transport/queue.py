@@ -140,18 +140,22 @@ class QueueChannel:
 
         Call this when you own the queues and want to clean up resources.
         After calling this, the channel should not be used.
+
+        Note: This method assumes it's called from the main process where
+        the logger is valid. If called from subprocess, the logger may be
+        stale. If this becomes a problem, add a guard or revert to silent pass.
         """
         self._closed = True
         try:
             self._send_q.close()
             self._send_q.join_thread()
         except Exception:
-            pass  # Queue may already be closed
+            self._lg.debug("send_q already closed or cleanup failed")
         try:
             self._recv_q.close()
             self._recv_q.join_thread()
         except Exception:
-            pass  # Queue may already be closed
+            self._lg.debug("recv_q already closed or cleanup failed")
 
     @property
     def is_closed(self) -> bool:

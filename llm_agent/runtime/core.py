@@ -381,35 +381,44 @@ def _subprocess_entry(
 
     This runs in the subprocess - creates logger, agent, and runner, then runs.
     """
-    import importlib
-
     from appinfra.log import Logger
 
     from llm_agent.runtime.runner import AgentRunner
 
     lg = Logger.from_queue_config(log_config, name=f"agent/{name}")
+    learn_trait = _create_learn_trait(lg, learn_config_dict)
+    factory = _load_agent_factory(lg, factory_module, llm_config, learn_trait)
 
-    # Create LearnTrait if config provided
-    learn_trait = None
-    if learn_config_dict is not None:
-        from llm_agent.core.traits.learn import LearnConfig, LearnTrait
-
-        learn_config = LearnConfig(**learn_config_dict)
-        learn_trait = LearnTrait(_lg=lg, config=learn_config)
-
-    # Import factory from specified module
-    module = importlib.import_module(factory_module)
-    factory = module.Factory(lg=lg, llm_config=llm_config, learn_trait=learn_trait)
-
-    # Create and start agent
     agent = factory.create(config, variables=variables)
     agent.start()
 
-    # Extract schedule interval from config
     schedule_interval = _extract_schedule_interval(config)
-
     runner = AgentRunner(lg=lg, agent=agent, channel=channel, schedule_interval=schedule_interval)
     runner.run()
+
+
+def _create_learn_trait(lg: Any, learn_config_dict: dict[str, Any] | None) -> Any:
+    """Create LearnTrait from config dict if provided."""
+    if learn_config_dict is None:
+        return None
+
+    from llm_agent.core.traits.learn import LearnConfig, LearnTrait
+
+    learn_config = LearnConfig(**learn_config_dict)
+    return LearnTrait(_lg=lg, config=learn_config)
+
+
+def _load_agent_factory(
+    lg: Any, factory_module: str, llm_config: dict[str, Any], learn_trait: Any
+) -> Any:
+    """Load agent factory from module with descriptive error handling."""
+    import importlib
+
+    try:
+        module = importlib.import_module(factory_module)
+        return module.Factory(lg=lg, llm_config=llm_config, learn_trait=learn_trait)
+    except (ImportError, AttributeError) as e:
+        raise RuntimeError(f"Failed to load agent factory from {factory_module}: {e}") from e
 
 
 def _extract_schedule_interval(config: dict[str, Any]) -> float | None:

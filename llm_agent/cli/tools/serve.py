@@ -88,6 +88,7 @@ class ServeTool(Tool):
             db=config.learn.db,
             embedder_url=config.learn.embedder_url,
             embedder_model=config.learn.embedder_model,
+            embedder_timeout=config.learn.embedder_timeout,
         )
 
     def _create_learn_trait(self, learn_config: LearnConfig | None) -> LearnTrait | None:

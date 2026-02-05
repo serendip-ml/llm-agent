@@ -165,6 +165,7 @@ class Agent(Runnable):
 
     def _start_traits(self) -> None:
         """Start all attached traits. Call from start()."""
+        self._started = True
         for trait in self._traits.values():
             trait.on_start()
 
@@ -172,3 +173,4 @@ class Agent(Runnable):
         """Stop all attached traits. Call from stop()."""
         for trait in self._traits.values():
             trait.on_stop()
+        self._started = False
