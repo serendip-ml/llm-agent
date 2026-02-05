@@ -378,3 +378,103 @@ class TestSubstituteVariables:
         result = _substitute_variables(text, variables)
 
         assert result == "Single {BRACE} and replaced"
+
+
+class TestFactorySystemPrompt:
+    """Tests for Factory._build_system_prompt() method."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create mock Logger."""
+        return MagicMock()
+
+    @pytest.fixture
+    def factory(self, mock_logger):
+        """Create Factory with minimal config."""
+        return self._create_factory(mock_logger)
+
+    def _create_factory(self, mock_logger):
+        """Create Factory instance."""
+        from llm_agent.agents.default import Factory
+
+        llm_config = {
+            "default": "local",
+            "backends": {
+                "local": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                    "model": "test",
+                }
+            },
+        }
+        return Factory(lg=mock_logger, llm_config=llm_config)
+
+    def test_system_prompt_with_identity_only(self, mock_logger):
+        """System prompt contains identity when only identity is configured."""
+        from llm_agent.agents.default import Agent as DefaultAgent
+        from llm_agent.core.traits.identity import IdentityTrait
+
+        factory = self._create_factory(mock_logger)
+        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="task")
+        agent.add_trait(IdentityTrait("You are a helpful assistant."))
+
+        system_prompt = factory._build_system_prompt(agent)
+
+        assert system_prompt == "You are a helpful assistant."
+
+    def test_system_prompt_with_method_only(self, mock_logger):
+        """System prompt contains method when only method is configured."""
+        from llm_agent.agents.default import Agent as DefaultAgent
+        from llm_agent.core.traits.identity import MethodTrait
+
+        factory = self._create_factory(mock_logger)
+        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="task")
+        agent.add_trait(MethodTrait("- Step 1\n- Step 2"))
+
+        system_prompt = factory._build_system_prompt(agent)
+
+        assert system_prompt == "## Method\n- Step 1\n- Step 2"
+
+    def test_system_prompt_with_identity_and_method(self, mock_logger):
+        """System prompt combines identity and method."""
+        from llm_agent.agents.default import Agent as DefaultAgent
+        from llm_agent.core.traits.identity import IdentityTrait, MethodTrait
+
+        factory = self._create_factory(mock_logger)
+        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="task")
+        agent.add_trait(IdentityTrait("You are a helpful assistant."))
+        agent.add_trait(MethodTrait("- Step 1\n- Step 2"))
+
+        system_prompt = factory._build_system_prompt(agent)
+
+        assert system_prompt == "You are a helpful assistant.\n\n## Method\n- Step 1\n- Step 2"
+
+    def test_system_prompt_empty_when_no_traits(self, mock_logger):
+        """System prompt is None when no identity or method traits."""
+        from llm_agent.agents.default import Agent as DefaultAgent
+
+        factory = self._create_factory(mock_logger)
+        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="task")
+
+        system_prompt = factory._build_system_prompt(agent)
+
+        assert system_prompt is None
+
+    def test_factory_create_passes_system_prompt_to_saia(self, mock_logger):
+        """Factory.create() passes system prompt to SAIATrait."""
+        from llm_agent.core.traits.saia import SAIATrait
+
+        factory = self._create_factory(mock_logger)
+        config = {
+            "name": "test-agent",
+            "identity": "You are a code analyst.",
+            "method": "- Analyze carefully",
+            "task": {"description": "Analyze the code."},
+        }
+
+        agent = factory.create(config)
+        saia_trait = agent.get_trait(SAIATrait)
+
+        assert saia_trait is not None
+        expected = "You are a code analyst.\n\n## Method\n- Analyze carefully"
+        assert saia_trait.config.system_prompt == expected

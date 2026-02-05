@@ -90,6 +90,15 @@ class SAIATrait(Trait):
 
         tools, executor = self._get_tools_and_executor()
 
+        self._lg.debug(
+            "SAIA tools configured",
+            extra={
+                "tool_count": len(tools),
+                "tool_names": [t.name for t in tools],
+                "has_executor": executor is not None,
+            },
+        )
+
         run_config = RunConfig(
             max_iterations=self.config.max_iterations,
             timeout_secs=self.config.timeout_secs,
@@ -102,6 +111,7 @@ class SAIATrait(Trait):
             system=self.config.system_prompt,
             run=run_config,
             terminal_tool=self.config.terminal_tool,
+            lg=self._lg,
         )
         self._started = True
         self._lg.debug("SAIA trait started")

@@ -43,6 +43,20 @@ class LearnConfig:
     embedder_model: str = "default"
     embedder_timeout: float = 30.0
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to plain dict for pickling across process boundaries.
+
+        Handles DotDict and other special dict types that can't be pickled directly.
+        """
+        return {
+            "profile_id": self.profile_id,
+            "llm": dict(self.llm) if self.llm else {},
+            "db": dict(self.db) if self.db else {},
+            "embedder_url": self.embedder_url,
+            "embedder_model": self.embedder_model,
+            "embedder_timeout": self.embedder_timeout,
+        }
+
 
 @dataclass
 class LearnTrait:

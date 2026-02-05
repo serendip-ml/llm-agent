@@ -10,6 +10,7 @@ import asyncio
 from typing import Any
 
 from appinfra.log import Logger
+from appinfra.time import time
 
 from llm_agent.core.agent import Agent as BaseAgent
 from llm_agent.core.runnable import ExecutionResult
@@ -86,9 +87,22 @@ class Agent(BaseAgent):
         if not self._default_prompt:
             return ExecutionResult(success=False, content="No default prompt configured")
 
+        start_t = time.start()
         result = self._execute(self._default_prompt)
         self._cycle_count += 1
         self._store_result(result)
+
+        self._lg.info(
+            "execution completed",
+            extra={
+                "after": time.since(start_t),
+                "agent": self._name,
+                "success": result.success,
+                "iters": result.iterations,
+                "output": result.content,
+            },
+        )
+
         return result
 
     def ask(self, question: str) -> str:

@@ -23,7 +23,7 @@ from llm_agent.runtime.transport import Message, MessageType, Request, create_ch
 if TYPE_CHECKING:
     from appinfra.log import Logger
 
-    from llm_agent.core.traits.learn import LearnTrait
+    from llm_agent.core.traits.learn import LearnConfig
     from llm_agent.core.traits.llm import LLMConfig
     from llm_agent.runtime.registry import AgentRegistry
 
@@ -45,7 +45,7 @@ class Core:
         lg: Logger,
         registry: AgentRegistry,
         llm_config: LLMConfig,
-        learn_trait: LearnTrait | None = None,
+        learn_config: LearnConfig | None = None,
         variables: dict[str, str] | None = None,
         factory_module: str = "llm_agent.agents.default",
     ) -> None:
@@ -55,14 +55,14 @@ class Core:
             lg: Logger instance.
             registry: Agent registry for handle lookup.
             llm_config: LLM configuration for agents.
-            learn_trait: Optional shared LearnTrait.
+            learn_config: Optional LearnConfig for memory capabilities.
             variables: Variable substitutions for agent configs.
             factory_module: Module containing the agent Factory class.
         """
         self._lg = lg
         self._registry = registry
         self._llm_config = llm_config
-        self._learn_trait = learn_trait
+        self._learn_config = learn_config
         self._variables = variables or {}
         self._factory_module = factory_module
 
@@ -309,6 +309,9 @@ class Core:
         main_channel, subprocess_channel = create_channel_pair()
         handle.channel = main_channel
 
+        # Convert LearnConfig to dict for pickling (handles DotDict from appinfra)
+        learn_config_dict = self._learn_config.to_dict() if self._learn_config else None
+
         handle.process = mp.Process(
             target=_subprocess_entry,
             args=(
@@ -316,6 +319,7 @@ class Core:
                 self._build_runner_config(handle),
                 subprocess_channel,
                 self._llm_config,  # Already a dict, no need for asdict()
+                learn_config_dict,
                 self._variables,
                 self._log_config,
                 self._factory_module,
@@ -368,6 +372,7 @@ def _subprocess_entry(
     config: dict[str, Any],
     channel: Any,
     llm_config: dict[str, Any],
+    learn_config_dict: dict[str, Any] | None,
     variables: dict[str, str],
     log_config: dict[str, Any],
     factory_module: str,
@@ -382,11 +387,19 @@ def _subprocess_entry(
 
     from llm_agent.runtime.runner import AgentRunner
 
-    lg = Logger.from_queue_config(log_config, name=f"agent.{name}")
+    lg = Logger.from_queue_config(log_config, name=f"agent/{name}")
+
+    # Create LearnTrait if config provided
+    learn_trait = None
+    if learn_config_dict is not None:
+        from llm_agent.core.traits.learn import LearnConfig, LearnTrait
+
+        learn_config = LearnConfig(**learn_config_dict)
+        learn_trait = LearnTrait(_lg=lg, config=learn_config)
 
     # Import factory from specified module
     module = importlib.import_module(factory_module)
-    factory = module.Factory(lg=lg, llm_config=llm_config)
+    factory = module.Factory(lg=lg, llm_config=llm_config, learn_trait=learn_trait)
 
     # Create and start agent
     agent = factory.create(config, variables=variables)

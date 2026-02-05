@@ -102,8 +102,10 @@ class Factory(AgentFactory):
     def _add_traits(self, agent: Agent, config: dict[str, Any]) -> None:
         """Add traits to the agent based on configuration."""
         self._add_tools_trait(agent, config.get("tools", {}))
-        self._add_saia_trait(agent, config)
+        # Add identity traits first so we can build system prompt from them
         self._add_identity_traits(agent, config)
+        # SAIA needs system prompt from identity/method traits
+        self._add_saia_trait(agent, config)
         if self._learn_trait is not None:
             agent.add_trait(self._learn_trait)
 
@@ -122,12 +124,35 @@ class Factory(AgentFactory):
 
     def _add_saia_trait(self, agent: Agent, config: dict[str, Any]) -> None:
         """Add SAIATrait for LLM operations."""
+        # Build system prompt from identity and method traits
+        system_prompt = self._build_system_prompt(agent)
+
         saia_config = SAIAConfig(
             terminal_tool=config.get("terminal_tool", "complete_task"),
             max_iterations=config.get("max_iterations", 0),
             timeout_secs=config.get("timeout_secs", 0),
+            system_prompt=system_prompt,
         )
         agent.add_trait(SAIATrait(_lg=self._lg, backend=self._get_backend(), config=saia_config))
+
+    def _build_system_prompt(self, agent: Agent) -> str | None:
+        """Build system prompt from identity and method traits."""
+        from llm_agent.core.traits.identity import IdentityTrait, MethodTrait
+
+        parts: list[str] = []
+
+        identity_trait = agent.get_trait(IdentityTrait)
+        if identity_trait is not None:
+            parts.append(identity_trait.identity.prompt)
+
+        method_trait = agent.get_trait(MethodTrait)
+        if method_trait is not None:
+            parts.append(f"## Method\n{method_trait.method}")
+
+        if not parts:
+            return None
+
+        return "\n\n".join(parts)
 
     def _add_identity_traits(self, agent: Agent, config: dict[str, Any]) -> None:
         """Add identity and method traits if configured."""
