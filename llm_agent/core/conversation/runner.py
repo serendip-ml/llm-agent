@@ -25,6 +25,12 @@ IdentityBuilder = Callable[[], str]
 """Function that builds the identity/system prompt."""
 
 
+# Conversation context limits
+_CONTEXT_MESSAGE_LIMIT = 5  # Last N messages for context
+_SYSTEM_CONTENT_TRUNCATE = 500  # Max chars for system context
+_ASSISTANT_CONTENT_TRUNCATE = 200  # Max chars for assistant context
+
+
 @dataclass
 class ConversationRunner:
     """Runs conversation-based task execution with optional SAIA integration.
@@ -187,41 +193,24 @@ class ConversationRunner:
             return TaskResult(success=False, content="", error=str(e))
 
     def _run_saia_complete(self, task_context: str) -> Any:
-        """Run SAIA complete, handling sync/async boundary.
-
-        Detects whether we're already in an async context and handles
-        accordingly to avoid nested asyncio.run() errors.
-        """
+        """Run SAIA complete, handling sync/async boundary."""
         assert self.saia is not None
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop is not None:
-            # Already in async context - create task in existing loop
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, self.saia.complete(task_context))
-                return future.result()
-        else:
-            # Not in async context - safe to use asyncio.run
-            return asyncio.run(self.saia.complete(task_context))
+        return self._run_async(self.saia.complete(task_context))
 
     def _build_task_from_conversation(self, messages: list[Message], task: Task) -> str:
         """Build task description incorporating conversation context."""
         # Extract system prompt and recent messages for context
         context_parts = []
 
-        for msg in messages[-5:]:  # Last 5 messages for context
+        for msg in messages[-_CONTEXT_MESSAGE_LIMIT:]:
             if msg.role == "system":
-                context_parts.append(f"Context: {msg.content[:500]}")
+                context_parts.append(f"Context: {msg.content[:_SYSTEM_CONTENT_TRUNCATE]}")
             elif msg.role == "user":
                 context_parts.append(f"User: {msg.content}")
             elif msg.role == "assistant":
-                context_parts.append(f"Previous response: {msg.content[:200]}...")
+                context_parts.append(
+                    f"Previous response: {msg.content[:_ASSISTANT_CONTENT_TRUNCATE]}..."
+                )
 
         context = "\n".join(context_parts)
         return f"{context}\n\nCurrent task: {task.description}"
@@ -248,18 +237,43 @@ class ConversationRunner:
         )
 
     def _try_extract_with_saia(self, content: str, output_schema: type) -> Any:
-        """Try to extract structured output using SAIA extract verb."""
+        """Try to extract structured output using SAIA extract verb.
+
+        Handles sync/async boundary the same way as _run_saia_complete().
+        """
         if self.saia is None:
             return None
 
         try:
-            return asyncio.run(self.saia.extract(content, output_schema))
+            return self._run_async(self.saia.extract(content, output_schema))
         except Exception as e:
             self.lg.warning(
                 "SAIA extraction failed",
                 extra={"agent": self._agent_name, "exception": e},
             )
             return None
+
+    def _run_async(self, coro: Any) -> Any:
+        """Run async coroutine, handling sync/async boundary.
+
+        Detects whether we're already in an async context and handles
+        accordingly to avoid nested asyncio.run() errors.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None:
+            # Already in async context - run in thread pool
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, coro)
+                return future.result()
+        else:
+            # Not in async context - safe to use asyncio.run
+            return asyncio.run(coro)
 
     def _extract_completion(self, terminal_data: dict[str, Any] | None) -> Any:
         """Extract TaskCompletion from terminal_data if valid."""

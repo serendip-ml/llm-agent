@@ -108,12 +108,17 @@ class Agent(Runnable):
 
         Raises:
             ValueError: If a trait of this type is already added.
+            Exception: If trait.attach() fails (trait is rolled back).
         """
         trait_type = type(trait)
         if trait_type in self._traits:
             raise ValueError(f"Trait {trait_type.__name__} already added")
         self._traits[trait_type] = trait
-        trait.attach(self)
+        try:
+            trait.attach(self)
+        except Exception:
+            del self._traits[trait_type]
+            raise
         if self._started:
             trait.on_start()
 

@@ -380,21 +380,28 @@ def _subprocess_entry(
     """Entry point for agent subprocess.
 
     This runs in the subprocess - creates logger, agent, and runner, then runs.
+    Initialization errors are caught and sent back to the main process via ERROR message.
     """
     from appinfra.log import Logger
 
     from llm_agent.runtime.runner import AgentRunner
 
-    lg = Logger.from_queue_config(log_config, name=f"agent/{name}")
-    learn_trait = _create_learn_trait(lg, learn_config_dict)
-    factory = _load_agent_factory(lg, factory_module, llm_config, learn_trait)
+    try:
+        lg = Logger.from_queue_config(log_config, name=f"agent/{name}")
+        learn_trait = _create_learn_trait(lg, learn_config_dict)
+        factory = _load_agent_factory(lg, factory_module, llm_config, learn_trait)
 
-    agent = factory.create(config, variables=variables)
-    agent.start()
+        agent = factory.create(config, variables=variables)
+        agent.start()
 
-    schedule_interval = _extract_schedule_interval(config)
-    runner = AgentRunner(lg=lg, agent=agent, channel=channel, schedule_interval=schedule_interval)
-    runner.run()
+        schedule_interval = _extract_schedule_interval(config)
+        runner = AgentRunner(
+            lg=lg, agent=agent, channel=channel, schedule_interval=schedule_interval
+        )
+        runner.run()
+    except Exception as e:
+        # Send error back to main process for faster feedback
+        channel.send(Message(type=MessageType.ERROR, payload={"error": str(e)}))
 
 
 def _create_learn_trait(lg: Any, learn_config_dict: dict[str, Any] | None) -> Any:

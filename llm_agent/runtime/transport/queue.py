@@ -47,10 +47,20 @@ class QueueChannel:
             send_q: Queue for sending messages.
             recv_q: Queue for receiving messages.
         """
-        self._lg = lg
+        self._lg: Logger | None = lg
         self._send_q = send_q
         self._recv_q = recv_q
         self._closed = False
+
+    def __getstate__(self) -> dict[str, object]:
+        """Prepare state for pickling - strip logger which doesn't survive."""
+        state = self.__dict__.copy()
+        state["_lg"] = None
+        return state
+
+    def __setstate__(self, state: dict[str, object]) -> None:
+        """Restore state after unpickling."""
+        self.__dict__.update(state)
 
     def set_logger(self, lg: Logger) -> None:
         """Set logger after unpickling (not currently needed, see class docstring)."""
@@ -120,10 +130,11 @@ class QueueChannel:
                 return msg
 
             # Non-matching message - unexpected, log for debugging
-            self._lg.warning(
-                "received non-matching message in request()",
-                extra={"expected_id": req.id, "msg_type": type(msg).__name__},
-            )
+            if self._lg is not None:
+                self._lg.warning(
+                    "received non-matching message in request()",
+                    extra={"expected_id": req.id, "msg_type": type(msg).__name__},
+                )
 
         raise TimeoutError(f"No response to request {req.id} within {timeout}s")
 
@@ -150,12 +161,14 @@ class QueueChannel:
             self._send_q.close()
             self._send_q.join_thread()
         except Exception:
-            self._lg.debug("send_q already closed or cleanup failed")
+            if self._lg is not None:
+                self._lg.debug("send_q already closed or cleanup failed")
         try:
             self._recv_q.close()
             self._recv_q.join_thread()
         except Exception:
-            self._lg.debug("recv_q already closed or cleanup failed")
+            if self._lg is not None:
+                self._lg.debug("recv_q already closed or cleanup failed")
 
     @property
     def is_closed(self) -> bool:
