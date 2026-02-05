@@ -434,5 +434,8 @@ def _extract_schedule_interval(config: dict[str, Any]) -> float | None:
     if schedule and isinstance(schedule, dict):
         interval = schedule.get("interval")
         if interval is not None:
-            return float(interval)
+            try:
+                return float(interval)
+            except (ValueError, TypeError):
+                return None
     return None

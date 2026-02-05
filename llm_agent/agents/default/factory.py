@@ -121,6 +121,7 @@ class Factory(AgentFactory):
 
         # Create new instance from config to avoid sharing _agent reference
         learn_trait = LearnTrait(_lg=self._lg, config=self._learn_trait.config)
+        self._tool_factory.set_learn_trait(learn_trait)
         agent.add_trait(learn_trait)
 
     def _add_tools_trait(self, agent: Agent, tools_config: dict[str, Any]) -> None:

@@ -208,9 +208,9 @@ class ConversationRunner:
             elif msg.role == "user":
                 context_parts.append(f"User: {msg.content}")
             elif msg.role == "assistant":
-                context_parts.append(
-                    f"Previous response: {msg.content[:_ASSISTANT_CONTENT_TRUNCATE]}..."
-                )
+                truncated = msg.content[:_ASSISTANT_CONTENT_TRUNCATE]
+                suffix = "..." if len(msg.content) > _ASSISTANT_CONTENT_TRUNCATE else ""
+                context_parts.append(f"Previous response: {truncated}{suffix}")
 
         context = "\n".join(context_parts)
         return f"{context}\n\nCurrent task: {task.description}"
