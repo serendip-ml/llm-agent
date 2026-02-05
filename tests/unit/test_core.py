@@ -49,17 +49,17 @@ class TestCoreInit:
             mock_listener_class.assert_called_once()
             mock_listener_class.return_value.start.assert_called_once()
 
-    def test_init_with_learn_trait(self, mock_logger, registry, llm_config):
-        """Core accepts optional LearnTrait."""
-        mock_learn_trait = MagicMock()
+    def test_init_with_learn_config(self, mock_logger, registry, llm_config):
+        """Core accepts optional LearnConfig."""
+        mock_learn_config = MagicMock()
         with patch("llm_agent.runtime.core.LogQueueListener"):
             core = Core(
                 lg=mock_logger,
                 registry=registry,
                 llm_config=llm_config,
-                learn_trait=mock_learn_trait,
+                learn_config=mock_learn_config,
             )
-        assert core._learn_trait is mock_learn_trait
+        assert core._learn_config is mock_learn_config
 
     def test_init_with_variables(self, mock_logger, registry, llm_config):
         """Core accepts optional variables dict."""

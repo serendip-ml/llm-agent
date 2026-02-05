@@ -23,7 +23,7 @@ from llm_agent.runtime.transport import Message, MessageType, Request, create_ch
 if TYPE_CHECKING:
     from appinfra.log import Logger
 
-    from llm_agent.core.traits.learn import LearnTrait
+    from llm_agent.core.traits.learn import LearnConfig
     from llm_agent.core.traits.llm import LLMConfig
     from llm_agent.runtime.registry import AgentRegistry
 
@@ -45,8 +45,9 @@ class Core:
         lg: Logger,
         registry: AgentRegistry,
         llm_config: LLMConfig,
-        learn_trait: LearnTrait | None = None,
+        learn_config: LearnConfig | None = None,
         variables: dict[str, str] | None = None,
+        factory_module: str = "llm_agent.agents.default",
     ) -> None:
         """Initialize the runtime core.
 
@@ -54,14 +55,16 @@ class Core:
             lg: Logger instance.
             registry: Agent registry for handle lookup.
             llm_config: LLM configuration for agents.
-            learn_trait: Optional shared LearnTrait.
+            learn_config: Optional LearnConfig for memory capabilities.
             variables: Variable substitutions for agent configs.
+            factory_module: Module containing the agent Factory class.
         """
         self._lg = lg
         self._registry = registry
         self._llm_config = llm_config
-        self._learn_trait = learn_trait
+        self._learn_config = learn_config
         self._variables = variables or {}
+        self._factory_module = factory_module
 
         # Queue-based logging for subprocesses
         self._log_queue: Queue[Any] = Queue()
@@ -303,8 +306,11 @@ class Core:
         """Spawn subprocess for agent."""
         self._lg.debug("spawning process for agent runtime...", extra={"agent": handle.name})
 
-        main_channel, subprocess_channel = create_channel_pair()
+        main_channel, subprocess_channel = create_channel_pair(self._lg)
         handle.channel = main_channel
+
+        # Convert LearnConfig to dict for pickling (handles DotDict from appinfra)
+        learn_config_dict = self._learn_config.to_dict() if self._learn_config else None
 
         handle.process = mp.Process(
             target=_subprocess_entry,
@@ -313,8 +319,10 @@ class Core:
                 self._build_runner_config(handle),
                 subprocess_channel,
                 self._llm_config,  # Already a dict, no need for asdict()
+                learn_config_dict,
                 self._variables,
                 self._log_config,
+                self._factory_module,
             ),
             name=f"agent-{handle.name}",
             daemon=True,
@@ -363,27 +371,71 @@ def _subprocess_entry(
     name: str,
     config: dict[str, Any],
     channel: Any,
-    llm_config_dict: dict[str, Any],
+    llm_config: dict[str, Any],
+    learn_config_dict: dict[str, Any] | None,
     variables: dict[str, str],
     log_config: dict[str, Any],
+    factory_module: str,
 ) -> None:
     """Entry point for agent subprocess.
 
-    This runs in the subprocess - creates logger and runner, then runs.
+    This runs in the subprocess - creates logger, agent, and runner, then runs.
+    Initialization errors are caught and sent back to the main process via ERROR message.
     """
     from appinfra.log import Logger
 
     from llm_agent.runtime.runner import AgentRunner
 
-    lg = Logger.from_queue_config(log_config, name=f"agent.{name}")
+    try:
+        lg = Logger.from_queue_config(log_config, name=f"agent/{name}")
+        learn_trait = _create_learn_trait(lg, learn_config_dict)
+        factory = _load_agent_factory(lg, factory_module, llm_config, learn_trait)
 
-    runner = AgentRunner(
-        name=name,
-        config=config,
-        channel=channel,
-        lg=lg,
-        llm_config=llm_config_dict,
-        learn_trait=None,  # LearnTrait can't be passed across processes
-        variables=variables,
-    )
-    runner.run()
+        agent = factory.create(config, variables=variables)
+        agent.start()
+
+        schedule_interval = _extract_schedule_interval(config)
+        runner = AgentRunner(
+            lg=lg, agent=agent, channel=channel, schedule_interval=schedule_interval
+        )
+        runner.run()
+    except Exception as e:
+        # Send error back to main process for faster feedback
+        channel.send(Message(type=MessageType.ERROR, payload={"error": str(e)}))
+
+
+def _create_learn_trait(lg: Any, learn_config_dict: dict[str, Any] | None) -> Any:
+    """Create LearnTrait from config dict if provided."""
+    if learn_config_dict is None:
+        return None
+
+    from llm_agent.core.traits.learn import LearnConfig, LearnTrait
+
+    learn_config = LearnConfig(**learn_config_dict)
+    return LearnTrait(_lg=lg, config=learn_config)
+
+
+def _load_agent_factory(
+    lg: Any, factory_module: str, llm_config: dict[str, Any], learn_trait: Any
+) -> Any:
+    """Load agent factory from module with descriptive error handling."""
+    import importlib
+
+    try:
+        module = importlib.import_module(factory_module)
+        return module.Factory(lg=lg, llm_config=llm_config, learn_trait=learn_trait)
+    except (ImportError, AttributeError) as e:
+        raise RuntimeError(f"Failed to load agent factory from {factory_module}: {e}") from e
+
+
+def _extract_schedule_interval(config: dict[str, Any]) -> float | None:
+    """Extract schedule interval from agent config."""
+    schedule = config.get("schedule")
+    if schedule and isinstance(schedule, dict):
+        interval = schedule.get("interval")
+        if interval is not None:
+            try:
+                return float(interval)
+            except (ValueError, TypeError):
+                return None
+    return None

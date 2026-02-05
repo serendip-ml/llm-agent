@@ -2,32 +2,26 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, TypeVar
+from abc import abstractmethod
+from typing import TypeVar
 
 from appinfra.log import Logger
 
-from llm_agent.core.traits.base import Trait
-
-
-if TYPE_CHECKING:
-    from llm_agent.core.task import Task
+from .runnable import ExecutionResult, Runnable
+from .traits.base import Trait
 
 
 TraitT = TypeVar("TraitT", bound=Trait)
 
 
-class Agent(ABC):
+class Agent(Runnable):
     """Abstract base class for agents.
 
-    Defines the runnable interface that all agents must implement:
-    - name: Agent identifier
-    - start(): Begin running
-    - stop(): Stop running
-    - submit(task): Submit a task for execution
+    Provides trait composition and lifecycle management. Subclasses
+    implement the concrete agent behavior.
 
-    Agents support composable traits for capabilities like LLM access,
-    tool use, learning, etc.
+    For LLM operations, attach SAIATrait and call agent.get_trait(SAIATrait).saia
+    directly. For learning, attach LearnTrait and access via get_trait().
 
     Example:
         class MyAgent(Agent):
@@ -41,14 +35,9 @@ class Agent(ABC):
 
             def start(self) -> None:
                 self._start_traits()
-                # ... agent-specific startup
 
             def stop(self) -> None:
                 self._stop_traits()
-                # ... agent-specific cleanup
-
-            def submit(self, task: Task) -> None:
-                # ... handle task submission
     """
 
     def __init__(self, lg: Logger) -> None:
@@ -71,9 +60,6 @@ class Agent(ABC):
     def start(self) -> None:
         """Start the agent.
 
-        After start(), the agent runs continuously, working on tasks
-        or idling. Call stop() to shut down.
-
         Subclasses should call _start_traits() to start attached traits.
         """
         ...
@@ -82,19 +68,28 @@ class Agent(ABC):
     def stop(self) -> None:
         """Stop the agent.
 
-        Gracefully shuts down the agent. After stop(), the agent
-        no longer processes tasks.
-
         Subclasses should call _stop_traits() to stop attached traits.
         """
         ...
 
     @abstractmethod
-    def submit(self, task: Task) -> None:
-        """Submit a task for the agent to work on.
+    def record_feedback(self, message: str) -> None:
+        """Record feedback about execution.
 
         Args:
-            task: The task to execute.
+            message: The feedback message.
+        """
+        ...
+
+    @abstractmethod
+    def get_recent_results(self, limit: int = 10) -> list[ExecutionResult]:
+        """Get recent execution results.
+
+        Args:
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of recent ExecutionResult objects.
         """
         ...
 
@@ -113,12 +108,17 @@ class Agent(ABC):
 
         Raises:
             ValueError: If a trait of this type is already added.
+            Exception: If trait.attach() fails (trait is rolled back).
         """
         trait_type = type(trait)
         if trait_type in self._traits:
             raise ValueError(f"Trait {trait_type.__name__} already added")
         self._traits[trait_type] = trait
-        trait.attach(self)
+        try:
+            trait.attach(self)
+        except Exception:
+            del self._traits[trait_type]
+            raise
         if self._started:
             trait.on_start()
 
@@ -170,6 +170,7 @@ class Agent(ABC):
 
     def _start_traits(self) -> None:
         """Start all attached traits. Call from start()."""
+        self._started = True
         for trait in self._traits.values():
             trait.on_start()
 
@@ -177,3 +178,4 @@ class Agent(ABC):
         """Stop all attached traits. Call from stop()."""
         for trait in self._traits.values():
             trait.on_stop()
+        self._started = False

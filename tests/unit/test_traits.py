@@ -6,17 +6,14 @@ import pytest
 from pydantic import BaseModel
 
 from llm_agent import (
-    AgentConfig,
     BaseTrait,
-    CompletionResult,
-    ConversationalAgent,
     Identity,
     IdentityTrait,
     MethodTrait,
     StructuredOutputError,
 )
 from llm_agent.core.llm.types import Message
-from llm_agent.core.traits.llm import LLMConfig, LLMTrait
+from llm_agent.core.traits.llm import LLMTrait
 
 
 pytestmark = pytest.mark.unit
@@ -166,10 +163,14 @@ class TestAgentTraits:
         """Create mock Logger."""
         return MagicMock()
 
-    def test_add_trait(self, mock_logger):
-        config = AgentConfig(name="test")
-        agent = ConversationalAgent(lg=mock_logger, config=config)
+    @pytest.fixture
+    def agent(self, mock_logger):
+        """Create a test agent."""
+        from llm_agent.agents.default import Agent as DefaultAgent
 
+        return DefaultAgent(lg=mock_logger, name="test", default_prompt="")
+
+    def test_add_trait(self, agent):
         identity = Identity(prompt="Test identity")
         trait = IdentityTrait(identity)
         agent.add_trait(trait)
@@ -177,92 +178,25 @@ class TestAgentTraits:
         assert agent.has_trait(IdentityTrait)
         assert agent.get_trait(IdentityTrait) == trait
 
-    def test_add_trait_attaches(self, mock_logger):
-        config = AgentConfig(name="test")
-        agent = ConversationalAgent(lg=mock_logger, config=config)
-
+    def test_add_trait_attaches(self, agent):
         identity = Identity(prompt="Test identity")
         trait = IdentityTrait(identity)
         agent.add_trait(trait)
 
         assert trait._agent == agent
 
-    def test_add_duplicate_trait_raises(self, mock_logger):
-        config = AgentConfig(name="test")
-        agent = ConversationalAgent(lg=mock_logger, config=config)
-
+    def test_add_duplicate_trait_raises(self, agent):
         identity = Identity(prompt="Test identity")
         agent.add_trait(IdentityTrait(identity))
 
         with pytest.raises(ValueError, match="already added"):
             agent.add_trait(IdentityTrait(identity))
 
-    def test_get_trait_returns_none_if_not_added(self, mock_logger):
-        config = AgentConfig(name="test")
-        agent = ConversationalAgent(lg=mock_logger, config=config)
-
+    def test_get_trait_returns_none_if_not_added(self, agent):
         assert agent.get_trait(IdentityTrait) is None
 
-    def test_has_trait_returns_false_if_not_added(self, mock_logger):
-        config = AgentConfig(name="test")
-        agent = ConversationalAgent(lg=mock_logger, config=config)
-
+    def test_has_trait_returns_false_if_not_added(self, agent):
         assert not agent.has_trait(IdentityTrait)
-
-    def test_complete_with_identity_trait(self, mock_logger):
-        config = AgentConfig(name="test", fact_injection="none")
-        agent = ConversationalAgent(lg=mock_logger, config=config)
-
-        # Add mock LLMTrait
-        mock_llm_trait = MagicMock(spec=LLMTrait)
-        mock_llm_trait.complete.return_value = CompletionResult(
-            id="resp-1",
-            content="Response",
-            model="default",
-            tokens_used=10,
-            latency_ms=100,
-        )
-        agent._traits[LLMTrait] = mock_llm_trait
-
-        # Add IdentityTrait
-        identity = Identity(prompt="You are a helpful assistant. Be friendly.")
-        agent.add_trait(IdentityTrait(identity))
-
-        agent.complete("Hello")
-
-        # Check that identity was injected into prompt
-        call_args = mock_llm_trait.complete.call_args
-        messages = call_args.kwargs["messages"]
-        system_prompt = messages[0].content
-
-        assert "You are a helpful assistant." in system_prompt
-        assert "Be friendly." in system_prompt
-
-    def test_complete_with_method_trait(self, mock_logger):
-        """MethodTrait injects method into prompt."""
-        config = AgentConfig(name="test", fact_injection="none")
-        agent = ConversationalAgent(lg=mock_logger, config=config)
-
-        mock_llm_trait = MagicMock(spec=LLMTrait)
-        mock_llm_trait.complete.return_value = CompletionResult(
-            id="resp-1",
-            content="Response",
-            model="default",
-            tokens_used=10,
-            latency_ms=100,
-        )
-        agent._traits[LLMTrait] = mock_llm_trait
-
-        agent.add_trait(MethodTrait("- Step 1\n- Step 2"))
-
-        agent.complete("Hello")
-
-        call_args = mock_llm_trait.complete.call_args
-        messages = call_args.kwargs["messages"]
-        system_prompt = messages[0].content
-
-        assert "## Method" in system_prompt
-        assert "- Step 1" in system_prompt
 
 
 class TestLLMTraitStructuredOutput:
@@ -277,7 +211,7 @@ class TestLLMTraitStructuredOutput:
     @pytest.fixture
     def trait(self):
         """Create LLMTrait with mocked client."""
-        trait = LLMTrait(MagicMock(), LLMConfig())
+        trait = LLMTrait(MagicMock(), {})
         trait._client = MagicMock()
         return trait
 

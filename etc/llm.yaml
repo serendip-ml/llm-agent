@@ -4,7 +4,8 @@ backends:
   local:
     type: openai_compatible
     base_url: "http://localhost:8000/v1"
-    model: "qwen2.5-72b"
+    model: auto
+    max_tokens: 4096
     # No API key needed for local
 
   anthropic:

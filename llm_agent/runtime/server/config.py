@@ -21,6 +21,8 @@ class LearnBackendConfig(BaseModel):
     """Database configuration dict (url, extensions, etc.)."""
     embedder_url: str | None = None
     embedder_model: str = "default"
+    embedder_timeout: float = 30.0
+    """Embedder timeout in seconds."""
 
 
 class TaskConfigYAML(BaseModel):

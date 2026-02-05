@@ -234,12 +234,11 @@ class TestHTTPTraitHandleRequest:
     @pytest.fixture
     def agent(self, mock_logger, mock_llm_trait, mock_learn_trait):
         """Create a test agent with mocked traits."""
-        from llm_agent import AgentConfig, ConversationalAgent
+        from llm_agent.agents.default import Agent as DefaultAgent
         from llm_agent.core.traits.learn import LearnTrait
         from llm_agent.core.traits.llm import LLMTrait
 
-        config = AgentConfig(name="test-agent", fact_injection="none")
-        agent = ConversationalAgent(lg=mock_logger, config=config)
+        agent = DefaultAgent(lg=mock_logger, name="test-agent", default_prompt="")
         agent._traits[LLMTrait] = mock_llm_trait
         agent._traits[LearnTrait] = mock_learn_trait
         return agent
@@ -282,7 +281,7 @@ class TestHTTPTraitHandleRequest:
         assert resp.success is True
         assert resp.fact_id == 42
         mock_learn_trait.remember.assert_called_once_with(
-            "User likes Python", category="preferences"
+            fact="User likes Python", category="preferences"
         )
 
     def test_handle_forget_request(self, http_trait, mock_learn_trait):
@@ -292,7 +291,7 @@ class TestHTTPTraitHandleRequest:
 
         assert isinstance(resp, ForgetResponse)
         assert resp.success is True
-        mock_learn_trait.forget.assert_called_once_with(42)
+        mock_learn_trait.forget.assert_called_once_with(fact_id=42)
 
     def test_handle_feedback_request(self, http_trait, mock_learn_trait):
         # First complete a request to track the response
@@ -367,7 +366,7 @@ class TestHTTPTraitHandleRequest:
 
     def test_handle_recall_request_success(self, mock_logger):
         """Verify successful recall returns facts serialized correctly."""
-        from llm_agent import AgentConfig, ConversationalAgent
+        from llm_agent.agents.default import Agent as DefaultAgent
         from llm_agent.core.traits.learn import LearnTrait
         from llm_agent.core.traits.llm import LLMTrait
         from llm_agent.runtime.server.protocol.v1 import RecallResponse
@@ -388,8 +387,7 @@ class TestHTTPTraitHandleRequest:
         mock_learn_trait.has_embedder = True
 
         # Create agent with traits
-        config = AgentConfig(name="test-agent", fact_injection="none")
-        agent = ConversationalAgent(lg=mock_logger, config=config)
+        agent = DefaultAgent(lg=mock_logger, name="test-agent", default_prompt="")
         agent._traits[LLMTrait] = mock_llm_trait
         agent._traits[LearnTrait] = mock_learn_trait
 

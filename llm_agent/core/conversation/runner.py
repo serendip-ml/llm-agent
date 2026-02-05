@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -14,7 +15,8 @@ from llm_agent.core.task import Task, TaskResult
 
 
 if TYPE_CHECKING:
-    from llm_agent.core.governor import GovernorLoop
+    from llm_saia import SAIA
+
     from llm_agent.core.traits.llm import LLMTrait
 
 
@@ -23,13 +25,19 @@ IdentityBuilder = Callable[[], str]
 """Function that builds the identity/system prompt."""
 
 
+# Conversation context limits
+_CONTEXT_MESSAGE_LIMIT = 5  # Last N messages for context
+_SYSTEM_CONTENT_TRUNCATE = 500  # Max chars for system context
+_ASSISTANT_CONTENT_TRUNCATE = 200  # Max chars for assistant context
+
+
 @dataclass
 class ConversationRunner:
-    """Runs conversation-based task execution with tool support.
+    """Runs conversation-based task execution with optional SAIA integration.
 
     Manages the conversation lifecycle:
     - Prepares conversation (compaction, initialization/continuation)
-    - Runs tool execution loop via injected GovernorLoop
+    - Runs task execution via SAIA (if available) or simple LLM completion
     - Builds results with optional structured output extraction
 
     Example:
@@ -38,7 +46,7 @@ class ConversationRunner:
             conversation=conversation,
             compactor=compactor,
             llm_trait=llm_trait,
-            governor_loop=loop,
+            saia=saia,  # Optional - enables tool use
             default_task=Task(name="default", description="..."),
             identity_builder=lambda: agent._build_identity_prompt(),
         )
@@ -48,8 +56,8 @@ class ConversationRunner:
     lg: Logger
     conversation: Conversation
     compactor: Compactor
-    llm_trait: LLMTrait
-    governor_loop: GovernorLoop | None
+    llm_trait: LLMTrait | None
+    saia: SAIA | None
     default_task: Task
     identity_builder: IdentityBuilder
 
@@ -125,13 +133,16 @@ class ConversationRunner:
     # -------------------------------------------------------------------------
 
     def _run_conversation_loop(self, task: Task | None) -> TaskResult:
-        """Run tool executor with current conversation state."""
-        if self.governor_loop is None:
-            return self._run_simple_completion(task)
-        return self._run_with_tools(task)
+        """Run task execution with current conversation state."""
+        if self.saia is not None:
+            return self._run_with_saia(task)
+        return self._run_simple_completion(task)
 
     def _run_simple_completion(self, task: Task | None) -> TaskResult:
-        """Run simple completion without tools."""
+        """Run simple completion without tools (requires llm_trait)."""
+        if self.llm_trait is None:
+            raise RuntimeError("Either SAIA or LLMTrait required for execution")
+
         result = self.llm_trait.complete(messages=self.conversation.messages())
         self.conversation.add_assistant(result.content)
 
@@ -152,53 +163,117 @@ class ConversationRunner:
             tokens_used=result.tokens_used + extra_tokens,
         )
 
-    def _run_with_tools(self, task: Task | None) -> TaskResult:
-        """Run governor loop with tools."""
-        assert self.governor_loop is not None
+    def _run_with_saia(self, task: Task | None) -> TaskResult:
+        """Run task execution with SAIA."""
+        assert self.saia is not None
 
         effective_task = task or self.default_task
 
         try:
+            # Build task description from conversation context
             messages = self.conversation.messages()
-            exec_result = self.governor_loop.run(task=effective_task, messages=messages)
-            self._update_conversation_from_execution(exec_result.messages, len(messages))
-            return self._build_task_result(effective_task, exec_result)
-        except RuntimeError as e:
-            self.lg.warning("tool loop failed", extra={"agent": self._agent_name, "exception": e})
+            task_context = self._build_task_from_conversation(messages, effective_task)
+
+            # Run SAIA complete - handle sync/async boundary
+            saia_result = self._run_saia_complete(task_context)
+
+            # Update conversation with result
+            self.conversation.add_assistant(saia_result.output)
+
+            # Build result
+            return self._build_saia_result(effective_task, saia_result)
+
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as e:
+            self.lg.warning(
+                "SAIA execution failed",
+                extra={"agent": self._agent_name, "exception": e},
+            )
             return TaskResult(success=False, content="", error=str(e))
 
-    def _update_conversation_from_execution(
-        self, messages: list[Message], original_count: int
-    ) -> None:
-        """Update conversation with messages added during tool execution."""
-        for msg in messages[original_count:]:
-            self.conversation.add(msg)
+    def _run_saia_complete(self, task_context: str) -> Any:
+        """Run SAIA complete, handling sync/async boundary."""
+        assert self.saia is not None
+        return self._run_async(self.saia.complete(task_context))
 
-    # -------------------------------------------------------------------------
-    # Result Building
-    # -------------------------------------------------------------------------
+    def _build_task_from_conversation(self, messages: list[Message], task: Task) -> str:
+        """Build task description incorporating conversation context."""
+        # Extract system prompt and recent messages for context
+        context_parts = []
 
-    def _build_task_result(self, task: Task, exec_result: Any) -> TaskResult:
-        """Build TaskResult from tool execution."""
-        parsed, final_content, extra_tokens = None, exec_result.content, 0
+        for msg in messages[-_CONTEXT_MESSAGE_LIMIT:]:
+            if msg.role == "system":
+                context_parts.append(f"Context: {msg.content[:_SYSTEM_CONTENT_TRUNCATE]}")
+            elif msg.role == "user":
+                context_parts.append(f"User: {msg.content}")
+            elif msg.role == "assistant":
+                truncated = msg.content[:_ASSISTANT_CONTENT_TRUNCATE]
+                suffix = "..." if len(msg.content) > _ASSISTANT_CONTENT_TRUNCATE else ""
+                context_parts.append(f"Previous response: {truncated}{suffix}")
 
-        if task.output_schema is not None:
-            extraction = self._try_extract_structured(exec_result, task.output_schema)
-            if isinstance(extraction, TaskResult):
-                return extraction
-            parsed, final_content, extra_tokens = extraction
+        context = "\n".join(context_parts)
+        return f"{context}\n\nCurrent task: {task.description}"
 
-        completion = self._extract_completion(exec_result.terminal_data)
+    def _build_saia_result(self, task: Task, saia_result: Any) -> TaskResult:
+        """Build TaskResult from SAIA execution result."""
+        parsed = None
+
+        # Handle structured output extraction if requested
+        if task.output_schema is not None and saia_result.completed:
+            parsed = self._try_extract_with_saia(saia_result.output, task.output_schema)
+
+        # Extract completion info from terminal data
+        completion = self._extract_completion(saia_result.terminal_data)
 
         return TaskResult(
-            success=True,
-            content=final_content,
+            success=saia_result.completed,
+            content=saia_result.output,
             parsed=parsed,
             completion=completion,
-            tool_calls=exec_result.tool_calls,
-            iterations=exec_result.iterations,
-            tokens_used=exec_result.total_tokens + extra_tokens,
+            tool_calls=[],  # SAIA tracks tool calls differently
+            iterations=saia_result.iterations,
+            tokens_used=0,  # SAIA tracks tokens differently
         )
+
+    def _try_extract_with_saia(self, content: str, output_schema: type) -> Any:
+        """Try to extract structured output using SAIA extract verb.
+
+        Handles sync/async boundary the same way as _run_saia_complete().
+        """
+        if self.saia is None:
+            return None
+
+        try:
+            return self._run_async(self.saia.extract(content, output_schema))
+        except Exception as e:
+            self.lg.warning(
+                "SAIA extraction failed",
+                extra={"agent": self._agent_name, "exception": e},
+            )
+            return None
+
+    def _run_async(self, coro: Any) -> Any:
+        """Run async coroutine, handling sync/async boundary.
+
+        Detects whether we're already in an async context and handles
+        accordingly to avoid nested asyncio.run() errors.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None:
+            # Already in async context - run in thread pool
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, coro)
+                return future.result()
+        else:
+            # Not in async context - safe to use asyncio.run
+            return asyncio.run(coro)
 
     def _extract_completion(self, terminal_data: dict[str, Any] | None) -> Any:
         """Extract TaskCompletion from terminal_data if valid."""
@@ -214,38 +289,26 @@ class ConversationRunner:
             return TaskCompletion(status=TaskStatus(status), conclusion=conclusion)
         except ValueError:
             self.lg.warning(
-                "invalid terminal status", extra={"status": status, "agent": self._agent_name}
+                "invalid terminal status",
+                extra={"status": status, "agent": self._agent_name},
             )
             return None
 
-    def _try_extract_structured(
-        self, exec_result: Any, output_schema: type
-    ) -> tuple[Any, str, int] | TaskResult:
-        """Try to extract structured output, return tuple or error TaskResult."""
-        from llm_agent.core.llm.backend import StructuredOutputError
-
-        messages = self._build_extraction_messages(exec_result.content)
-
-        try:
-            result = self.llm_trait.complete(
-                messages=messages,
-                output_schema=output_schema,
-            )
-            return result.parsed, result.content, result.tokens_used
-        except StructuredOutputError as e:
-            return TaskResult(
-                success=False,
-                content=exec_result.content,
-                tool_calls=exec_result.tool_calls,
-                iterations=exec_result.iterations,
-                tokens_used=exec_result.total_tokens,
-                error=f"Structured output error: {e}",
-            )
+    # -------------------------------------------------------------------------
+    # Simple completion helpers (when no SAIA)
+    # -------------------------------------------------------------------------
 
     def _try_extract_structured_simple(
         self, completion_result: Any, output_schema: type
     ) -> tuple[Any, int] | TaskResult:
         """Try to extract structured output from simple completion."""
+        if self.llm_trait is None:
+            return TaskResult(
+                success=False,
+                content=completion_result.content,
+                error="LLMTrait required for structured extraction",
+            )
+
         from llm_agent.core.llm.backend import StructuredOutputError
 
         messages = self._build_extraction_messages(completion_result.content)

@@ -300,13 +300,11 @@ class LLMTrait:
 class LLMTraitBackend:
     """Adapter that wraps LLMTrait to satisfy LLMBackend protocol.
 
-    Used by ConversationalAgent.execute() to provide ToolExecutor
-    with an LLMBackend-compatible interface.
+    Provides an LLMBackend-compatible interface for code that needs it.
 
     Example:
         llm_trait = agent.require_trait(LLMTrait)
         backend = LLMTraitBackend(llm_trait)
-        executor = ToolExecutor(lg=lg, llm=backend, registry=registry, task=task)
     """
 
     def __init__(self, llm_trait: LLMTrait) -> None:

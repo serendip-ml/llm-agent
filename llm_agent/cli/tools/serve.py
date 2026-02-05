@@ -16,7 +16,7 @@ from appinfra.app.tools import Tool, ToolConfig
 if TYPE_CHECKING:
     from multiprocessing.queues import Queue
 
-    from llm_agent.core.traits.learn import LearnTrait
+    from llm_agent.core.traits.learn import LearnConfig, LearnTrait
     from llm_agent.runtime import AgentInfo, AgentRegistry, Core
     from llm_agent.runtime.server import AgentServerConfig
     from llm_agent.runtime.server.protocol.base import Request, Response
@@ -65,32 +65,40 @@ class ServeTool(Tool):
         config = AgentServerConfig.from_dict(raw_config)
         self._apply_cli_overrides(config)
 
-        learn_trait = self._create_learn_trait(config)
+        learn_config = self._create_learn_config(config)
+        learn_trait = self._create_learn_trait(learn_config)
         registry = self._create_registry()
-        core = self._create_core(registry, config, learn_trait)
+        core = self._create_core(registry, config, learn_config)
         self._register_agents(registry, core, config)
 
         self._log_startup(config)
         self._run_server(config, core, learn_trait)
         return 0
 
-    def _create_learn_trait(self, config: AgentServerConfig) -> LearnTrait | None:
-        """Create shared learn trait if configured."""
-        from llm_agent.core.traits.learn import LearnConfig, LearnTrait
+    def _create_learn_config(self, config: AgentServerConfig) -> LearnConfig | None:
+        """Create LearnConfig from server configuration."""
+        from llm_agent.core.traits.learn import LearnConfig
 
         if config.learn is None:
             return None
 
-        return LearnTrait(
-            self.lg,
-            LearnConfig(
-                profile_id=config.learn.profile_id,
-                llm=config.llm,
-                db=config.learn.db,
-                embedder_url=config.learn.embedder_url,
-                embedder_model=config.learn.embedder_model,
-            ),
+        return LearnConfig(
+            profile_id=config.learn.profile_id,
+            llm=config.llm,
+            db=config.learn.db,
+            embedder_url=config.learn.embedder_url,
+            embedder_model=config.learn.embedder_model,
+            embedder_timeout=config.learn.embedder_timeout,
         )
+
+    def _create_learn_trait(self, learn_config: LearnConfig | None) -> LearnTrait | None:
+        """Create LearnTrait from config for main process use."""
+        from llm_agent.core.traits.learn import LearnTrait
+
+        if learn_config is None:
+            return None
+
+        return LearnTrait(_lg=self.lg, config=learn_config)
 
     def _create_registry(self) -> AgentRegistry:
         """Create agent registry."""
@@ -102,7 +110,7 @@ class ServeTool(Tool):
         self,
         registry: AgentRegistry,
         config: AgentServerConfig,
-        learn_trait: LearnTrait | None,
+        learn_config: LearnConfig | None,
     ) -> Core:
         """Create runtime core."""
         from llm_agent.runtime import Core
@@ -111,7 +119,7 @@ class ServeTool(Tool):
             lg=self.lg,
             registry=registry,
             llm_config=config.llm,
-            learn_trait=learn_trait,
+            learn_config=learn_config,
             variables=self._parse_env_vars(),
         )
 

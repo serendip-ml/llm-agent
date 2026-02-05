@@ -1,13 +1,12 @@
-"""Factory classes for creating agents, traits, and tools.
+"""Factory classes for creating traits and tools.
 
-This module provides a factory hierarchy for creating agent components:
+This module provides factories for creating agent components:
 - ToolFactory: Creates Tool instances from configuration
 - TraitFactory: Creates Trait instances from configuration
-- AgentFactory: Creates ConversationalAgent instances from configuration
 
 Example:
     from appinfra.log import quick_console_logger
-    from llm_agent.core.factory import AgentFactory, ToolFactory, TraitFactory
+    from llm_agent.core.factory import ToolFactory, TraitFactory
     from llm_agent.core.traits.llm import LLMConfig
 
     lg = quick_console_logger("agent", "info")
@@ -15,17 +14,10 @@ Example:
 
     tool_factory = ToolFactory()
     trait_factory = TraitFactory(lg, tool_factory, llm_config)
-    agent_factory = AgentFactory(lg, trait_factory)
 
-    config = {
-        "name": "explorer",
-        "identity": "You are a codebase exploration agent.",
-        "task": {"description": "Explore the codebase"},
-        "tools": {"shell": {"allowed_commands": ["grep", "find"]}},
-    }
-
-    agent = agent_factory.create(config)
-    agent.start()
+    # Create traits
+    llm_trait = trait_factory.create_llm_trait()
+    tools_trait = trait_factory.create_tools_trait({"shell": {}})
 """
 
 from __future__ import annotations
@@ -36,15 +28,6 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
-
-from llm_agent.core.config import AgentConfig
-from llm_agent.core.conversation import (
-    Compactor,
-    Conversation,
-    ConversationConfig,
-    SlidingWindowCompactor,
-)
-from llm_agent.core.conversational import ConversationalAgent
 
 
 if TYPE_CHECKING:
@@ -281,126 +264,46 @@ class TraitFactory:
 
 
 class AgentFactory:
-    """Factory for creating ConversationalAgent instances from configuration.
+    """Abstract base class for agent factories.
+
+    Agent factories create Agent instances from configuration. Concrete
+    implementations handle their own backend creation from llm_config.
+
+    This class must be subclassed - it cannot be instantiated directly.
+    Subclasses must implement the create() method.
 
     Example:
-        tool_factory = ToolFactory()
-        trait_factory = TraitFactory(lg, tool_factory, llm_config)
-        agent_factory = AgentFactory(lg, trait_factory)
-
-        config = {
-            "name": "code-reviewer",
-            "identity": "You are a senior code reviewer.",
-            "method": "- Read the full diff first",
-            "task": {"description": "Review pull requests"},
-            "tools": {"shell": {"allowed_commands": ["git"]}},
-        }
-
-        agent = agent_factory.create(config)
-        agent.start()
+        class MyFactory(AgentFactory):
+            def create(self, config, variables=None):
+                # Create backend from self._llm_config
+                # Create and return agent
+                ...
     """
 
-    def __init__(
-        self,
-        lg: Logger,
-        trait_factory: TraitFactory,
-        compactor: Compactor | None = None,
-    ) -> None:
+    def __init__(self, lg: Logger, llm_config: dict[str, Any]) -> None:
         """Initialize factory.
 
         Args:
-            lg: Logger instance for created agents.
-            trait_factory: Factory for creating traits.
-            compactor: Optional conversation compaction strategy.
+            lg: Logger instance.
+            llm_config: LLM configuration dict (passed to subprocess).
         """
         self._lg = lg
-        self._trait_factory = trait_factory
-        self._compactor = compactor
+        self._llm_config = llm_config
 
-    def create(
-        self,
-        config: dict[str, Any],
-        variables: dict[str, str] | None = None,
-    ) -> ConversationalAgent:
-        """Create a ConversationalAgent from configuration dictionary.
+    def create(self, config: dict[str, Any], variables: dict[str, str] | None = None) -> Any:
+        """Create an agent from configuration.
 
         Args:
-            config: Configuration dictionary with keys:
-                - name (required): Agent identifier
-                - identity: Agent's identity/persona (string or dict)
-                - method: How the agent operates (string)
-                - directive: Legacy field for identity (dict)
-                - task: Task configuration with 'description'
-                - tools: Tool configurations keyed by type
-                - conversation: Conversation config (max_tokens, etc.)
-            variables: Variable substitutions for {{VAR}} patterns.
+            config: Agent configuration dictionary.
+            variables: Optional variable substitutions.
 
         Returns:
-            Configured ConversationalAgent ready to start.
+            Configured Agent instance.
+
+        Raises:
+            NotImplementedError: If not overridden by subclass.
         """
-        variables = variables or {}
-        config = _substitute_in_dict(config, variables)
-
-        agent = self._create_base_agent(config)
-        self._add_traits(agent, config)
-
-        return agent
-
-    def _create_base_agent(self, config: dict[str, Any]) -> ConversationalAgent:
-        """Create the base agent with conversation configured."""
-        from llm_agent.core.task import Task
-
-        task_config = config.get("task", {})
-        conv_config = config.get("conversation", {})
-
-        conversation_config = ConversationConfig(
-            max_tokens=conv_config.get("max_tokens", 32000),
-            compact_threshold=conv_config.get("compact_threshold", 0.8),
-            min_recent_messages=conv_config.get("min_recent_messages", 4),
-        )
-
-        agent_config = AgentConfig(
-            name=config["name"],
-            default_prompt=task_config.get("description", ""),
-        )
-
-        default_task = Task(
-            name=config["name"],
-            description=task_config.get("description", ""),
-            max_iterations=task_config.get("max_iterations", 10),
-            timeout_secs=task_config.get("timeout_secs", 0),
-        )
-
-        return ConversationalAgent(
-            lg=self._lg,
-            config=agent_config,
-            conversation=Conversation(config=conversation_config),
-            compactor=self._compactor or SlidingWindowCompactor(),
-            default_task=default_task,
-        )
-
-    def _add_traits(self, agent: ConversationalAgent, config: dict[str, Any]) -> None:
-        """Add all traits to the agent based on configuration."""
-        # Always add LLM trait
-        agent.add_trait(self._trait_factory.create_llm_trait())
-
-        # Add identity trait (from identity or legacy directive field)
-        identity_config = config.get("identity") or config.get("directive")
-        if identity_config is not None:
-            agent.add_trait(self._trait_factory.create_identity_trait(identity_config))
-
-        # Add method trait if specified
-        method = config.get("method")
-        if method is not None:
-            agent.add_trait(self._trait_factory.create_method_trait(method))
-
-        # Add learn trait if configured
-        if self._trait_factory.learn_trait is not None:
-            agent.add_trait(self._trait_factory.learn_trait)
-
-        # Add tools trait
-        tools_config = config.get("tools", {})
-        agent.add_trait(self._trait_factory.create_tools_trait(tools_config))
+        raise NotImplementedError("Subclasses must implement create()")
 
 
 # =============================================================================
@@ -435,54 +338,3 @@ def _substitute_in_dict(data: Any, variables: dict[str, str]) -> Any:
     if isinstance(data, list):
         return [_substitute_in_dict(item, variables) for item in data]
     return data
-
-
-# =============================================================================
-# Convenience Function
-# =============================================================================
-
-
-def create_agent_from_config(
-    lg: Logger,
-    config_dict: dict[str, Any],
-    llm_config: LLMConfig,
-    learn_trait: LearnTrait | None = None,
-    variables: dict[str, str] | None = None,
-    compactor: Compactor | None = None,
-) -> ConversationalAgent:
-    """Create a ConversationalAgent from configuration dictionary.
-
-    Convenience function that wraps the factory hierarchy for simpler usage.
-
-    Args:
-        lg: Logger instance for the agent.
-        config_dict: Configuration dictionary (see AgentFactory.create for format).
-        llm_config: LLM backend configuration.
-        learn_trait: Optional LearnTrait for memory capabilities.
-        variables: Variable substitutions for {{VAR}} patterns.
-        compactor: Optional conversation compaction strategy.
-
-    Returns:
-        Configured ConversationalAgent ready to start.
-
-    Example:
-        from llm_agent.core.factory import create_agent_from_config
-        from llm_agent.core.traits.llm import LLMConfig
-
-        config = {
-            "name": "assistant",
-            "identity": "You are a helpful assistant.",
-            "tools": {"shell": {}},
-        }
-
-        agent = create_agent_from_config(
-            lg=logger,
-            config_dict=config,
-            llm_config=LLMConfig(base_url="http://localhost:8000/v1"),
-        )
-        agent.start()
-    """
-    tool_factory = ToolFactory()
-    trait_factory = TraitFactory(lg, tool_factory, llm_config, learn_trait)
-    agent_factory = AgentFactory(lg, trait_factory, compactor)
-    return agent_factory.create(config_dict, variables)

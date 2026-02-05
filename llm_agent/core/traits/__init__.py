@@ -5,6 +5,7 @@ from llm_agent.core.traits.http import HTTPConfig, HTTPTrait
 from llm_agent.core.traits.identity import Identity, IdentityTrait, MethodTrait
 from llm_agent.core.traits.learn import LearnConfig, LearnTrait
 from llm_agent.core.traits.llm import LLMConfig, LLMTrait
+from llm_agent.core.traits.saia import SAIAConfig, SAIATrait
 from llm_agent.core.traits.tools import ToolsTrait
 
 
@@ -25,6 +26,9 @@ __all__ = [
     # LLM
     "LLMConfig",
     "LLMTrait",
+    # SAIA
+    "SAIAConfig",
+    "SAIATrait",
     # Tools
     "ToolsTrait",
 ]

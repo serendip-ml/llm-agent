@@ -1,7 +1,7 @@
 """Tool execution for LLM ↔ tool interaction.
 
 This module provides:
-- SimpleToolExecutor: Pure tool execution without loop/decisions (used by GovernorLoop)
+- SimpleToolExecutor: Pure tool execution without loop/decisions (used by SAIA)
 - ToolExecutionResult: Result type for backward compatibility
 """
 
@@ -25,7 +25,7 @@ class ToolExecutionResult(BaseModel):
     """Result from tool execution loop.
 
     Note: This class is kept for backward compatibility. New code should
-    use GovernorResult from llm_agent.core.governor instead.
+    use TaskResult from llm_agent.core.task instead.
     """
 
     content: str
@@ -51,7 +51,7 @@ class SimpleToolExecutor:
     """Pure tool execution - no loop, no decisions.
 
     Executes tool calls and returns results. All decision logic about
-    what to execute and when to stop is handled by the GovernorLoop.
+    what to execute and when to stop is handled by SAIA.
 
     Example:
         executor = SimpleToolExecutor(lg, registry)
