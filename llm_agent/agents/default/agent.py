@@ -7,6 +7,7 @@ and other methods expected by the runtime runner.
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from typing import Any
 
 from appinfra.log import Logger
@@ -50,7 +51,9 @@ class Agent(BaseAgent):
         self._cycle_count = 0
         self._recent_results: list[ExecutionResult] = []
         self._max_recent = 100
-        self._response_ids: set[str] = set()  # Track response IDs for feedback validation
+        # Track response IDs for feedback validation (bounded FIFO to prevent memory leaks)
+        self._response_ids: OrderedDict[str, None] = OrderedDict()
+        self._max_response_ids = 1000
 
     @property
     def name(self) -> str:
@@ -187,9 +190,12 @@ class Agent(BaseAgent):
         messages.append(Message(role="user", content=query))
 
         result = llm_trait.complete(messages=messages)
-        # Track response_id for feedback validation
+        # Track response_id for feedback validation (bounded FIFO)
         if hasattr(result, "id") and result.id:
-            self._response_ids.add(result.id)
+            self._response_ids[result.id] = None
+            # Evict oldest entries if over limit
+            while len(self._response_ids) > self._max_response_ids:
+                self._response_ids.popitem(last=False)
         return result
 
     def remember(self, fact: str, category: str | None = None) -> int:
