@@ -77,7 +77,6 @@ class SAIATrait(Trait):
 
     _agent: Agent | None = field(default=None, repr=False, compare=False)
     _saia: SAIA | None = field(default=None, repr=False, compare=False)
-    _started: bool = field(default=False, repr=False, compare=False)
 
     def attach(self, agent: Agent) -> None:
         """Attach trait to agent."""
@@ -113,14 +112,12 @@ class SAIATrait(Trait):
             terminal_tool=self.config.terminal_tool,
             lg=self._lg,
         )
-        self._started = True
         self._lg.debug("SAIA trait started")
 
     def on_stop(self) -> None:
         """Clean up on agent stop."""
         # Backend cleanup handled by caller (they own the backend)
         self._saia = None
-        self._started = False
         self._lg.debug("SAIA trait stopped")
 
     @property

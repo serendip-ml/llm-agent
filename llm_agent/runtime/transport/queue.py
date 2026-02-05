@@ -16,6 +16,8 @@ from llm_agent.runtime.transport.base import Message, Request, Response
 if TYPE_CHECKING:
     from multiprocessing.queues import Queue
 
+    from appinfra.log import Logger
+
 
 class QueueChannel:
     """Channel using multiprocessing.Queue.
@@ -25,18 +27,34 @@ class QueueChannel:
     - _recv_q: Queue for incoming messages
 
     Thread-safe and process-safe via multiprocessing.Queue.
+
+    Logging note:
+        The logger will NOT survive pickling across process boundaries.
+        This is fine because request() (which uses the logger) is only called
+        by the main process. The subprocess only uses send() and recv().
     """
 
-    def __init__(self, send_q: Queue[Message], recv_q: Queue[Message]) -> None:
+    def __init__(
+        self,
+        lg: Logger,
+        send_q: Queue[Message],
+        recv_q: Queue[Message],
+    ) -> None:
         """Initialize channel with send and receive queues.
 
         Args:
+            lg: Logger for diagnostics.
             send_q: Queue for sending messages.
             recv_q: Queue for receiving messages.
         """
+        self._lg = lg
         self._send_q = send_q
         self._recv_q = recv_q
         self._closed = False
+
+    def set_logger(self, lg: Logger) -> None:
+        """Set logger after unpickling (not currently needed, see class docstring)."""
+        self._lg = lg
 
     def send(self, msg: Message) -> None:
         """Send message via queue (non-blocking).
@@ -74,7 +92,8 @@ class QueueChannel:
         """Send request and wait for matching response.
 
         This is a convenience method that sends a request and waits for
-        a Response with matching request_id.
+        a Response with matching request_id. Only used by the main process
+        (Core) - the subprocess (Runner) uses send/recv directly.
 
         Args:
             req: Request to send.
@@ -100,8 +119,11 @@ class QueueChannel:
             if isinstance(msg, Response) and msg.request_id == req.id:
                 return msg
 
-            # Non-matching message - this shouldn't happen in normal use
-            # but we'll keep polling until we get our response or timeout
+            # Non-matching message - unexpected, log for debugging
+            self._lg.warning(
+                "received non-matching message in request()",
+                extra={"expected_id": req.id, "msg_type": type(msg).__name__},
+            )
 
         raise TimeoutError(f"No response to request {req.id} within {timeout}s")
 
@@ -113,18 +135,44 @@ class QueueChannel:
         """
         self._closed = True
 
+    def close_queues(self) -> None:
+        """Close the underlying multiprocessing queues.
+
+        Call this when you own the queues and want to clean up resources.
+        After calling this, the channel should not be used.
+        """
+        self._closed = True
+        try:
+            self._send_q.close()
+            self._send_q.join_thread()
+        except Exception:
+            pass  # Queue may already be closed
+        try:
+            self._recv_q.close()
+            self._recv_q.join_thread()
+        except Exception:
+            pass  # Queue may already be closed
+
     @property
     def is_closed(self) -> bool:
         """Check if channel is closed."""
         return self._closed
 
 
-def create_channel_pair() -> tuple[QueueChannel, QueueChannel]:
+def create_channel_pair(lg: Logger) -> tuple[QueueChannel, QueueChannel]:
     """Create a pair of connected channels for main<->subprocess communication.
 
     Returns a tuple of (main_channel, subprocess_channel) where:
     - main_channel.send() -> subprocess_channel.recv()
     - subprocess_channel.send() -> main_channel.recv()
+
+    The subprocess_channel is passed to the subprocess via mp.Process args.
+    The logger will NOT survive pickling, but this is fine because:
+    - Main process uses request() which needs the logger
+    - Subprocess only uses send()/recv() which don't need it
+
+    Args:
+        lg: Logger for channel diagnostics (used by main_channel.request()).
 
     Returns:
         Tuple of (main_channel, subprocess_channel).
@@ -134,9 +182,9 @@ def create_channel_pair() -> tuple[QueueChannel, QueueChannel]:
     q2: Queue[Message] = mp.Queue()
 
     # Main sends on q1, receives on q2
-    main_channel = QueueChannel(send_q=q1, recv_q=q2)
+    main_channel = QueueChannel(lg=lg, send_q=q1, recv_q=q2)
 
     # Subprocess sends on q2, receives on q1
-    subprocess_channel = QueueChannel(send_q=q2, recv_q=q1)
+    subprocess_channel = QueueChannel(lg=lg, send_q=q2, recv_q=q1)
 
     return main_channel, subprocess_channel

@@ -306,7 +306,7 @@ class Core:
         """Spawn subprocess for agent."""
         self._lg.debug("spawning process for agent runtime...", extra={"agent": handle.name})
 
-        main_channel, subprocess_channel = create_channel_pair()
+        main_channel, subprocess_channel = create_channel_pair(self._lg)
         handle.channel = main_channel
 
         # Convert LearnConfig to dict for pickling (handles DotDict from appinfra)
