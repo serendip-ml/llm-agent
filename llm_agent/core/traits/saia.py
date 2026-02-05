@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
-from llm_saia import SAIA, RunConfig, SAIABackend, ToolDef
+from llm_saia import SAIA, Backend, ToolDef
 
 from llm_agent.core.traits.base import Trait
 
@@ -72,7 +72,7 @@ class SAIATrait(Trait):
     """
 
     _lg: Logger
-    backend: SAIABackend
+    backend: Backend
     config: SAIAConfig = field(default_factory=SAIAConfig)
 
     _agent: Agent | None = field(default=None, repr=False, compare=False)
@@ -98,20 +98,21 @@ class SAIATrait(Trait):
             },
         )
 
-        run_config = RunConfig(
-            max_iterations=self.config.max_iterations,
-            timeout_secs=self.config.timeout_secs,
+        builder = (
+            SAIA.builder()
+            .backend(self.backend)
+            .max_iterations(self.config.max_iterations)
+            .timeout(self.config.timeout_secs)
+            .logger(self._lg)
         )
+        if tools and executor:
+            builder = builder.tools(tools, executor)
+        if self.config.system_prompt:
+            builder = builder.system(self.config.system_prompt)
+        if self.config.terminal_tool:
+            builder = builder.terminal_tool(self.config.terminal_tool)
 
-        self._saia = SAIA(
-            backend=self.backend,
-            tools=tools,
-            executor=executor,
-            system=self.config.system_prompt,
-            run=run_config,
-            terminal_tool=self.config.terminal_tool,
-            lg=self._lg,
-        )
+        self._saia = builder.build()
         self._lg.debug("SAIA trait started")
 
     def on_stop(self) -> None:

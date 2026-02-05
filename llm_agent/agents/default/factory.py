@@ -15,7 +15,7 @@ from llm_agent.core.traits.saia import SAIAConfig, SAIATrait
 
 
 if TYPE_CHECKING:
-    from llm_saia import SAIABackend
+    from llm_saia import Backend
 
     from llm_agent.core.traits.learn import LearnTrait
 
@@ -52,12 +52,12 @@ class Factory(AgentFactory):
             learn_trait: Optional LearnTrait for memory capabilities.
         """
         super().__init__(lg, llm_config)
-        self._backend: SAIABackend | None = None
+        self._backend: Backend | None = None
         self._tool_factory = ToolFactory()
         self._learn_trait = learn_trait
         self._tool_factory.set_learn_trait(learn_trait)
 
-    def _get_backend(self) -> SAIABackend:
+    def _get_backend(self) -> Backend:
         """Get or create SAIA backend from llm_config."""
         if self._backend is None:
             from llm_infer.client import Factory as LLMClientFactory
