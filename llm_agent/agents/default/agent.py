@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any
 
 from appinfra.log import Logger
@@ -15,6 +16,13 @@ from appinfra.time import time
 
 from llm_agent.core.agent import Agent as BaseAgent
 from llm_agent.core.runnable import ExecutionResult
+
+
+@dataclass
+class _ConclusionSummary:
+    """Concise summary of findings from agent execution."""
+
+    summary: str
 
 
 class Agent(BaseAgent):
@@ -91,7 +99,7 @@ class Agent(BaseAgent):
             return ExecutionResult(success=False, content="No default prompt configured")
 
         start_t = time.start()
-        result = self._execute(self._default_prompt)
+        result = asyncio.run(self._run_once_pipeline())
         self._cycle_count += 1
         self._store_result(result)
 
@@ -106,6 +114,18 @@ class Agent(BaseAgent):
             },
         )
 
+        return result
+
+    async def _run_once_pipeline(self) -> ExecutionResult:
+        """Run execution and optional conclusion persistence in one event loop.
+
+        Both SAIA complete() and extract() share the same async backend,
+        so they must run within a single asyncio.run() to avoid stale
+        event-loop references on the httpx client.
+        """
+        result = await self._execute_async(self._default_prompt)
+        if result.success:
+            await self._persist_conclusion(result)
         return result
 
     def ask(self, question: str) -> str:
@@ -137,6 +157,10 @@ class Agent(BaseAgent):
         return self._recent_results[-limit:]
 
     def _execute(self, prompt: str) -> ExecutionResult:
+        """Execute a prompt using SAIA (sync wrapper for ask() etc.)."""
+        return asyncio.run(self._execute_async(prompt))
+
+    async def _execute_async(self, prompt: str) -> ExecutionResult:
         """Execute a prompt using SAIA."""
         from llm_agent.core.traits.saia import SAIATrait
 
@@ -145,7 +169,7 @@ class Agent(BaseAgent):
             return ExecutionResult(success=False, content="SAIATrait not attached")
 
         try:
-            saia_result = asyncio.run(saia_trait.saia.complete(prompt))
+            saia_result = await saia_trait.saia.complete(prompt)
             return ExecutionResult(
                 success=saia_result.completed,
                 content=saia_result.output,
@@ -160,6 +184,57 @@ class Agent(BaseAgent):
         self._recent_results.append(result)
         if len(self._recent_results) > self._max_recent:
             self._recent_results = self._recent_results[-self._max_recent :]
+
+    async def _persist_conclusion(self, result: ExecutionResult) -> None:
+        """Persist a summarized conclusion from a successful run.
+
+        Uses SAIA extract verb to distill the raw execution output into a
+        concise summary before storing it as a fact. This avoids storing
+        noisy tool-call traces and intermediate reasoning.
+        """
+        from llm_agent.core.traits.learn import LearnTrait
+        from llm_agent.core.traits.saia import SAIATrait
+
+        learn_trait = self.get_trait(LearnTrait)
+        if learn_trait is None:
+            return
+
+        content = result.content.strip()
+        if not content:
+            return
+
+        saia_trait = self.get_trait(SAIATrait)
+        if saia_trait is None:
+            return
+
+        try:
+            summary = await self._summarize_output(saia_trait.saia, content)
+            if not summary:
+                return
+
+            fact_id = learn_trait.remember(fact=summary, category="conclusion", source="inferred")
+            self._lg.debug(
+                "conclusion persisted",
+                extra={"agent": self._name, "fact_id": fact_id},
+            )
+        except Exception as e:
+            self._lg.warning(
+                "failed to persist conclusion",
+                extra={"agent": self._name, "exception": e},
+            )
+
+    async def _summarize_output(self, saia: Any, content: str) -> str | None:
+        """Summarize raw SAIA output into a concise conclusion via extract verb."""
+        result = await saia.extract(
+            content,
+            _ConclusionSummary,
+            instructions=(
+                "Summarize the key findings and conclusions from this agent "
+                "execution. Be concise — focus on what was discovered, not "
+                "the steps taken. Output only factual findings."
+            ),
+        )
+        return result.summary.strip() or None
 
     # HTTP Protocol methods (used by HTTPTrait)
 

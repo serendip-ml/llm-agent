@@ -10,7 +10,7 @@ pgserver:
 dbs:
   main:
     url: "postgresql://${pgserver.user}:${pgserver.pass}@127.0.0.1:${pgserver.port}/learn"
-    create_db: false            # Database already created by llm-learn
+    create_db: true
     readonly: false
     pool_pre_ping: true
     extensions:

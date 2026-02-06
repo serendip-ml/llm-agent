@@ -101,12 +101,14 @@ class Factory(AgentFactory):
 
     def _add_traits(self, agent: Agent, config: dict[str, Any]) -> None:
         """Add traits to the agent based on configuration."""
+        # LearnTrait must be created before tools so remember/recall bind to the
+        # instance that will actually be started (not the factory's template).
+        self._add_learn_trait(agent)
         self._add_tools_trait(agent, config.get("tools", {}))
-        # Add identity traits first so we can build system prompt from them
+        # Add identity traits so we can build system prompt from them
         self._add_identity_traits(agent, config)
         # SAIA needs system prompt from identity/method traits
         self._add_saia_trait(agent, config)
-        self._add_learn_trait(agent)
 
     def _add_learn_trait(self, agent: Agent) -> None:
         """Add LearnTrait if configured.
