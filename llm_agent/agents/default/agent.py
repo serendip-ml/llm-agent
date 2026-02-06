@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any
 
 from appinfra.log import Logger
@@ -15,6 +16,13 @@ from appinfra.time import time
 
 from llm_agent.core.agent import Agent as BaseAgent
 from llm_agent.core.runnable import ExecutionResult
+
+
+@dataclass
+class _ConclusionSummary:
+    """Concise summary of findings from agent execution."""
+
+    summary: str
 
 
 class Agent(BaseAgent):
@@ -217,17 +225,9 @@ class Agent(BaseAgent):
 
     async def _summarize_output(self, saia: Any, content: str) -> str | None:
         """Summarize raw SAIA output into a concise conclusion via extract verb."""
-        from dataclasses import dataclass
-
-        @dataclass
-        class ConclusionSummary:
-            """Concise summary of findings from agent execution."""
-
-            summary: str
-
         result = await saia.extract(
             content,
-            ConclusionSummary,
+            _ConclusionSummary,
             instructions=(
                 "Summarize the key findings and conclusions from this agent "
                 "execution. Be concise — focus on what was discovered, not "
