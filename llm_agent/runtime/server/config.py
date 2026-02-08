@@ -14,11 +14,16 @@ from llm_agent.core.traits.identity import Identity
 
 
 class LearnBackendConfig(BaseModel):
-    """Learn trait backend configuration."""
+    """Learn trait backend configuration.
 
-    profile_id: str
+    Note: profile_id is deprecated. Each agent now specifies its own
+    profile configuration in agent YAML (domain/workspace/name).
+    """
+
     db: dict[str, Any]
     """Database configuration dict (url, extensions, etc.)."""
+    profile_id: str | None = None
+    """Legacy profile ID (deprecated, use per-agent profile config instead)."""
     embedder_url: str | None = None
     embedder_model: str = "default"
     embedder_timeout: float = 30.0
@@ -41,6 +46,23 @@ class ScheduleConfigYAML(BaseModel):
 
     interval: int
     """Seconds between automatic executions."""
+
+
+class EventHandlerConfig(BaseModel):
+    """Event handler configuration for declarative behavior.
+
+    Defines how the agent should behave for specific events (schedule, question).
+    Maps to memory strategies and prompt composition.
+    """
+
+    recall_strategy: Literal["chronological", "semantic"] = "chronological"
+    """Memory recall strategy: 'chronological' for recency, 'semantic' for relevance."""
+
+    recall_limit: int = 5
+    """Maximum number of past solutions to recall."""
+
+    compose_layers: list[str] = ["identity", "context", "task"]
+    """Prompt composition layers (identity, method, context, task/question)."""
 
 
 class AgentConfigYAML(BaseModel):
@@ -84,6 +106,9 @@ class AgentConfigYAML(BaseModel):
 
     conversation: dict[str, Any] = {}
     """Conversation settings (max_tokens, compact_threshold, etc.)."""
+
+    events: dict[str, EventHandlerConfig] = {}
+    """Event handlers keyed by event name (schedule, question)."""
 
     model_config = {"populate_by_name": True}
 

@@ -76,19 +76,23 @@ class ServeTool(Tool):
         return 0
 
     def _create_learn_config(self, config: AgentServerConfig) -> LearnConfig | None:
-        """Create LearnConfig from server configuration."""
+        """Create LearnConfig from server configuration.
+
+        Creates a template config with global settings (llm, db, embedder).
+        Each agent will resolve its own profile_config from agent YAML.
+        """
         from llm_agent.core.traits.learn import LearnConfig
 
         if config.learn is None:
             return None
 
         return LearnConfig(
-            profile_id=config.learn.profile_id,
             llm=config.llm,
             db=config.learn.db,
             embedder_url=config.learn.embedder_url,
             embedder_model=config.learn.embedder_model,
             embedder_timeout=config.learn.embedder_timeout,
+            # Note: profile_config and agent_name are set per-agent in factory
         )
 
     def _create_learn_trait(self, learn_config: LearnConfig | None) -> LearnTrait | None:
@@ -140,9 +144,11 @@ class ServeTool(Tool):
         core: Core,
         learn_trait: LearnTrait | None,
     ) -> None:
-        """Run the server with signal handling."""
-        if learn_trait is not None:
-            learn_trait.on_start()
+        """Run the server with signal handling.
+
+        Note: learn_trait is a template for per-agent traits and doesn't
+        need on_start() called - each agent runtime starts its own trait.
+        """
 
         request_q: Queue[Any] = mp.Queue()
         response_q: Queue[Any] = mp.Queue()
@@ -171,13 +177,15 @@ class ServeTool(Tool):
         core: Core,
         learn_trait: LearnTrait | None,
     ) -> None:
-        """Execute shutdown sequence (idempotent)."""
+        """Execute shutdown sequence (idempotent).
+
+        Note: learn_trait is a template only - each agent runtime
+        manages its own trait lifecycle.
+        """
         if state["requested"]:
             return
         state["requested"] = True
         core.shutdown()
-        if learn_trait is not None:
-            learn_trait.on_stop()
 
     def _install_signal_handlers(self, do_shutdown: Callable[[], None]) -> None:
         """Install signal handlers for graceful shutdown.

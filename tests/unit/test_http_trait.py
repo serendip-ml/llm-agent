@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from llm_agent import CompletionResult, HTTPConfig, HTTPTrait
+from llm_agent.core.agent import Identity
 from llm_agent.runtime.server.http import HTTPServer, HTTPServerConfig
 from llm_agent.runtime.server.protocol.v1 import (
     CompleteRequest,
@@ -238,7 +239,7 @@ class TestHTTPTraitHandleRequest:
         from llm_agent.core.traits.learn import LearnTrait
         from llm_agent.core.traits.llm import LLMTrait
 
-        agent = DefaultAgent(lg=mock_logger, name="test-agent", default_prompt="")
+        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
         agent._traits[LLMTrait] = mock_llm_trait
         agent._traits[LearnTrait] = mock_learn_trait
         return agent
@@ -258,7 +259,7 @@ class TestHTTPTraitHandleRequest:
         assert isinstance(resp, HealthResponse)
         assert resp.id == "req-1"
         assert resp.status == "ok"
-        assert resp.agent_name == "test-agent"
+        assert resp.agent_name == "test"
 
     def test_handle_complete_request(self, http_trait):
         req = CompleteRequest(id="req-1", query="Hello")
@@ -387,7 +388,7 @@ class TestHTTPTraitHandleRequest:
         mock_learn_trait.has_embedder = True
 
         # Create agent with traits
-        agent = DefaultAgent(lg=mock_logger, name="test-agent", default_prompt="")
+        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
         agent._traits[LLMTrait] = mock_llm_trait
         agent._traits[LearnTrait] = mock_learn_trait
 

@@ -12,14 +12,15 @@ server:
 llm: !include './llm.yaml'
 
 # Learning backend (for facts, feedback)
+# Each agent specifies its own profile in agent YAML
 learn:
-  profile_id: "1"
   db: !include './infra.yaml#dbs.main'
   # embedder_url: http://localhost:8001/v1  # Enable for RAG/semantic search
 
 # Agent definitions
 agents:
-  codebase-qna: !include './agents/codebase-qna.yaml'
+  #codebase-qna: !include './agents/codebase-qna.yaml'
+  joke-teller: !include './agents/joke-teller.yaml'
 
 # Appinfra logging (optional, uses defaults if not specified)
 logging: !include './infra.yaml#logging'

@@ -167,8 +167,10 @@ class TestAgentTraits:
     def agent(self, mock_logger):
         """Create a test agent."""
         from llm_agent.agents.default import Agent as DefaultAgent
+        from llm_agent.core.agent import Identity
 
-        return DefaultAgent(lg=mock_logger, name="test", default_prompt="")
+        identity = Identity.from_name("test")
+        return DefaultAgent(lg=mock_logger, identity=identity, default_prompt="")
 
     def test_add_trait(self, agent):
         identity = Identity(prompt="Test identity")

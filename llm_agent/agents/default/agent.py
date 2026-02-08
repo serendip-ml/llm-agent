@@ -9,13 +9,23 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 from appinfra.time import time
 
 from llm_agent.core.agent import Agent as BaseAgent
+from llm_agent.core.dispatcher import Dispatcher
+from llm_agent.core.memory import (
+    format_solutions_context,
+    recall_chronological,
+    recall_semantic,
+)
 from llm_agent.core.runnable import ExecutionResult
+
+
+if TYPE_CHECKING:
+    from llm_agent.core.agent import Identity
 
 
 @dataclass
@@ -36,7 +46,10 @@ class Agent(BaseAgent):
     - get_recent_results(): Recent execution history
 
     Example:
-        agent = Agent(lg, name="explorer", default_prompt="Analyze the codebase")
+        from llm_agent.core.agent import Identity
+
+        identity = Identity.from_name("explorer")
+        agent = Agent(lg, identity=identity, default_prompt="Analyze the codebase")
         agent.add_trait(SAIATrait(lg=lg, backend=backend))
         agent.add_trait(ToolsTrait())
         agent.start()
@@ -45,16 +58,16 @@ class Agent(BaseAgent):
         response = agent.ask("What files are in src/?")
     """
 
-    def __init__(self, lg: Logger, name: str, default_prompt: str = "") -> None:
+    def __init__(self, lg: Logger, identity: Identity, default_prompt: str = "") -> None:
         """Initialize agent.
 
         Args:
             lg: Logger instance.
-            name: Agent identifier.
+            identity: Agent identity (domain/workspace/name).
             default_prompt: Default prompt for run_once() execution.
         """
         super().__init__(lg)
-        self._name = name
+        self.identity = identity
         self._default_prompt = default_prompt
         self._cycle_count = 0
         self._recent_results: list[ExecutionResult] = []
@@ -62,11 +75,13 @@ class Agent(BaseAgent):
         # Track response IDs for feedback validation (bounded FIFO to prevent memory leaks)
         self._response_ids: OrderedDict[str, None] = OrderedDict()
         self._max_response_ids = 1000
+        # Event dispatcher for declarative behavior
+        self._dispatcher = Dispatcher()
 
     @property
     def name(self) -> str:
-        """Agent identifier."""
-        return self._name
+        """Agent name (from identity)."""
+        return str(self.identity.name)
 
     @property
     def cycle_count(self) -> int:
@@ -78,8 +93,9 @@ class Agent(BaseAgent):
         if self._started:
             return
         self._start_traits()
+        self._register_event_handlers()
         self._started = True
-        self._lg.info("agent started", extra={"agent": self._name})
+        self._lg.info("agent started", extra={"agent": self.name})
 
     def stop(self) -> None:
         """Stop the agent and all attached traits."""
@@ -87,7 +103,106 @@ class Agent(BaseAgent):
             return
         self._stop_traits()
         self._started = False
-        self._lg.info("agent stopped", extra={"agent": self._name})
+        self._lg.info("agent stopped", extra={"agent": self.name})
+
+    def _register_event_handlers(self) -> None:
+        """Register default event handlers for schedule and question events.
+
+        Uses chronological recall for scheduled tasks (repetitive execution).
+        Uses semantic recall for ad-hoc questions (varied queries).
+
+        Subclasses or factory can override by registering custom handlers
+        after initialization.
+        """
+        # Register schedule event handler (chronological recall)
+        self._dispatcher.on("schedule", self._on_schedule)
+
+        # Register question event handler (semantic recall)
+        self._dispatcher.on("question", self._on_question)
+
+    async def _on_schedule(
+        self,
+        task: str,
+        agent_name: str,
+        saia_trait: Any,
+        learn_trait: Any | None,
+    ) -> dict[str, Any]:
+        """Handle scheduled execution with chronological recall.
+
+        Args:
+            task: The task to execute.
+            agent_name: Name of this agent.
+            saia_trait: SAIATrait instance.
+            learn_trait: Optional LearnTrait instance.
+
+        Returns:
+            Dict with execution result fields.
+        """
+        # Recall recent solutions chronologically
+        context = ""
+        if learn_trait is not None:
+            past = recall_chronological(learn_trait, agent_name, limit=5)
+            context = format_solutions_context(past)
+            if context:
+                self._lg.debug(
+                    "recalled past solutions (chronological)",
+                    extra={"agent": agent_name, "count": len(past)},
+                )
+
+        # Compose prompt using SAIA
+        prompt = saia_trait.saia.compose(context, task)
+
+        # Execute
+        saia_result = await saia_trait.saia.complete(prompt)
+        return {
+            "success": saia_result.completed,
+            "content": saia_result.output,
+            "iterations": saia_result.iterations,
+            "tokens_used": saia_result.score.total_tokens if saia_result.score else 0,
+            "trace_id": saia_result.trace_id,
+        }
+
+    async def _on_question(
+        self,
+        question: str,
+        agent_name: str,
+        saia_trait: Any,
+        learn_trait: Any | None,
+    ) -> dict[str, Any]:
+        """Handle ad-hoc questions with semantic recall.
+
+        Args:
+            question: The question to answer.
+            agent_name: Name of this agent.
+            saia_trait: SAIATrait instance.
+            learn_trait: Optional LearnTrait instance.
+
+        Returns:
+            Dict with execution result fields.
+        """
+        # Recall semantically similar solutions
+        context = ""
+        if learn_trait is not None:
+            past = recall_semantic(learn_trait, query=question, limit=5, agent_name=agent_name)
+            context = format_solutions_context(past)
+            if context:
+                self._lg.debug(
+                    "recalled past solutions (semantic)",
+                    extra={"agent": agent_name, "count": len(past)},
+                )
+
+        # Compose prompt using SAIA
+        prompt = saia_trait.saia.compose(context, question)
+
+        # Execute
+        saia_result = await saia_trait.saia.complete(prompt)
+        return {
+            "success": saia_result.completed,
+            "content": saia_result.output,
+            "iterations": saia_result.iterations,
+            "tokens_used": saia_result.score.total_tokens if saia_result.score else 0,
+            "trace_id": saia_result.trace_id,
+        }
 
     def run_once(self) -> ExecutionResult:
         """Execute one cycle using the default prompt.
@@ -100,16 +215,18 @@ class Agent(BaseAgent):
 
         start_t = time.start()
         result = asyncio.run(self._run_once_pipeline())
+        result.latency_ms = int(time.since(start_t))
         self._cycle_count += 1
         self._store_result(result)
 
         self._lg.info(
             "execution completed",
             extra={
-                "after": time.since(start_t),
-                "agent": self._name,
+                "after": result.latency_ms,
+                "agent": self.name,
                 "success": result.success,
                 "iters": result.iterations,
+                "tokens": result.tokens_used,
                 "output": result.content,
             },
         )
@@ -123,10 +240,60 @@ class Agent(BaseAgent):
         so they must run within a single asyncio.run() to avoid stale
         event-loop references on the httpx client.
         """
-        result = await self._execute_async(self._default_prompt)
+        if self._dispatcher.has_handler("schedule"):
+            result = await self._run_with_dispatcher()
+        else:
+            result = await self._run_legacy()
+
         if result.success:
             await self._persist_conclusion(result)
         return result
+
+    async def _run_with_dispatcher(self) -> ExecutionResult:
+        """Run execution using event orchestrator."""
+        from llm_agent.core.traits.learn import LearnTrait
+        from llm_agent.core.traits.saia import SAIATrait
+
+        saia_trait = self.get_trait(SAIATrait)
+        learn_trait = self.get_trait(LearnTrait)
+
+        if saia_trait is None:
+            return ExecutionResult(success=False, content="SAIATrait not attached")
+
+        result_dict = await self._dispatcher.trigger(
+            "schedule",
+            task=self._default_prompt,
+            agent_name=self.name,
+            saia_trait=saia_trait,
+            learn_trait=learn_trait,
+        )
+
+        return self._convert_to_execution_result(result_dict)
+
+    async def _run_legacy(self) -> ExecutionResult:
+        """Run execution using legacy approach (no orchestrator)."""
+        past_solutions = self._recall_past_solutions()
+        context = self._format_past_solutions_context(past_solutions)
+
+        prompt = self._default_prompt
+        if context:
+            prompt = f"{context}\n\n{self._default_prompt}"
+
+        return await self._execute_async(prompt)
+
+    def _convert_to_execution_result(self, result_dict: Any) -> ExecutionResult:
+        """Convert orchestrator result dict to ExecutionResult."""
+        if isinstance(result_dict, dict):
+            return ExecutionResult(
+                success=result_dict.get("success", False),
+                content=result_dict.get("content", ""),
+                iterations=result_dict.get("iterations", 0),
+                tokens_used=result_dict.get("tokens_used", 0),
+                trace_id=result_dict.get("trace_id", ""),
+            )
+        else:
+            # If handler returned ExecutionResult directly
+            return result_dict  # type: ignore[no-any-return]
 
     def ask(self, question: str) -> str:
         """Ask the agent a question.
@@ -137,13 +304,40 @@ class Agent(BaseAgent):
         Returns:
             Response string from the agent.
         """
-        result = self._execute(question)
+        # Use event-based orchestration if handler is registered
+        result: ExecutionResult
+        if self._dispatcher.has_handler("question"):
+            result = asyncio.run(self._ask_async(question))
+        else:
+            result = self._execute(question)
+
         self._store_result(result)
         return result.content
 
+    async def _ask_async(self, question: str) -> ExecutionResult:
+        """Async implementation of ask() using event orchestration."""
+        from llm_agent.core.traits.learn import LearnTrait
+        from llm_agent.core.traits.saia import SAIATrait
+
+        saia_trait = self.get_trait(SAIATrait)
+        learn_trait = self.get_trait(LearnTrait)
+
+        if saia_trait is None:
+            return ExecutionResult(success=False, content="SAIATrait not attached")
+
+        result_dict = await self._dispatcher.trigger(
+            "question",
+            question=question,
+            agent_name=self.name,
+            saia_trait=saia_trait,
+            learn_trait=learn_trait,
+        )
+
+        return self._convert_to_execution_result(result_dict)
+
     def record_feedback(self, message: str) -> None:
         """Record feedback (no-op for non-learning agent)."""
-        self._lg.debug("feedback received (not stored)", extra={"agent": self._name})
+        self._lg.debug("feedback received (not stored)", extra={"agent": self.name})
 
     def get_recent_results(self, limit: int = 10) -> list[ExecutionResult]:
         """Get recent execution results.
@@ -174,9 +368,11 @@ class Agent(BaseAgent):
                 success=saia_result.completed,
                 content=saia_result.output,
                 iterations=saia_result.iterations,
+                tokens_used=saia_result.score.total_tokens if saia_result.score else 0,
+                trace_id=saia_result.trace_id,
             )
         except Exception as e:
-            self._lg.warning("execution failed", extra={"agent": self._name, "exception": e})
+            self._lg.warning("execution failed", extra={"agent": self.name, "exception": e})
             return ExecutionResult(success=False, content=f"Execution error: {e}")
 
     def _store_result(self, result: ExecutionResult) -> None:
@@ -185,42 +381,156 @@ class Agent(BaseAgent):
         if len(self._recent_results) > self._max_recent:
             self._recent_results = self._recent_results[-self._max_recent :]
 
-    async def _persist_conclusion(self, result: ExecutionResult) -> None:
-        """Persist a summarized conclusion from a successful run.
+    def _format_solution_summaries(self, solutions: list[Any]) -> list[dict[str, Any]]:
+        """Format solution facts into summary dicts for logging."""
+        return [
+            {
+                "problem": f.solution_details.problem[:100] if f.solution_details else "",
+                "success": (
+                    f.solution_details.answer.get("success", False) if f.solution_details else False
+                ),
+                "tokens": f.solution_details.tokens_used if f.solution_details else 0,
+            }
+            for f in solutions
+        ]
 
-        Uses SAIA extract verb to distill the raw execution output into a
-        concise summary before storing it as a fact. This avoids storing
-        noisy tool-call traces and intermediate reasoning.
+    def _log_recalled_solutions(self, solutions: list[Any]) -> None:
+        """Log recalled solutions for analysis."""
+        self._lg.info(
+            "recalled past solutions",
+            extra={
+                "agent": self.name,
+                "count": len(solutions),
+                "solutions": self._format_solution_summaries(solutions),
+            },
+        )
+
+    def _format_past_solutions_context(self, solutions: list[Any]) -> str:
+        """Format past solutions into context string for prompt injection."""
+        if not solutions:
+            return ""
+
+        lines = ["## Previously Completed Tasks\n"]
+        for i, sol in enumerate(solutions, 1):
+            if sol.solution_details:
+                output = sol.solution_details.answer.get("output", "")
+                if output:
+                    # Extract just the actual output, not metadata
+                    lines.append(f"{i}. {output[:200]}")
+
+        return "\n".join(lines) if len(lines) > 1 else ""
+
+    def _recall_past_solutions(self, limit: int = 5) -> list[Any]:
+        """Recall past solutions for similar problems.
+
+        Args:
+            limit: Maximum number of past solutions to recall.
+
+        Returns:
+            List of past solution facts.
         """
+        from llm_agent.core.traits.learn import LearnTrait
+
+        learn_trait = self.get_trait(LearnTrait)
+        if learn_trait is None:
+            return []
+
+        try:
+            past_solutions = learn_trait.learn.solutions.search(
+                query=self._default_prompt,
+                limit=limit,
+                active_only=True,
+            )
+
+            if not past_solutions:
+                self._lg.debug(
+                    "no past solutions found",
+                    extra={"agent": self.name, "query": self._default_prompt[:100]},
+                )
+            else:
+                self._log_recalled_solutions(past_solutions)
+
+            return past_solutions  # type: ignore[no-any-return]
+
+        except Exception as e:
+            self._lg.debug(
+                "failed to recall past solutions",
+                extra={"agent": self.name, "exception": e},
+            )
+            return []
+
+    def _build_problem_context(self, result: ExecutionResult) -> dict[str, Any]:
+        """Build problem context dict including iterations, trace ID, and tools."""
+        from llm_agent.core.traits.tools import ToolsTrait
+
+        context: dict[str, Any] = {
+            "iterations": result.iterations,
+            "trace_id": result.trace_id,
+        }
+
+        # Include tool names if ToolsTrait is attached
+        tools_trait = self.get_trait(ToolsTrait)
+        if tools_trait is not None:
+            tool_names = [t.name for t in tools_trait.registry.list_tools()]
+            context["tools_available"] = tool_names
+
+        return context
+
+    def _build_answer_payload(self, result: ExecutionResult) -> dict[str, Any]:
+        """Build answer payload dict from execution result."""
+        return {
+            "success": result.success,
+            "output": result.content,
+            "iterations": result.iterations,
+        }
+
+    def _record_solution(self, learn_trait: Any, result: ExecutionResult, summary: str) -> int:
+        """Record solution to database and log success."""
+        fact_id = learn_trait.learn.solutions.record(
+            agent_name=self.name,
+            problem=self._default_prompt,
+            problem_context=self._build_problem_context(result),
+            answer=self._build_answer_payload(result),
+            answer_text=summary,
+            tokens_used=result.tokens_used,
+            latency_ms=result.latency_ms,
+            category="execution",
+            source="agent",
+        )
+
+        self._lg.debug(
+            "solution persisted",
+            extra={
+                "agent": self.name,
+                "fact_id": fact_id,
+                "tokens": result.tokens_used,
+                "latency_ms": result.latency_ms,
+            },
+        )
+        return fact_id  # type: ignore[no-any-return]
+
+    async def _persist_conclusion(self, result: ExecutionResult) -> None:
+        """Persist a complete solution record from a successful run."""
         from llm_agent.core.traits.learn import LearnTrait
         from llm_agent.core.traits.saia import SAIATrait
 
         learn_trait = self.get_trait(LearnTrait)
-        if learn_trait is None:
+        saia_trait = self.get_trait(SAIATrait)
+        if learn_trait is None or saia_trait is None:
             return
 
         content = result.content.strip()
         if not content:
             return
 
-        saia_trait = self.get_trait(SAIATrait)
-        if saia_trait is None:
-            return
-
         try:
             summary = await self._summarize_output(saia_trait.saia, content)
-            if not summary:
-                return
-
-            fact_id = learn_trait.remember(fact=summary, category="conclusion", source="inferred")
-            self._lg.debug(
-                "conclusion persisted",
-                extra={"agent": self._name, "fact_id": fact_id},
-            )
+            if summary:
+                self._record_solution(learn_trait, result, summary)
         except Exception as e:
             self._lg.warning(
-                "failed to persist conclusion",
-                extra={"agent": self._name, "exception": e},
+                "failed to persist solution",
+                extra={"agent": self.name, "exception": e},
             )
 
     async def _summarize_output(self, saia: Any, content: str) -> str | None:

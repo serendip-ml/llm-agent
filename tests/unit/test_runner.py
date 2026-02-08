@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from llm_agent.core.runnable import ExecutionResult
+from llm_agent.core.agent import ExecutionResult
 from llm_agent.runtime import AgentRunner
 from llm_agent.runtime.transport import Message, MessageType, Response
 

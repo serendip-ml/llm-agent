@@ -7,8 +7,10 @@ from typing import TypeVar
 
 from appinfra.log import Logger
 
-from .runnable import ExecutionResult, Runnable
-from .traits.base import Trait
+from llm_agent.core.runnable import Runnable
+from llm_agent.core.traits.base import Trait
+
+from .types import ExecutionResult
 
 
 TraitT = TypeVar("TraitT", bound=Trait)

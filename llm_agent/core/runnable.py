@@ -6,16 +6,11 @@ Defines the interface that the runtime runner expects from anything it can run.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+
+from llm_agent.core.agent.types import ExecutionResult
 
 
-@dataclass
-class ExecutionResult:
-    """Result from agent execution."""
-
-    success: bool
-    content: str
-    iterations: int = 1
+__all__ = ["Runnable", "ExecutionResult"]
 
 
 class Runnable(ABC):
