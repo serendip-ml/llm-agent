@@ -9,7 +9,7 @@ from llm_learn.core.identity import IdentityResolver, ProfileIdentity
 
 
 @dataclass(frozen=True)
-class Identity(ProfileIdentity):  # type: ignore[misc]
+class Identity(ProfileIdentity):
     """Agent identity with convenient constructors.
 
     Wraps ProfileIdentity with agent-friendly API and room for future

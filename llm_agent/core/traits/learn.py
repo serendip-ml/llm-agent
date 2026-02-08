@@ -172,12 +172,17 @@ class LearnTrait:
             return self.config.identity
 
         if self.config.profile_config is not None or self.config.agent_name is not None:
+            from dataclasses import asdict
+
             from llm_learn.core import IdentityResolver
 
-            return IdentityResolver.resolve(  # type: ignore[no-any-return]
+            from ..agent import Identity
+
+            resolved = IdentityResolver.resolve(
                 config=self.config.profile_config,
                 defaults={"name": self.config.agent_name or "default"},
             )
+            return Identity(**asdict(resolved))
 
         return None
 
@@ -381,7 +386,7 @@ class LearnTrait:
                 model_name=self._embedder.model,
             )
 
-        return fact_id  # type: ignore[no-any-return]
+        return fact_id
 
     def forget(self, fact_id: int) -> None:
         """Remove a stored fact.
@@ -416,7 +421,7 @@ class LearnTrait:
             raise ValueError("recall() requires embedder - configure embedder_url in LearnConfig")
 
         embedding = self._embedder.embed(query)
-        return self.learn.embeddings.search_similar(  # type: ignore[no-any-return]
+        return self.learn.embeddings.search_similar(
             query=embedding.embedding,
             model_name=self._embedder.model,
             top_k=top_k,
@@ -447,7 +452,7 @@ class LearnTrait:
         if self._context is None:
             raise RuntimeError("LearnTrait not started")
 
-        return self._context.build_system_prompt(  # type: ignore[no-any-return]
+        return self._context.build_system_prompt(
             base_prompt=base_prompt,
             categories=categories,
             max_facts=max_facts,
@@ -482,7 +487,7 @@ class LearnTrait:
         scored_facts = self.recall(query, top_k=top_k, min_similarity=min_similarity)
         facts = [sf.entity for sf in scored_facts]
 
-        return self._context.build_system_prompt_from_facts(  # type: ignore[no-any-return]
+        return self._context.build_system_prompt_from_facts(
             base_prompt=base_prompt,
             facts=facts,
         )
@@ -507,7 +512,7 @@ class LearnTrait:
         Returns:
             Feedback ID.
         """
-        return self.learn.feedback.record(  # type: ignore[no-any-return]
+        return self.learn.feedback.record(
             signal=signal,
             comment=content,
             context=context,
@@ -529,7 +534,7 @@ class LearnTrait:
         Returns:
             Preference ID.
         """
-        return self.learn.preferences.record(  # type: ignore[no-any-return]
+        return self.learn.preferences.record(
             context=context,
             chosen=chosen,
             rejected=rejected,

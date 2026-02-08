@@ -452,7 +452,7 @@ class Agent(BaseAgent):
             else:
                 self._log_recalled_solutions(past_solutions)
 
-            return past_solutions  # type: ignore[no-any-return]
+            return past_solutions
 
         except Exception as e:
             self._lg.debug(
