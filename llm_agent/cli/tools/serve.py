@@ -534,6 +534,12 @@ class ServeTool(Tool):
         if agent_config.schedule is not None:
             config_dict["schedule"] = agent_config.schedule.model_dump()
 
+        # Add event handlers if specified
+        if agent_config.events:
+            config_dict["events"] = {
+                name: handler.model_dump() for name, handler in agent_config.events.items()
+            }
+
         return config_dict
 
     def _apply_cli_overrides(self, config: Any) -> None:
