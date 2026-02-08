@@ -9,7 +9,7 @@ from appinfra.log import Logger
 
 if TYPE_CHECKING:
     from llm_agent.core.tools.factory import ToolFactory
-    from llm_agent.core.traits.identity import DirectiveTrait, MethodTrait
+    from llm_agent.core.traits.directive import DirectiveTrait, MethodTrait
     from llm_agent.core.traits.learn import LearnTrait
     from llm_agent.core.traits.llm import LLMConfig, LLMTrait
     from llm_agent.core.traits.tools import ToolsTrait
@@ -71,7 +71,7 @@ class TraitFactory:
         Returns:
             Configured DirectiveTrait.
         """
-        from llm_agent.core.traits.identity import Directive, DirectiveTrait
+        from llm_agent.core.traits.directive import Directive, DirectiveTrait
 
         if isinstance(config, str):
             directive = Directive(prompt=config)
@@ -91,7 +91,7 @@ class TraitFactory:
         Returns:
             Configured MethodTrait.
         """
-        from llm_agent.core.traits.identity import MethodTrait
+        from llm_agent.core.traits.directive import MethodTrait
 
         return MethodTrait(method)
 

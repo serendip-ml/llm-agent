@@ -441,7 +441,7 @@ class TestFactorySystemPrompt:
     def test_system_prompt_with_identity_only(self, mock_logger):
         """System prompt contains identity when only identity is configured."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.identity import DirectiveTrait
+        from llm_agent.core.traits.directive import DirectiveTrait
 
         factory = self._create_factory(mock_logger)
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
@@ -454,7 +454,7 @@ class TestFactorySystemPrompt:
     def test_system_prompt_with_method_only(self, mock_logger):
         """System prompt contains method when only method is configured."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.identity import MethodTrait
+        from llm_agent.core.traits.directive import MethodTrait
 
         factory = self._create_factory(mock_logger)
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
@@ -467,7 +467,7 @@ class TestFactorySystemPrompt:
     def test_system_prompt_with_identity_and_method(self, mock_logger):
         """System prompt combines identity and method."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.identity import DirectiveTrait, MethodTrait
+        from llm_agent.core.traits.directive import DirectiveTrait, MethodTrait
 
         factory = self._create_factory(mock_logger)
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")

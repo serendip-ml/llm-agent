@@ -4,7 +4,6 @@ from .agent import Agent
 from .config import Config
 from .factory import Factory, _substitute_in_dict, _substitute_variables
 from .identity import Identity
-from .prog import ProgAgentFactory
 from .types import ExecutionResult
 
 
@@ -14,7 +13,6 @@ __all__ = [
     "ExecutionResult",
     "Factory",
     "Identity",
-    "ProgAgentFactory",
     "_substitute_in_dict",
     "_substitute_variables",
 ]

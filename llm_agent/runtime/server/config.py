@@ -10,7 +10,7 @@ from typing import Any, Literal
 from appinfra.app.fastapi.config import ApiConfig
 from pydantic import BaseModel, Field
 
-from llm_agent.core.traits.identity import Directive
+from llm_agent.core.traits.directive import Directive
 
 
 class LearnBackendConfig(BaseModel):

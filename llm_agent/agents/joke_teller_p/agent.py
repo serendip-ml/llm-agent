@@ -17,7 +17,7 @@ from appinfra.log import Logger
 from pydantic import BaseModel
 
 from ...core.agent import Agent, ExecutionResult, Identity
-from ...core.traits.identity import Directive
+from ...core.traits.directive import Directive
 
 
 class Joke(BaseModel):

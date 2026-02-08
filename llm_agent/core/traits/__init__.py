@@ -3,9 +3,9 @@
 from enum import Enum
 
 from llm_agent.core.traits.base import BaseTrait, Trait
+from llm_agent.core.traits.directive import Directive, DirectiveTrait, MethodTrait
 from llm_agent.core.traits.factory import TraitFactory
 from llm_agent.core.traits.http import HTTPConfig, HTTPTrait
-from llm_agent.core.traits.identity import Directive, DirectiveTrait, MethodTrait
 from llm_agent.core.traits.learn import LearnConfig, LearnTrait
 from llm_agent.core.traits.llm import LLMConfig, LLMTrait
 from llm_agent.core.traits.registry import TraitRegistry
@@ -29,12 +29,25 @@ class TraitName(str, Enum):
     METHOD = "method"
 
 
+# All trait types available in the platform
+ALL_TRAITS: list[TraitName] = [
+    TraitName.LLM,
+    TraitName.LEARN,
+    TraitName.HTTP,
+    TraitName.SAIA,
+    TraitName.TOOLS,
+    TraitName.IDENTITY,
+    TraitName.METHOD,
+]
+
+
 __all__ = [
     # Base
     "BaseTrait",
     "Trait",
-    # Names
+    # Names & Catalogs
     "TraitName",
+    "ALL_TRAITS",
     # Factory
     "TraitFactory",
     # Registry

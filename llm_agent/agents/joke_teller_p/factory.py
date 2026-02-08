@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from ...core.agent.prog import ProgAgentFactory
+from ...core.agent import Factory as BaseFactory
 from ...core.traits import TraitName as TN
 from .agent import JokeTellerAgent
 
 
-class Factory(ProgAgentFactory):
+class Factory(BaseFactory):
     """Factory for JokeTellerAgent.
 
     Declares LLM and LEARN as required traits. These can be overridden in YAML:

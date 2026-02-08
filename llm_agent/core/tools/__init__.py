@@ -33,13 +33,14 @@ class ToolName(str, Enum):
     RECALL = "recall"
 
 
-# Standard platform tools (available without dependencies)
-STANDARD_TOOLS: list[ToolName] = [
+# All tool types available in the platform
+ALL_TOOLS: list[ToolName] = [
     ToolName.SHELL,
     ToolName.READ_FILE,
     ToolName.WRITE_FILE,
     ToolName.HTTP_FETCH,
     ToolName.COMPLETE_TASK,
+    # Note: REMEMBER/RECALL require LearnTrait, added dynamically when needed
 ]
 
 
@@ -50,9 +51,9 @@ __all__ = [
     "ToolCall",
     "ToolCallResult",
     "ToolResult",
-    # Names & Constants
+    # Names & Catalogs
     "ToolName",
-    "STANDARD_TOOLS",
+    "ALL_TOOLS",
     # Factory & Registry
     "ToolFactory",
     "ToolRegistry",

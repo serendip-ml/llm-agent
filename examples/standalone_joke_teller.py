@@ -117,10 +117,7 @@ def main() -> None:  # cq: max-lines=45
         learn_config=learn_config,
     )
 
-    logger.info("platform context created", extra={"traits": platform.traits.count()})
-
-    # Start platform traits (DB connections, etc.)
-    platform.start_traits()
+    logger.info("platform context created")
 
     try:
         # Create agent via factory
