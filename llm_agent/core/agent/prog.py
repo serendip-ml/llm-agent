@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from ..errors import ConfigError, TraitNotFoundError
 from ..traits import TraitName
 from ..traits.identity import Directive
 from .agent import Agent
@@ -16,7 +17,6 @@ from .identity import Identity
 
 if TYPE_CHECKING:
     from ..platform import PlatformContext
-    from ..traits import BaseTrait
 
 
 class ProgAgentFactory:
@@ -27,14 +27,17 @@ class ProgAgentFactory:
     - Extracts config params → passes to agent __init__
     - Attaches traits based on agent requirements
 
-    Trait Declaration (two options):
-        1. In agent class:
-            class MyAgent(Agent):
-                required_traits = [TraitName.LLM, TraitName.LEARN]
-
-        2. In YAML config:
+    Trait Requirements (3 ways, priority order):
+        1. YAML config (highest priority):
             traits:
               required: [llm, learn]
+
+        2. Factory class variable:
+            class Factory(ProgAgentFactory):
+                agent_class = MyAgent
+                required_traits = [TraitName.LLM, TraitName.LEARN]
+
+        3. No requirements (agent handles validation in code)
 
     Usage:
         class Factory(ProgAgentFactory):
@@ -44,8 +47,8 @@ class ProgAgentFactory:
     # Subclasses must set this
     agent_class: ClassVar[type[Agent]] = None  # type: ignore[assignment]
 
-    # Registry mapping trait names to trait classes
-    TRAIT_REGISTRY: ClassVar[dict[TraitName, type[BaseTrait]]] = {}
+    # Optional: declare required traits at factory level
+    required_traits: ClassVar[list[TraitName]] = []
 
     def __init__(self, platform: PlatformContext) -> None:
         """Initialize factory with platform context.
@@ -71,11 +74,10 @@ class ProgAgentFactory:
             Configured agent instance.
 
         Raises:
-            RuntimeError: If agent_class not set.
-            ValueError: If required config fields missing.
+            ConfigError: If agent_class not set or required config fields missing.
         """
         if self.agent_class is None:
-            raise RuntimeError(f"{self.__class__.__name__} must set agent_class class variable")
+            raise ConfigError(f"{self.__class__.__name__} must set agent_class class variable")
 
         # Parse profile → construct Identity
         identity = self._build_identity(config)
@@ -95,7 +97,7 @@ class ProgAgentFactory:
         )
 
         # Attach standard traits
-        self._attach_traits(agent)
+        self._attach_traits(agent, config)
 
         return agent
 
@@ -109,14 +111,14 @@ class ProgAgentFactory:
             Constructed Identity for addressing.
 
         Raises:
-            ValueError: If required fields missing.
+            ConfigError: If required fields missing.
         """
         # Extract profile
         profile = config.get("profile", {})
         name = profile.get("name")
 
         if not name:
-            raise ValueError("profile.name is required")
+            raise ConfigError("profile.name is required")
 
         # Use Identity.from_config to properly resolve IDs
         return Identity.from_config(profile, defaults={"name": name})
@@ -131,24 +133,31 @@ class ProgAgentFactory:
             Constructed Directive.
 
         Raises:
-            ValueError: If identity field missing.
+            ConfigError: If identity field missing.
         """
         identity_prompt = config.get("identity")
         if not identity_prompt:
-            raise ValueError("identity is required")
+            raise ConfigError("identity is required")
 
         if isinstance(identity_prompt, str):
             return Directive(prompt=identity_prompt)
         else:
             return Directive(**identity_prompt)
 
-    def _attach_traits(self, agent: Agent) -> None:
-        """Attach all available platform traits to agent.
+    def _attach_traits(self, agent: Agent, config: dict[str, Any]) -> None:
+        """Attach all available platform traits and validate requirements.
 
-        Subclasses can override to customize trait attachment or add validation.
+        Trait requirements are determined in priority order:
+        1. config['traits']['required'] (if present)
+        2. self.required_traits class variable (if set)
+        3. No requirements (validation skipped)
 
         Args:
             agent: Agent instance.
+            config: Full config dict from manifest.
+
+        Raises:
+            TraitNotFoundError: If required traits are not available in platform.
         """
         # Attach all available traits from platform registry
         for trait in self._platform.traits.all():
@@ -159,3 +168,44 @@ class ProgAgentFactory:
             "attached traits to agent",
             extra={"agent": agent.name, "traits": trait_names},
         )
+
+        # Validate trait requirements
+        self._validate_trait_requirements(agent, config)
+
+    def _validate_trait_requirements(self, agent: Agent, config: dict[str, Any]) -> None:
+        """Validate that required traits are attached.
+
+        Args:
+            agent: Agent instance with traits attached.
+            config: Full config dict from manifest.
+
+        Raises:
+            TraitNotFoundError: If required traits are missing.
+        """
+        # Determine required traits (priority: config > class variable > none)
+        required: list[TraitName] = []
+
+        traits_config = config.get("traits", {})
+        if "required" in traits_config:
+            # Config takes priority - convert strings to TraitName
+            required = [TraitName(name) for name in traits_config["required"]]
+        elif self.required_traits:
+            # Use factory class variable
+            required = self.required_traits
+
+        if not required:
+            # No requirements specified - skip validation
+            return
+
+        # Validate each required trait
+        missing: list[str] = []
+        for trait_name in required:
+            trait = self._platform.traits.get_by_name(trait_name)
+            if trait is None:
+                missing.append(trait_name.value)
+
+        if missing:
+            raise TraitNotFoundError(
+                f"{agent.name} requires traits {missing} but they are not configured. "
+                f"Check platform configuration (e.g., 'learn' section for LearnTrait)."
+            )
