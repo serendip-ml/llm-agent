@@ -257,55 +257,6 @@ class JokeTellerAgent(Agent):
 
         return result.parsed  # type: ignore[no-any-return]
 
-    def _attempt_joke_generation(  # cq: max-lines=40
-        self,
-        llm_trait: Any,
-        learn_trait: Any,
-        context: list[str],
-        retry_prompt: str,
-        attempt: int,
-    ) -> tuple[Joke | None, str]:
-        """Attempt to generate one novel joke.
-
-        Returns:
-            Tuple of (joke, next_retry_prompt). joke is None if attempt failed.
-        """
-        from ...core.llm.types import Message
-
-        # Build prompt and generate joke
-        prompt = self._build_generation_prompt(context, retry_prompt)
-        messages = [Message(role="user", content=prompt)]
-        result = llm_trait.complete(messages, output_schema=Joke)
-
-        if result.parsed is None:
-            self._lg.warning(
-                "LLM failed to generate structured joke",
-                extra={"agent": self.name, "attempt": attempt},
-            )
-            return None, "Previous attempt failed to produce valid JSON. Try again."
-
-        joke = result.parsed
-        novelty = self._check_novelty(learn_trait, joke.text)
-
-        if novelty.is_novel:
-            self._lg.info(
-                "generated novel joke",
-                extra={"agent": self.name, "attempts": attempt, "style": joke.style},
-            )
-            return joke, ""
-
-        # Too similar - build retry prompt
-        next_retry = self._build_similarity_retry_prompt(novelty)
-        self._lg.info(
-            "joke too similar, retrying",
-            extra={
-                "agent": self.name,
-                "attempt": attempt,
-                "similar_count": len(novelty.similar_jokes),
-            },
-        )
-        return None, next_retry
-
     def _build_similarity_retry_prompt(self, novelty: NoveltyCheck) -> str:
         """Build retry prompt when joke is too similar to existing ones."""
         similar_jokes_text = "\n".join(

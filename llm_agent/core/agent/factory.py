@@ -274,7 +274,7 @@ class Factory:
         self._create_and_register_tools(agent, tools_config, tools_trait)
 
         # Attach ToolsTrait if any tools were created
-        if len(tools_trait._registry) > 0:
+        if tools_trait.has_tools():
             agent.add_trait(tools_trait)
 
     def _create_and_register_tools(
