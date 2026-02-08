@@ -74,6 +74,15 @@ class Registry:
                 "Use replace() to update an existing trait."
             )
 
+        # Check for name collision before registering
+        if hasattr(trait, "trait_name"):
+            name = trait.trait_name
+            existing = self._by_name.get(name)
+            if existing is not None and type(existing) is not trait_type:
+                raise TraitAlreadyRegisteredError(
+                    f"Trait name '{name}' is already registered for {type(existing).__name__}."
+                )
+
         self._traits[trait_type] = trait
 
         # Auto-register by name if trait declares one
@@ -92,11 +101,14 @@ class Registry:
             trait: Trait instance to register/replace.
         """
         trait_type = type(trait)
+        old = self._traits.get(trait_type)
         self._traits[trait_type] = trait
 
-        # Update name mapping if trait has one
+        # Update name mapping if trait has one, or remove stale name if replacing with unnamed
         if hasattr(trait, "trait_name"):
             self._by_name[trait.trait_name] = trait
+        elif old is not None and hasattr(old, "trait_name"):
+            self._by_name.pop(old.trait_name, None)
 
         self._lg.debug("trait replaced", extra={"trait": trait_type.__name__})
 
@@ -200,6 +212,7 @@ class Registry:
     def clear(self) -> None:
         """Remove all traits from registry."""
         self._traits.clear()
+        self._by_name.clear()
         self._lg.debug("trait registry cleared")
 
     def __repr__(self) -> str:

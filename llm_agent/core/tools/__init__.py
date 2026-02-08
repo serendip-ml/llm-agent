@@ -1,6 +1,6 @@
 """Tool use infrastructure for agents."""
 
-from enum import Enum
+from enum import StrEnum
 
 from llm_agent.core.tools.base import BaseTool, Tool, ToolCall, ToolCallResult, ToolResult
 from llm_agent.core.tools.builtin import (
@@ -17,7 +17,7 @@ from llm_agent.core.tools.factory import ToolFactory
 from llm_agent.core.tools.registry import Registry
 
 
-class ToolName(str, Enum):
+class ToolName(StrEnum):
     """Tool name identifiers.
 
     Using str Enum so values work in YAML configs and as strings.

@@ -139,5 +139,5 @@ class PlatformContext:
     def __repr__(self) -> str:
         """String representation of platform context."""
         has_llm = "llm" in self._config
-        has_learn = "learn" in self._config
+        has_learn = self._config.get("learn") is not None
         return f"PlatformContext(llm={has_llm}, learn={has_learn})"

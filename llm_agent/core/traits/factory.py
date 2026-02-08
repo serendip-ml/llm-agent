@@ -162,6 +162,9 @@ class Factory:
         if not learn_config:
             raise ConfigError("Learning configuration required but not provided")
 
+        if "db" not in learn_config:
+            raise ConfigError("Learning configuration missing required 'db' field")
+
         config = LearnConfig(
             identity=identity,
             llm=learn_config.get("llm", {}),

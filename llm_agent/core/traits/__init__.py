@@ -1,6 +1,6 @@
 """Agent traits for composable capabilities."""
 
-from enum import Enum
+from enum import StrEnum
 
 from llm_agent.core.traits.base import BaseTrait, Trait
 from llm_agent.core.traits.directive import Directive, DirectiveTrait, MethodTrait
@@ -13,7 +13,7 @@ from llm_agent.core.traits.saia import SAIAConfig, SAIATrait
 from llm_agent.core.traits.tools import ToolsTrait
 
 
-class TraitName(str, Enum):
+class TraitName(StrEnum):
     """Trait name identifiers.
 
     Using str Enum so values work in YAML configs and as strings.

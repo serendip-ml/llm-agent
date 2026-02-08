@@ -73,7 +73,7 @@ def _build_agent_config() -> dict[str, Any]:
             "workspace": "examples",
             "name": "standalone-joker",
         },
-        "identity": """You are a joke teller who develops a personal sense of humor over time.
+        "directive": """You are a joke teller who develops a personal sense of humor over time.
 
 You learn what lands and what doesn't. You recall previous jokes and the
 reactions they got, and you use that to refine your style. You never repeat
@@ -119,6 +119,7 @@ def main() -> None:  # cq: max-lines=45
 
     logger.info("platform context created")
 
+    agent = None
     try:
         # Create agent via factory
         factory = Factory(platform)
@@ -134,11 +135,10 @@ def main() -> None:  # cq: max-lines=45
         # Display result
         _display_result(logger, result)
 
-        # Stop agent
-        agent.stop()
-
     finally:
-        # Cleanup platform resources
+        # Cleanup resources
+        if agent is not None:
+            agent.stop()
         platform.cleanup()
         logger.info("standalone joke teller finished")
 

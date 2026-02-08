@@ -172,7 +172,13 @@ class Factory:
         traits_config = config.get("traits", {})
         if "required" in traits_config:
             # Config takes priority - convert strings to TraitName
-            return [TraitName(name) for name in traits_config["required"]]
+            try:
+                return [TraitName(name) for name in traits_config["required"]]
+            except ValueError as e:
+                raise ConfigError(
+                    f"Unknown trait in traits.required: {e}. "
+                    f"Valid traits: {[t.value for t in TraitName]}"
+                ) from e
         elif self.required_traits:
             # Use factory class variable
             return self.required_traits

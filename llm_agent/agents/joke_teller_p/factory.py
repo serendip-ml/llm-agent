@@ -10,9 +10,9 @@ from .agent import JokeTellerAgent
 class Factory(BaseFactory):
     """Factory for JokeTellerAgent.
 
-    Declares LLM and LEARN as required traits. These can be overridden in YAML:
+    Declares DIRECTIVE, LLM, and LEARN as required traits. These can be overridden in YAML:
         traits:
-          required: [llm, learn]
+          required: [directive, llm, learn]
 
     No tools needed - agent uses LLMTrait/LearnTrait directly in code.
     """
