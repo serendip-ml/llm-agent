@@ -12,8 +12,7 @@ This package contains the core abstractions for building agents:
 - llm: LLM backend abstractions
 """
 
-from llm_agent.core.agent import Agent
-from llm_agent.core.config import AgentConfig
+from llm_agent.core.agent import Agent, Config, ExecutionResult
 from llm_agent.core.conversation import (
     Compactor,
     Conversation,
@@ -21,12 +20,10 @@ from llm_agent.core.conversation import (
     SlidingWindowCompactor,
     SummarizingCompactor,
 )
-from llm_agent.core.factory import (
-    ToolFactory,
-    TraitFactory,
-)
-from llm_agent.core.runnable import ExecutionResult, Runnable
+from llm_agent.core.runnable import Runnable
 from llm_agent.core.task import Task, TaskResult
+from llm_agent.core.tools.factory import ToolFactory
+from llm_agent.core.traits.factory import TraitFactory
 
 
 __all__ = [
@@ -35,7 +32,7 @@ __all__ = [
     "Runnable",
     # Agents
     "Agent",
-    "AgentConfig",
+    "Config",
     # Factories
     "ToolFactory",
     "TraitFactory",

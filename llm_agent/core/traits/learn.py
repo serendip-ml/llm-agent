@@ -20,7 +20,7 @@ from llm_agent.core.traits.llm import LLMConfig, _resolve_llm_defaults
 
 
 if TYPE_CHECKING:
-    from llm_agent.core.agent import Agent
+    from llm_agent.core.agent import Agent, Identity
 
 
 @dataclass
@@ -28,17 +28,29 @@ class LearnConfig:
     """Configuration for Learn trait.
 
     Attributes:
-        profile_id: Profile ID for scoping all learn operations.
+        identity: Resolved Identity (preferred).
         llm: LLM configuration for learned completions.
         db: Database configuration dict (with url, extensions, etc.).
         embedder_url: URL for embedding service (None = no RAG).
         embedder_model: Model name for embeddings.
         embedder_timeout: Embedder timeout in seconds.
+
+    Legacy:
+        profile_config: Profile configuration dict from agent YAML (deprecated).
+        agent_name: Agent name (deprecated).
+        profile_id: Legacy profile ID (deprecated).
     """
 
-    profile_id: str
-    llm: LLMConfig
-    db: dict[str, Any]
+    # New: resolved identity
+    identity: Identity | None = None
+
+    # Legacy: hierarchical profile configuration (deprecated)
+    profile_config: dict[str, Any] | None = None
+    agent_name: str | None = None
+    profile_id: str | None = None
+
+    llm: LLMConfig | None = None
+    db: dict[str, Any] | None = None
     embedder_url: str | None = None
     embedder_model: str = "default"
     embedder_timeout: float = 30.0
@@ -57,8 +69,18 @@ class LearnConfig:
                 return result
             return dict(d)
 
+        # Serialize identity as dict if present
+        identity_dict = None
+        if self.identity is not None:
+            from dataclasses import asdict
+
+            identity_dict = asdict(self.identity)
+
         return {
-            "profile_id": self.profile_id,
+            "identity": identity_dict,
+            "profile_config": _to_plain_dict(self.profile_config),
+            "agent_name": self.agent_name,
+            "profile_id": self.profile_id,  # Legacy
             "llm": _to_plain_dict(self.llm),
             "db": _to_plain_dict(self.db),
             "embedder_url": self.embedder_url,
@@ -124,26 +146,64 @@ class LearnTrait:
         """
         self._agent = agent
 
+    def _create_learn_client(self, database: Database) -> LearnClient:
+        """Create learn client from config using identity or legacy path."""
+        identity = self._resolve_identity()
+
+        if identity is not None:
+            return LearnClient.from_identity(
+                lg=self._lg, identity=identity, database=database, ensure_schema=True
+            )
+        elif self.config.profile_id is not None:
+            return LearnClient(
+                lg=self._lg,
+                profile_id=self.config.profile_id,
+                database=database,
+                ensure_schema=True,
+            )
+        else:
+            raise ValueError(
+                "LearnConfig must have either identity, profile_config/agent_name, or profile_id"
+            )
+
+    def _resolve_identity(self) -> Identity | None:
+        """Resolve Identity from config."""
+        if self.config.identity is not None:
+            return self.config.identity
+
+        if self.config.profile_config is not None or self.config.agent_name is not None:
+            from dataclasses import asdict
+
+            from llm_learn.core import IdentityResolver
+
+            from ..agent import Identity
+
+            resolved = IdentityResolver.resolve(
+                config=self.config.profile_config,
+                defaults={"name": self.config.agent_name or "default"},
+            )
+            return Identity(**asdict(resolved))
+
+        return None
+
     def on_start(self) -> None:
         """Create learn client, LLM client, and embedder on agent start."""
+        from llm_agent.errors import ConfigError
+
         # Create database from config
+        if self.config.db is None:
+            raise ConfigError("LearnConfig.db is required")
         pg = PG(self._lg, self.config.db)
         self._database = Database(self._lg, pg)
 
-        # Create learn client (ensure_schema=True triggers auto-migration)
-        self._learn = LearnClient(
-            lg=self._lg,
-            profile_id=self.config.profile_id,
-            database=self._database,
-            ensure_schema=True,
-        )
-
-        # Create context builder
+        # Create learn client and context builder
+        self._learn = self._create_learn_client(self._database)
         self._context = ContextBuilder(self._learn.facts)
 
         # Create LLM client for completions
-        self._client = LLMClientFactory(self._lg).from_config(self.config.llm)
-        self._llm_defaults = _resolve_llm_defaults(self.config.llm)
+        llm_config = self.config.llm or {}
+        self._client = LLMClientFactory(self._lg).from_config(llm_config)
+        self._llm_defaults = _resolve_llm_defaults(llm_config)
 
         # Create embedder if URL provided
         if self.config.embedder_url:

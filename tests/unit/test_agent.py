@@ -4,9 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from llm_agent.core.agent import Agent
-from llm_agent.core.factory import _substitute_variables
-from llm_agent.core.runnable import ExecutionResult
+from llm_agent.core.agent import Agent, ExecutionResult, Identity, _substitute_variables
 
 
 pytestmark = pytest.mark.unit
@@ -83,7 +81,11 @@ class TestAgentLifecycle:
         """Create a test agent using agents.default.Agent."""
         from llm_agent.agents.default import Agent as DefaultAgent
 
-        return DefaultAgent(lg=mock_logger, name="test-agent", default_prompt="Do something")
+        return DefaultAgent(
+            lg=mock_logger,
+            identity=Identity.from_name("test-agent"),
+            default_prompt="You are a test agent.",
+        )
 
     def test_init(self, agent):
         assert agent.name == "test-agent"
@@ -119,7 +121,7 @@ class TestAgentTraits:
         """Create a test agent."""
         from llm_agent.agents.default import Agent as DefaultAgent
 
-        return DefaultAgent(lg=mock_logger, name="test", default_prompt="")
+        return DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
 
     def test_add_trait(self, agent):
         mock_trait = MagicMock()
@@ -193,14 +195,18 @@ class TestAgentExecution:
         from llm_agent.agents.default import Agent as DefaultAgent
         from llm_agent.core.traits.saia import SAIATrait
 
-        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="Default task")
+        agent = DefaultAgent(
+            lg=mock_logger, identity=Identity.from_name("test"), default_prompt="Test task"
+        )
         agent._traits[SAIATrait] = mock_saia_trait
         return agent
 
     def test_run_once_without_saia_trait_fails(self, mock_logger):
         from llm_agent.agents.default import Agent as DefaultAgent
 
-        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="Do something")
+        agent = DefaultAgent(
+            lg=mock_logger, identity=Identity.from_name("test"), default_prompt="Test task"
+        )
 
         result = agent.run_once()
 
@@ -211,7 +217,7 @@ class TestAgentExecution:
         from llm_agent.agents.default import Agent as DefaultAgent
         from llm_agent.core.traits.saia import SAIATrait
 
-        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="")
+        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
         agent._traits[SAIATrait] = mock_saia_trait
 
         result = agent.run_once()
@@ -259,7 +265,7 @@ class TestAgentExecution:
     def test_ask_without_saia_trait_returns_error(self, mock_logger):
         from llm_agent.agents.default import Agent as DefaultAgent
 
-        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="")
+        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
 
         result = agent.ask("Question?")
 
@@ -302,7 +308,7 @@ class TestAgentRecentResults:
         """Create a test agent."""
         from llm_agent.agents.default import Agent as DefaultAgent
 
-        return DefaultAgent(lg=mock_logger, name="test", default_prompt="")
+        return DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
 
     def test_get_recent_results_empty(self, agent):
         assert agent.get_recent_results() == []
@@ -332,7 +338,7 @@ class TestAgentRecordFeedback:
         """Default agent's record_feedback is a no-op."""
         from llm_agent.agents.default import Agent as DefaultAgent
 
-        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="")
+        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
 
         # Should not raise
         agent.record_feedback("Some feedback message")
@@ -438,7 +444,7 @@ class TestFactorySystemPrompt:
         from llm_agent.core.traits.identity import IdentityTrait
 
         factory = self._create_factory(mock_logger)
-        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="task")
+        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
         agent.add_trait(IdentityTrait("You are a helpful assistant."))
 
         system_prompt = factory._build_system_prompt(agent)
@@ -451,7 +457,7 @@ class TestFactorySystemPrompt:
         from llm_agent.core.traits.identity import MethodTrait
 
         factory = self._create_factory(mock_logger)
-        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="task")
+        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
         agent.add_trait(MethodTrait("- Step 1\n- Step 2"))
 
         system_prompt = factory._build_system_prompt(agent)
@@ -464,7 +470,7 @@ class TestFactorySystemPrompt:
         from llm_agent.core.traits.identity import IdentityTrait, MethodTrait
 
         factory = self._create_factory(mock_logger)
-        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="task")
+        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
         agent.add_trait(IdentityTrait("You are a helpful assistant."))
         agent.add_trait(MethodTrait("- Step 1\n- Step 2"))
 
@@ -477,7 +483,7 @@ class TestFactorySystemPrompt:
         from llm_agent.agents.default import Agent as DefaultAgent
 
         factory = self._create_factory(mock_logger)
-        agent = DefaultAgent(lg=mock_logger, name="test", default_prompt="task")
+        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
 
         system_prompt = factory._build_system_prompt(agent)
 

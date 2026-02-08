@@ -3,12 +3,7 @@
 from llm_learn.core.types import ScoredEntity
 from llm_learn.memory.atomic import Fact
 
-from llm_agent.core.agent import Agent
-from llm_agent.core.config import AgentConfig
-from llm_agent.core.factory import (
-    ToolFactory,
-    TraitFactory,
-)
+from llm_agent.core.agent import Agent, Config
 from llm_agent.core.llm import (
     CompletionResult,
     HTTPBackend,
@@ -34,6 +29,7 @@ from llm_agent.core.tools import (
     ToolRegistry,
     ToolResult,
 )
+from llm_agent.core.tools.factory import ToolFactory
 from llm_agent.core.traits import (
     BaseTrait,
     HTTPConfig,
@@ -50,6 +46,8 @@ from llm_agent.core.traits import (
     ToolsTrait,
     Trait,
 )
+from llm_agent.core.traits.factory import TraitFactory
+from llm_agent.errors import AgentError, ConfigError
 
 
 __version__ = "0.0.0"
@@ -57,7 +55,10 @@ __version__ = "0.0.0"
 __all__ = [
     # Agents
     "Agent",
-    "AgentConfig",
+    "Config",
+    # Errors
+    "AgentError",
+    "ConfigError",
     # Factories
     "ToolFactory",
     "TraitFactory",

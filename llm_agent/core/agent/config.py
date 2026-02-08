@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 
-class AgentConfig(BaseModel):
+class Config(BaseModel):
     """Agent configuration."""
 
     name: str

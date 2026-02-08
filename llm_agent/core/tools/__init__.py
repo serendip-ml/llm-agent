@@ -11,6 +11,7 @@ from llm_agent.core.tools.builtin import (
     ShellTool,
 )
 from llm_agent.core.tools.executor import SimpleToolExecutor, ToolExecutionResult
+from llm_agent.core.tools.factory import ToolFactory
 from llm_agent.core.tools.registry import ToolRegistry
 
 
@@ -21,7 +22,8 @@ __all__ = [
     "ToolCall",
     "ToolCallResult",
     "ToolResult",
-    # Registry
+    # Factory & Registry
+    "ToolFactory",
     "ToolRegistry",
     # Executor
     "SimpleToolExecutor",
