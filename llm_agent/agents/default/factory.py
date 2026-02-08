@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from appinfra.log import Logger
-
 from llm_agent.agents.default.agent import Agent
 from llm_agent.core.agent import Factory as BaseFactory
 from llm_agent.core.traits.saia import SAIAConfig, SAIATrait
@@ -98,10 +96,10 @@ class Factory(BaseFactory):
         agent = super().create(config, variables=None)  # Already substituted
 
         # Add SAIA trait and event handlers (prompt-agent specific)
-        self._add_saia_trait(agent, config)
-        self._configure_event_handlers(agent, config)
+        self._add_saia_trait(agent, config)  # type: ignore[arg-type]
+        self._configure_event_handlers(agent, config)  # type: ignore[arg-type]
 
-        return agent
+        return agent  # type: ignore[return-value]
 
     def _add_saia_trait(self, agent: Agent, config: dict[str, Any]) -> None:
         """Add SAIATrait for LLM operations."""

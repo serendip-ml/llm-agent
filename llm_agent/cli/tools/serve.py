@@ -516,6 +516,15 @@ class ServeTool(Tool):
         }
 
         # Add type-specific fields
+        self._add_type_specific_fields(config_dict, agent_config)
+
+        # Common optional fields
+        self._add_optional_fields(config_dict, agent_config)
+
+        return config_dict
+
+    def _add_type_specific_fields(self, config_dict: dict[str, Any], agent_config: Any) -> None:
+        """Add type-specific fields to config dict."""
         if agent_config.type_ == "programmatic":
             config_dict["module"] = agent_config.module
             config_dict["factory"] = agent_config.factory
@@ -529,12 +538,14 @@ class ServeTool(Tool):
                     name: handler.model_dump() for name, handler in agent_config.events.items()
                 }
 
-        # Common optional fields
+    def _add_optional_fields(self, config_dict: dict[str, Any], agent_config: Any) -> None:
+        """Add optional fields to config dict."""
         if agent_config.directive is not None:
-            if isinstance(agent_config.directive, str):
-                config_dict["directive"] = agent_config.directive
-            else:
-                config_dict["directive"] = agent_config.directive.model_dump()
+            config_dict["directive"] = (
+                agent_config.directive
+                if isinstance(agent_config.directive, str)
+                else agent_config.directive.model_dump()
+            )
 
         if agent_config.method is not None:
             config_dict["method"] = agent_config.method
@@ -544,8 +555,6 @@ class ServeTool(Tool):
 
         if agent_config.schedule is not None:
             config_dict["schedule"] = agent_config.schedule.model_dump()
-
-        return config_dict
 
     def _apply_cli_overrides(self, config: Any) -> None:
         """Apply command-line overrides to config."""

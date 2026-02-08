@@ -6,11 +6,8 @@ import os
 import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from appinfra.log import Logger
-
 from ..errors import ConfigError, TraitNotFoundError
 from ..traits import TraitName
-from ..traits.directive import Directive
 from .agent import Agent
 from .identity import Identity
 
@@ -203,7 +200,7 @@ class Factory:
         return self._platform.trait_factory.create(
             trait_name=trait_name,  # Pass enum directly
             agent_config=config,
-            identity=agent.identity,  # For LearnTrait
+            identity=agent.identity,  # type: ignore[attr-defined]  # For LearnTrait
         )
 
     def _validate_trait_requirements(
@@ -223,7 +220,7 @@ class Factory:
             return
 
         # Map trait names to classes for validation
-        from ..traits.directive import DirectiveTrait
+        from ..traits.directive import DirectiveTrait, MethodTrait
         from ..traits.learn import LearnTrait
         from ..traits.llm import LLMTrait
 
@@ -231,13 +228,14 @@ class Factory:
             TraitName.DIRECTIVE: DirectiveTrait,
             TraitName.LLM: LLMTrait,
             TraitName.LEARN: LearnTrait,
+            TraitName.METHOD: MethodTrait,
         }
 
         # Validate each required trait is attached
         missing: list[str] = []
         for trait_name in required:
             trait_class = trait_class_map.get(trait_name)
-            if trait_class is None or agent.get_trait(trait_class) is None:  # type: ignore[arg-type]
+            if trait_class is None or agent.get_trait(trait_class) is None:
                 missing.append(trait_name.value)
 
         if missing:
@@ -258,25 +256,31 @@ class Factory:
             agent: Agent instance.
             config: Full config dict from manifest.
         """
+        from ..traits.learn import LearnTrait
         from ..traits.tools import ToolsTrait
 
         # Determine which tools to configure
         tools_config = config.get("tools", self.default_tools)
         if not tools_config:
-            # No tools configured - skip
             return
 
         # Bind LearnTrait to platform.tool_factory if available
-        from ..traits.learn import LearnTrait
-
-        learn_trait = agent.get_trait(LearnTrait)  # type: ignore[arg-type]
+        learn_trait = agent.get_trait(LearnTrait)
         if learn_trait:
             self._platform.tool_factory.set_learn_trait(learn_trait)
 
-        # Create ToolsTrait
+        # Create ToolsTrait and populate with configured tools
         tools_trait = ToolsTrait()
+        self._create_and_register_tools(agent, tools_config, tools_trait)
 
-        # Create and register each configured tool
+        # Attach ToolsTrait if any tools were created
+        if len(tools_trait._registry) > 0:
+            agent.add_trait(tools_trait)
+
+    def _create_and_register_tools(
+        self, agent: Agent, tools_config: dict[str, dict[str, Any]], tools_trait: Any
+    ) -> None:
+        """Create and register tools from configuration."""
         for tool_name, tool_config in tools_config.items():
             tool = self._platform.tool_factory.create(tool_name, tool_config)
             if tool is None:
@@ -291,10 +295,6 @@ class Factory:
                 "created tool for agent",
                 extra={"agent": agent.name, "tool": tool_name},
             )
-
-        # Attach ToolsTrait if any tools were created
-        if len(tools_trait._registry) > 0:
-            agent.add_trait(tools_trait)
 
 
 # =============================================================================

@@ -77,7 +77,7 @@ class JokeTellerAgent(Agent):
         return self._identity.name
 
     @property
-    def identity(self):
+    def identity(self) -> Identity:
         """Agent identity for addressing."""
         return self._identity
 
@@ -255,7 +255,7 @@ class JokeTellerAgent(Agent):
             )
             return None
 
-        return result.parsed
+        return result.parsed  # type: ignore[no-any-return]
 
     def _attempt_joke_generation(  # cq: max-lines=40
         self,
@@ -338,7 +338,7 @@ Try a completely different style or topic."""
         # Get directive from traits
         from ...core.traits.directive import DirectiveTrait
 
-        directive_trait = self.get_trait(DirectiveTrait)  # type: ignore[arg-type]
+        directive_trait = self.get_trait(DirectiveTrait)
         directive_prompt = directive_trait.directive.prompt if directive_trait else ""
 
         return f"""{directive_prompt}

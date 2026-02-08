@@ -424,9 +424,15 @@ class TestFactorySystemPrompt:
 
     def _create_factory(self, mock_logger):
         """Create Factory instance."""
-        from llm_agent.agents.default import Factory
+        from unittest.mock import MagicMock
 
-        llm_config = {
+        from llm_agent.agents.default import Factory
+        from llm_agent.core.traits.factory import Factory as TraitFactory
+
+        # Create mock platform context
+        mock_platform = MagicMock()
+        mock_platform.logger = mock_logger
+        mock_platform.llm_config.return_value = {
             "default": "local",
             "backends": {
                 "local": {
@@ -436,7 +442,9 @@ class TestFactorySystemPrompt:
                 }
             },
         }
-        return Factory(lg=mock_logger, llm_config=llm_config)
+        # Create a real trait factory for the mock platform
+        mock_platform.trait_factory = TraitFactory(mock_platform)
+        return Factory(platform=mock_platform)
 
     def test_system_prompt_with_identity_only(self, mock_logger):
         """System prompt contains identity when only identity is configured."""
@@ -495,10 +503,11 @@ class TestFactorySystemPrompt:
 
         factory = self._create_factory(mock_logger)
         config = {
-            "name": "test-agent",
-            "identity": "You are a code analyst.",
+            "profile": {"name": "test-agent"},
+            "directive": "You are a code analyst.",
             "method": "- Analyze carefully",
             "task": {"description": "Analyze the code."},
+            "traits": {"required": ["directive", "method"]},
         }
 
         agent = factory.create(config)

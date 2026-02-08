@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable
-
-from appinfra.log import Logger
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
     from llm_agent.core.platform import PlatformContext
-    from llm_agent.core.tools.factory import ToolFactory
+    from llm_agent.core.traits import TraitName
     from llm_agent.core.traits.directive import DirectiveTrait, MethodTrait
     from llm_agent.core.traits.learn import LearnTrait
     from llm_agent.core.traits.llm import LLMConfig, LLMTrait
-    from llm_agent.core.traits.tools import ToolsTrait
 
 from .base import Trait
 
@@ -45,7 +43,7 @@ class Factory:
         self._lg = platform.logger
 
         # Map trait types to creator functions
-        self._creators: dict[TraitName, Callable[[dict[str, Any], Any], Trait]] = {
+        self._creators: dict[TraitName, Callable[..., Trait]] = {
             TraitName.DIRECTIVE: self._create_directive,
             TraitName.LLM: self._create_llm,
             TraitName.LEARN: self._create_learn,
@@ -194,4 +192,3 @@ class Factory:
             raise ConfigError("Method configuration required but not provided")
 
         return MethodTrait(method)
-

@@ -10,10 +10,10 @@ from llm_agent import (
     FileReadTool,
     FileWriteTool,
     HTTPFetchTool,
+    Registry,
     ShellTool,
     Tool,
     ToolCall,
-    ToolRegistry,
     ToolResult,
 )
 
@@ -100,11 +100,11 @@ class TestBaseTool:
         }
 
 
-class TestToolRegistry:
-    """Tests for ToolRegistry."""
+class TestRegistry:
+    """Tests for Registry."""
 
     def test_register_and_get(self):
-        registry = ToolRegistry()
+        registry = Registry()
         tool = ShellTool()
 
         registry.register(tool)
@@ -114,14 +114,14 @@ class TestToolRegistry:
         assert len(registry) == 1
 
     def test_register_duplicate_raises(self):
-        registry = ToolRegistry()
+        registry = Registry()
         registry.register(ShellTool())
 
         with pytest.raises(ValueError, match="already registered"):
             registry.register(ShellTool())
 
     def test_unregister(self):
-        registry = ToolRegistry()
+        registry = Registry()
         registry.register(ShellTool())
 
         registry.unregister("shell")
@@ -130,26 +130,26 @@ class TestToolRegistry:
         assert len(registry) == 0
 
     def test_unregister_unknown_raises(self):
-        registry = ToolRegistry()
+        registry = Registry()
 
         with pytest.raises(KeyError, match="not registered"):
             registry.unregister("unknown")
 
     def test_list_names(self):
-        registry = ToolRegistry()
+        registry = Registry()
         registry.register(ShellTool())
 
         assert registry.list_names() == ["shell"]
 
     def test_list_tools(self):
-        registry = ToolRegistry()
+        registry = Registry()
         tool = ShellTool()
         registry.register(tool)
 
         assert registry.list_tools() == [tool]
 
     def test_to_openai_tools(self):
-        registry = ToolRegistry()
+        registry = Registry()
         registry.register(ShellTool())
 
         tools = registry.to_openai_tools()
