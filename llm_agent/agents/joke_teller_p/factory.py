@@ -14,8 +14,9 @@ class Factory(ProgAgentFactory):
         traits:
           required: [llm, learn]
 
-    Or removed entirely by setting required: [] in YAML to handle validation in code.
+    No tools needed - agent uses LLMTrait/LearnTrait directly in code.
     """
 
     agent_class = JokeTellerAgent
     required_traits = [TN.LLM, TN.LEARN]
+    default_tools = {}  # This agent doesn't need tools (uses traits directly in code)

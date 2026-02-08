@@ -16,8 +16,8 @@ config:
   max_retries: 3
   similarity_threshold: 0.85
 
-# Identity prompt (agent personality)
-identity: |
+# Directive prompt (agent personality)
+directive: |
   You are a joke teller who develops a personal sense of humor over time.
 
   You learn what lands and what doesn't. You recall previous jokes and the

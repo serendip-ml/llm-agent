@@ -3,8 +3,8 @@
 The PlatformContext is the single source of truth for all platform resources:
 - Configuration
 - Shared resources (LLM clients, databases)
-- Trait registry
-- Tool registry
+- Trait registry (shared platform traits)
+- Tool registry (standard platform tools)
 
 It provides a clean boundary between the platform and agents (apps).
 """
@@ -15,6 +15,8 @@ from typing import Any
 
 from appinfra.log import Logger
 
+from .tools.factory import ToolFactory
+from .tools.registry import ToolRegistry
 from .traits.registry import TraitRegistry
 
 
@@ -48,19 +50,25 @@ class PlatformContext:
         lg: Logger,
         config: dict[str, Any],
         traits: TraitRegistry,
+        tools: ToolRegistry,
     ) -> None:
         """Initialize platform context.
 
         Args:
             lg: Platform logger.
             config: Platform configuration dict.
-            traits: Initialized trait registry.
+            traits: Initialized trait registry with platform traits.
+            tools: Initialized tool registry with standard tools.
         """
         self._lg = lg
         self._config = config
         self._traits = traits
+        self._tools = tools
 
-        self._lg.info("platform context initialized", extra={"traits": traits.count()})
+        self._lg.info(
+            "platform context initialized",
+            extra={"traits": traits.count(), "tools": len(tools)},
+        )
 
     @classmethod
     def from_config(
@@ -88,7 +96,10 @@ class PlatformContext:
         # Initialize trait registry
         traits = cls._build_trait_registry(lg, llm_config, learn_config)
 
-        return cls(lg=lg, config=config, traits=traits)
+        # Initialize tool registry with standard tools
+        tools = cls._build_tool_registry(lg)
+
+        return cls(lg=lg, config=config, traits=traits, tools=tools)
 
     @classmethod
     def _build_trait_registry(
@@ -127,6 +138,35 @@ class PlatformContext:
 
         return registry
 
+    @classmethod
+    def _build_tool_registry(cls, lg: Logger) -> ToolRegistry:
+        """Build tool registry with standard platform tools.
+
+        Uses ToolFactory and STANDARD_TOOLS list from tools package.
+
+        Args:
+            lg: Platform logger.
+
+        Returns:
+            ToolRegistry with standard tools registered.
+        """
+        from .tools import STANDARD_TOOLS
+
+        factory = ToolFactory()
+        registry = ToolRegistry()
+
+        for tool_name in STANDARD_TOOLS:
+            tool = factory.create(tool_name.value, {})
+            if tool is not None:
+                registry.register(tool)
+                lg.debug("registered standard tool", extra={"tool": tool.name})
+
+        # Note: REMEMBER/RECALL tools require LearnTrait, so they're not in
+        # STANDARD_TOOLS. They'll be added when agents with LearnTrait are created.
+
+        lg.info("tool registry built", extra={"tools": len(registry)})
+        return registry
+
     @property
     def logger(self) -> Logger:
         """Platform logger."""
@@ -141,6 +181,11 @@ class PlatformContext:
     def traits(self) -> TraitRegistry:
         """Trait registry with all available platform traits."""
         return self._traits
+
+    @property
+    def tools(self) -> ToolRegistry:
+        """Tool registry with standard platform tools."""
+        return self._tools
 
     def llm_config(self) -> dict[str, Any]:
         """Get LLM configuration.

@@ -26,6 +26,7 @@ class ProgAgentFactory:
     - Parses profile + identity → constructs Identity
     - Extracts config params → passes to agent __init__
     - Attaches traits based on agent requirements
+    - Configures tools from YAML or factory defaults
 
     Trait Requirements (3 ways, priority order):
         1. YAML config (highest priority):
@@ -39,6 +40,17 @@ class ProgAgentFactory:
 
         3. No requirements (agent handles validation in code)
 
+    Tool Configuration (2 ways, priority order):
+        1. YAML config (highest priority):
+            tools:
+              remember: {}
+              recall: {}
+
+        2. Factory class variable:
+            class Factory(ProgAgentFactory):
+                agent_class = MyAgent
+                default_tools = {"remember": {}, "recall": {}}
+
     Usage:
         class Factory(ProgAgentFactory):
             agent_class = MyAgent  # Just specify your agent class
@@ -49,6 +61,9 @@ class ProgAgentFactory:
 
     # Optional: declare required traits at factory level
     required_traits: ClassVar[list[TraitName]] = []
+
+    # Optional: declare default tools at factory level
+    default_tools: ClassVar[dict[str, dict[str, Any]]] = {}
 
     def __init__(self, platform: PlatformContext) -> None:
         """Initialize factory with platform context.
@@ -172,6 +187,9 @@ class ProgAgentFactory:
         # Validate trait requirements
         self._validate_trait_requirements(agent, config)
 
+        # Configure tools from YAML or factory defaults
+        self._configure_tools(agent, config)
+
     def _validate_trait_requirements(self, agent: Agent, config: dict[str, Any]) -> None:
         """Validate that required traits are attached.
 
@@ -209,3 +227,47 @@ class ProgAgentFactory:
                 f"{agent.name} requires traits {missing} but they are not configured. "
                 f"Check platform configuration (e.g., 'learn' section for LearnTrait)."
             )
+
+    def _configure_tools(self, agent: Agent, config: dict[str, Any]) -> None:  # cq: max-lines=35
+        """Configure tools for the agent from YAML or factory defaults.
+
+        Tool configuration priority:
+        1. config['tools'] (YAML config)
+        2. self.default_tools class variable
+        3. No tools (empty ToolsTrait)
+
+        Args:
+            agent: Agent instance.
+            config: Full config dict from manifest.
+        """
+        from ..traits.tools import ToolsTrait
+
+        # Determine which tools to configure
+        tools_config = config.get("tools", self.default_tools)
+        if not tools_config:
+            # No tools configured - skip
+            return
+
+        # Create ToolsTrait
+        tools_trait = ToolsTrait()
+
+        # Register each configured tool
+        for tool_name in tools_config:
+            # Get tool from platform registry
+            tool = self._platform.tools.get(tool_name)
+            if tool is None:
+                self._lg.warning(
+                    "tool not available in platform",
+                    extra={"agent": agent.name, "tool": tool_name},
+                )
+                continue
+
+            tools_trait.register(tool)
+            self._lg.debug(
+                "registered tool for agent",
+                extra={"agent": agent.name, "tool": tool_name},
+            )
+
+        # Attach ToolsTrait if any tools were registered
+        if len(tools_trait._registry) > 0:
+            agent.add_trait(tools_trait)
