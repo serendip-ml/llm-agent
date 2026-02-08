@@ -111,14 +111,16 @@ class Agent(BaseAgent):
         Uses chronological recall for scheduled tasks (repetitive execution).
         Uses semantic recall for ad-hoc questions (varied queries).
 
-        Subclasses or factory can override by registering custom handlers
-        after initialization.
+        Only registers handlers if not already registered, allowing factory
+        or subclasses to override with custom handlers.
         """
-        # Register schedule event handler (chronological recall)
-        self._dispatcher.on("schedule", self._on_schedule)
+        # Register schedule event handler (chronological recall) if not already set
+        if not self._dispatcher.has_handler("schedule"):
+            self._dispatcher.on("schedule", self._on_schedule)
 
-        # Register question event handler (semantic recall)
-        self._dispatcher.on("question", self._on_question)
+        # Register question event handler (semantic recall) if not already set
+        if not self._dispatcher.has_handler("question"):
+            self._dispatcher.on("question", self._on_question)
 
     async def _on_schedule(
         self,

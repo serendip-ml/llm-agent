@@ -183,7 +183,11 @@ class LearnTrait:
 
     def on_start(self) -> None:
         """Create learn client, LLM client, and embedder on agent start."""
+        from llm_agent.errors import ConfigError
+
         # Create database from config
+        if self.config.db is None:
+            raise ConfigError("LearnConfig.db is required")
         pg = PG(self._lg, self.config.db)
         self._database = Database(self._lg, pg)
 

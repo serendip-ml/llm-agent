@@ -30,8 +30,12 @@ def recall_chronological(learn_trait: Any, agent_name: str, limit: int = 5) -> l
             active_only=True,
         )
         return solutions  # type: ignore[no-any-return]
-    except Exception:
-        # If list_by_agent fails or doesn't exist, fall back to empty
+    except Exception as e:
+        # Log failure for debugging, but don't fail (graceful degradation)
+        if hasattr(learn_trait, "_lg"):
+            learn_trait._lg.debug(
+                "recall_chronological failed", extra={"agent_name": agent_name, "exception": e}
+            )
         return []
 
 
@@ -68,12 +72,13 @@ def recall_semantic(
                 if s.solution_details and s.solution_details.agent_name == agent_name
             ][:limit]
 
-        # Fall back to chronological if search returned nothing
-        if not solutions and agent_name:
-            return recall_chronological(learn_trait, agent_name, limit)
-
         return solutions  # type: ignore[no-any-return]
-    except Exception:
+    except Exception as e:
+        # Log failure for debugging, then fall back to chronological
+        if hasattr(learn_trait, "_lg"):
+            learn_trait._lg.debug(
+                "recall_semantic failed", extra={"query": query[:100], "exception": e}
+            )
         # Fall back to chronological on any error
         if agent_name:
             return recall_chronological(learn_trait, agent_name, limit)

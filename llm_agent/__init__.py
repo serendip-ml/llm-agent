@@ -47,6 +47,7 @@ from llm_agent.core.traits import (
     Trait,
 )
 from llm_agent.core.traits.factory import TraitFactory
+from llm_agent.errors import AgentError, ConfigError
 
 
 __version__ = "0.0.0"
@@ -55,6 +56,9 @@ __all__ = [
     # Agents
     "Agent",
     "Config",
+    # Errors
+    "AgentError",
+    "ConfigError",
     # Factories
     "ToolFactory",
     "TraitFactory",
