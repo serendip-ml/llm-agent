@@ -494,13 +494,6 @@ class ServeTool(Tool):
     ) -> None:
         """Register and auto-start agents from configuration."""
         for name, agent_config in config.agents.items():
-            if agent_config.type_ != "prompt":
-                self.lg.warning(
-                    "skipping non-prompt agent",
-                    extra={"agent": name, "type": agent_config.type_},
-                )
-                continue
-
             config_dict = self._build_agent_config_dict(name, agent_config)
             try:
                 registry.register(name, config_dict)
@@ -511,34 +504,46 @@ class ServeTool(Tool):
                 self.lg.error("failed to register agent", extra={"agent": name, "exception": e})
 
     def _build_agent_config_dict(self, name: str, agent_config: Any) -> dict[str, Any]:
-        """Build config dict for agent registration."""
+        """Build config dict for agent registration.
+
+        For programmatic agents, includes module, factory, profile, config.
+        For prompt agents, includes task, tools, conversation, events.
+        """
         config_dict: dict[str, Any] = {
             "name": name,
+            "type": agent_config.type_,
             "task": agent_config.task.model_dump(),
-            "tools": agent_config.tools,
-            "conversation": agent_config.conversation,
         }
 
-        # Add identity (can be string or Identity object)
-        if agent_config.identity is not None:
-            if isinstance(agent_config.identity, str):
-                config_dict["identity"] = agent_config.identity
-            else:
-                config_dict["identity"] = agent_config.identity.model_dump()
+        # Add type-specific fields
+        if agent_config.type_ == "programmatic":
+            config_dict["module"] = agent_config.module
+            config_dict["factory"] = agent_config.factory
+            config_dict["profile"] = agent_config.profile
+            config_dict["config"] = agent_config.config
+        else:
+            # Prompt agents use conversation and events
+            config_dict["conversation"] = agent_config.conversation
+            if agent_config.events:
+                config_dict["events"] = {
+                    name: handler.model_dump() for name, handler in agent_config.events.items()
+                }
 
-        # Add method if specified
+        # Common optional fields
+        if agent_config.directive is not None:
+            if isinstance(agent_config.directive, str):
+                config_dict["directive"] = agent_config.directive
+            else:
+                config_dict["directive"] = agent_config.directive.model_dump()
+
         if agent_config.method is not None:
             config_dict["method"] = agent_config.method
 
-        # Add schedule if specified
+        if agent_config.tools:
+            config_dict["tools"] = agent_config.tools
+
         if agent_config.schedule is not None:
             config_dict["schedule"] = agent_config.schedule.model_dump()
-
-        # Add event handlers if specified
-        if agent_config.events:
-            config_dict["events"] = {
-                name: handler.model_dump() for name, handler in agent_config.events.items()
-            }
 
         return config_dict
 

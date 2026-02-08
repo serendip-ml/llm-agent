@@ -77,6 +77,11 @@ class JokeTellerAgent(Agent):
         return self._identity.name
 
     @property
+    def identity(self):
+        """Agent identity for addressing."""
+        return self._identity
+
+    @property
     def cycle_count(self) -> int:
         """Number of execution cycles completed."""
         return self._cycle_count
@@ -219,7 +224,7 @@ class JokeTellerAgent(Agent):
             List of recent joke texts.
         """
         try:
-            facts = learn_trait.learn.solutions.list_recent(
+            facts = learn_trait.learn.solutions.list_by_agent(
                 profile_name=self.name,
                 category="execution",
                 limit=limit,

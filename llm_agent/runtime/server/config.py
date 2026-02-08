@@ -95,6 +95,12 @@ class AgentConfigYAML(BaseModel):
     factory: str = "Factory"
     """Factory class name for programmatic agents (default: 'Factory')."""
 
+    profile: dict[str, Any] = {}
+    """Profile configuration for agent identity (domain/workspace/name)."""
+
+    config: dict[str, Any] = {}
+    """Agent-specific configuration passed to __init__."""
+
     directive: Directive | str | None = None
     """Agent's directive - why it exists (string or Directive object)."""
 
