@@ -119,22 +119,18 @@ class JokeTellerAgent(Agent):
             # Get recent jokes for style context
             recent_context = self._get_recent_jokes(learn_trait, limit=5)
 
-            # Generate novel joke with retry logic
-            joke, attempts = self._generate_novel_joke(
-                llm_trait=llm_trait,
-                learn_trait=learn_trait,
-                context=recent_context,
-            )
+            # Generate joke (novelty checking disabled - TODO: implement with embeddings)
+            joke = self._generate_joke(llm_trait, recent_context)
 
             if joke is None:
                 return self._failure_result(
-                    f"Could not generate novel joke after {attempts} attempts",
-                    iterations=attempts,
+                    "Could not generate joke",
+                    iterations=1,
                 )
 
             # Save to memory and return success
             self._save_joke(learn_trait, joke)
-            return self._success_result(joke, attempts)
+            return self._success_result(joke, 1)
 
         except Exception as e:
             return self._error_result(e)
@@ -225,11 +221,10 @@ class JokeTellerAgent(Agent):
         """
         try:
             facts = learn_trait.learn.solutions.list_by_agent(
-                profile_name=self.name,
-                category="execution",
+                agent_name=self.name,
                 limit=limit,
             )
-            return [fact.answer_text for fact in facts if fact.answer_text]
+            return [fact.content for fact in facts if fact.content]
         except Exception as e:
             self._lg.debug(
                 "failed to fetch recent jokes",
@@ -237,36 +232,30 @@ class JokeTellerAgent(Agent):
             )
             return []
 
-    def _generate_novel_joke(
-        self,
-        llm_trait: Any,
-        learn_trait: Any,
-        context: list[str],
-    ) -> tuple[Joke | None, int]:
-        """Generate a novel joke with retry logic.
+    def _generate_joke(self, llm_trait: Any, context: list[str]) -> Joke | None:
+        """Generate a joke (novelty checking disabled).
 
         Args:
             llm_trait: LLMTrait instance.
-            learn_trait: LearnTrait instance.
             context: Recent jokes for style inspiration.
 
         Returns:
-            Tuple of (joke, attempts). joke is None if all attempts failed.
+            Generated joke or None if generation failed.
         """
-        retry_prompt = ""
-        for attempt in range(1, self._max_retries + 1):
-            joke, retry_prompt = self._attempt_joke_generation(
-                llm_trait=llm_trait,
-                learn_trait=learn_trait,
-                context=context,
-                retry_prompt=retry_prompt,
-                attempt=attempt,
+        from ...core.llm.types import Message
+
+        prompt = self._build_generation_prompt(context, retry_feedback="")
+        messages = [Message(role="user", content=prompt)]
+        result = llm_trait.complete(messages, output_schema=Joke)
+
+        if result.parsed is None:
+            self._lg.warning(
+                "LLM failed to generate structured joke",
+                extra={"agent": self.name},
             )
+            return None
 
-            if joke is not None:
-                return joke, attempt
-
-        return None, self._max_retries
+        return result.parsed
 
     def _attempt_joke_generation(  # cq: max-lines=40
         self,
