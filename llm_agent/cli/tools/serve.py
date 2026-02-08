@@ -494,10 +494,10 @@ class ServeTool(Tool):
     ) -> None:
         """Register and auto-start agents from configuration."""
         for name, agent_config in config.agents.items():
-            if agent_config.class_ != "prompt":
+            if agent_config.type_ != "prompt":
                 self.lg.warning(
                     "skipping non-prompt agent",
-                    extra={"agent": name, "class": agent_config.class_},
+                    extra={"agent": name, "type": agent_config.type_},
                 )
                 continue
 

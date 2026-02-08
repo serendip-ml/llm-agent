@@ -441,11 +441,11 @@ class TestFactorySystemPrompt:
     def test_system_prompt_with_identity_only(self, mock_logger):
         """System prompt contains identity when only identity is configured."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.identity import IdentityTrait
+        from llm_agent.core.traits.identity import DirectiveTrait
 
         factory = self._create_factory(mock_logger)
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
-        agent.add_trait(IdentityTrait("You are a helpful assistant."))
+        agent.add_trait(DirectiveTrait("You are a helpful assistant."))
 
         system_prompt = factory._build_system_prompt(agent)
 
@@ -467,11 +467,11 @@ class TestFactorySystemPrompt:
     def test_system_prompt_with_identity_and_method(self, mock_logger):
         """System prompt combines identity and method."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.identity import IdentityTrait, MethodTrait
+        from llm_agent.core.traits.identity import DirectiveTrait, MethodTrait
 
         factory = self._create_factory(mock_logger)
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
-        agent.add_trait(IdentityTrait("You are a helpful assistant."))
+        agent.add_trait(DirectiveTrait("You are a helpful assistant."))
         agent.add_trait(MethodTrait("- Step 1\n- Step 2"))
 
         system_prompt = factory._build_system_prompt(agent)

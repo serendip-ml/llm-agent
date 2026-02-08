@@ -10,7 +10,7 @@ This module provides:
 - Token utilities: Fast estimation without tokenizer dependencies
 
 Example:
-    from llm_agent.core.conversation import Conversation, ConversationConfig
+    from llm_agent.core.conv import Conversation, ConversationConfig
 
     config = ConversationConfig(max_tokens=32000, compact_threshold=0.8)
     conversation = Conversation(config=config)
@@ -27,14 +27,14 @@ Example:
     messages = conversation.messages()
 """
 
-from llm_agent.core.conversation.compactor import (
+from llm_agent.core.conv.compactor import (
     Compactor,
     SlidingWindowCompactor,
     SummarizingCompactor,
 )
-from llm_agent.core.conversation.conversation import Conversation, ConversationConfig
-from llm_agent.core.conversation.runner import ConversationRunner
-from llm_agent.core.conversation.tokens import (
+from llm_agent.core.conv.conversation import Conversation, ConversationConfig
+from llm_agent.core.conv.runner import ConversationRunner
+from llm_agent.core.conv.tokens import (
     DEFAULT_CHARS_PER_TOKEN,
     estimate_message_tokens,
     estimate_tokens,

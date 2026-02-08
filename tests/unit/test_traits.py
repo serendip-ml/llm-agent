@@ -7,8 +7,8 @@ from pydantic import BaseModel
 
 from llm_agent import (
     BaseTrait,
-    Identity,
-    IdentityTrait,
+    Directive,
+    DirectiveTrait,
     MethodTrait,
     StructuredOutputError,
 )
@@ -76,17 +76,17 @@ class TestCustomTrait:
         assert trait.get_value() == "test-agent: test"
 
 
-class TestIdentity:
-    """Tests for Identity."""
+class TestDirective:
+    """Tests for Directive."""
 
     def test_identity_with_prompt(self):
-        identity = Identity(prompt="You are a code reviewer.")
+        identity = Directive(prompt="You are a code reviewer.")
 
         assert identity.prompt == "You are a code reviewer."
         assert identity.extensions == {}
 
     def test_identity_with_extensions(self):
-        identity = Identity(
+        identity = Directive(
             prompt="You are a code reviewer.",
             extensions={"custom_field": "value"},
         )
@@ -95,24 +95,24 @@ class TestIdentity:
         assert identity.extensions == {"custom_field": "value"}
 
 
-class TestIdentityTrait:
-    """Tests for IdentityTrait."""
+class TestDirectiveTrait:
+    """Tests for DirectiveTrait."""
 
     def test_init_with_identity_object(self):
-        identity = Identity(prompt="Test identity")
-        trait = IdentityTrait(identity)
+        identity = Directive(prompt="Test identity")
+        trait = DirectiveTrait(identity)
 
-        assert trait.identity == identity
+        assert trait.directive == identity
 
     def test_init_with_string(self):
-        """IdentityTrait can be initialized with a string."""
-        trait = IdentityTrait("You are a code reviewer.")
+        """DirectiveTrait can be initialized with a string."""
+        trait = DirectiveTrait("You are a code reviewer.")
 
-        assert trait.identity.prompt == "You are a code reviewer."
+        assert trait.directive.prompt == "You are a code reviewer."
 
     def test_attach(self):
-        identity = Identity(prompt="Test identity")
-        trait = IdentityTrait(identity)
+        identity = Directive(prompt="Test identity")
+        trait = DirectiveTrait(identity)
         mock_agent = MagicMock()
 
         trait.attach(mock_agent)
@@ -120,12 +120,12 @@ class TestIdentityTrait:
         assert trait._agent == mock_agent
 
     def test_build_prompt(self):
-        identity = Identity(prompt="You are a code reviewer. Be critical.")
-        trait = IdentityTrait(identity)
+        identity = Directive(prompt="You are a code reviewer. Be critical.")
+        trait = DirectiveTrait(identity)
 
         result = trait.build_prompt("Base system prompt.")
 
-        # Identity is prepended
+        # Directive is prepended
         assert result.startswith("You are a code reviewer.")
         assert "Base system prompt." in result
 
@@ -173,32 +173,32 @@ class TestAgentTraits:
         return DefaultAgent(lg=mock_logger, identity=identity, default_prompt="")
 
     def test_add_trait(self, agent):
-        identity = Identity(prompt="Test identity")
-        trait = IdentityTrait(identity)
+        identity = Directive(prompt="Test identity")
+        trait = DirectiveTrait(identity)
         agent.add_trait(trait)
 
-        assert agent.has_trait(IdentityTrait)
-        assert agent.get_trait(IdentityTrait) == trait
+        assert agent.has_trait(DirectiveTrait)
+        assert agent.get_trait(DirectiveTrait) == trait
 
     def test_add_trait_attaches(self, agent):
-        identity = Identity(prompt="Test identity")
-        trait = IdentityTrait(identity)
+        identity = Directive(prompt="Test identity")
+        trait = DirectiveTrait(identity)
         agent.add_trait(trait)
 
         assert trait._agent == agent
 
     def test_add_duplicate_trait_raises(self, agent):
-        identity = Identity(prompt="Test identity")
-        agent.add_trait(IdentityTrait(identity))
+        identity = Directive(prompt="Test identity")
+        agent.add_trait(DirectiveTrait(identity))
 
         with pytest.raises(ValueError, match="already added"):
-            agent.add_trait(IdentityTrait(identity))
+            agent.add_trait(DirectiveTrait(identity))
 
     def test_get_trait_returns_none_if_not_added(self, agent):
-        assert agent.get_trait(IdentityTrait) is None
+        assert agent.get_trait(DirectiveTrait) is None
 
     def test_has_trait_returns_false_if_not_added(self, agent):
-        assert not agent.has_trait(IdentityTrait)
+        assert not agent.has_trait(DirectiveTrait)
 
 
 class TestLLMTraitStructuredOutput:

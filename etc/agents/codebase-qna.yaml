@@ -1,4 +1,4 @@
-class: prompt
+type: prompt
 
 identity: |
   You are becoming an expert codebase analyst.

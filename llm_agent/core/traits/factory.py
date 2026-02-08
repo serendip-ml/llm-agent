@@ -9,7 +9,7 @@ from appinfra.log import Logger
 
 if TYPE_CHECKING:
     from llm_agent.core.tools.factory import ToolFactory
-    from llm_agent.core.traits.identity import IdentityTrait, MethodTrait
+    from llm_agent.core.traits.identity import DirectiveTrait, MethodTrait
     from llm_agent.core.traits.learn import LearnTrait
     from llm_agent.core.traits.llm import LLMConfig, LLMTrait
     from llm_agent.core.traits.tools import ToolsTrait
@@ -62,25 +62,25 @@ class TraitFactory:
 
         return LLMTrait(self._lg, self._llm_config)
 
-    def create_identity_trait(self, config: str | dict[str, Any]) -> IdentityTrait:
-        """Create IdentityTrait from string or dict config.
+    def create_identity_trait(self, config: str | dict[str, Any]) -> DirectiveTrait:
+        """Create DirectiveTrait from string or dict config.
 
         Args:
             config: Identity prompt string or dict with 'prompt' key.
 
         Returns:
-            Configured IdentityTrait.
+            Configured DirectiveTrait.
         """
-        from llm_agent.core.traits.identity import Identity, IdentityTrait
+        from llm_agent.core.traits.identity import Directive, DirectiveTrait
 
         if isinstance(config, str):
-            identity = Identity(prompt=config)
+            directive = Directive(prompt=config)
         elif isinstance(config, dict):
-            identity = Identity(**config)
+            directive = Directive(**config)
         else:
-            identity = config  # Already an Identity
+            directive = config  # Already a Directive
 
-        return IdentityTrait(identity)
+        return DirectiveTrait(directive)
 
     def create_method_trait(self, method: str) -> MethodTrait:
         """Create MethodTrait from method string.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from llm_agent.core.conversation import (
+from llm_agent.core.conv import (
     Conversation,
     ConversationConfig,
     SlidingWindowCompactor,

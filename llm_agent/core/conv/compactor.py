@@ -14,7 +14,7 @@ from llm_agent.core.llm import Message
 
 
 if TYPE_CHECKING:
-    from llm_agent.core.conversation.conversation import Conversation
+    from llm_agent.core.conv.conversation import Conversation
     from llm_agent.core.llm import LLMBackend
 
 

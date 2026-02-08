@@ -175,13 +175,13 @@ class Factory(AgentFactory):
 
     def _build_system_prompt(self, agent: Agent) -> str | None:
         """Build system prompt from identity and method traits."""
-        from llm_agent.core.traits.identity import IdentityTrait, MethodTrait
+        from llm_agent.core.traits.identity import DirectiveTrait, MethodTrait
 
         parts: list[str] = []
 
-        identity_trait = agent.get_trait(IdentityTrait)
-        if identity_trait is not None:
-            parts.append(identity_trait.identity.prompt)
+        directive_trait = agent.get_trait(DirectiveTrait)
+        if directive_trait is not None:
+            parts.append(directive_trait.directive.prompt)
 
         method_trait = agent.get_trait(MethodTrait)
         if method_trait is not None:
@@ -194,15 +194,15 @@ class Factory(AgentFactory):
 
     def _add_identity_traits(self, agent: Agent, config: dict[str, Any]) -> None:
         """Add identity and method traits if configured."""
-        from llm_agent.core.traits.identity import Identity, IdentityTrait, MethodTrait
+        from llm_agent.core.traits.identity import Directive, DirectiveTrait, MethodTrait
 
         identity_config = config.get("identity")
         if identity_config is not None:
             if isinstance(identity_config, str):
-                identity = Identity(prompt=identity_config)
+                directive = Directive(prompt=identity_config)
             else:
-                identity = Identity(**identity_config)
-            agent.add_trait(IdentityTrait(identity))
+                directive = Directive(**identity_config)
+            agent.add_trait(DirectiveTrait(directive))
 
         method = config.get("method")
         if method is not None:

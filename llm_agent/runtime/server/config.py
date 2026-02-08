@@ -10,7 +10,7 @@ from typing import Any, Literal
 from appinfra.app.fastapi.config import ApiConfig
 from pydantic import BaseModel, Field
 
-from llm_agent.core.traits.identity import Identity
+from llm_agent.core.traits.identity import Directive
 
 
 class LearnBackendConfig(BaseModel):
@@ -86,11 +86,17 @@ class AgentConfigYAML(BaseModel):
             interval: 600
     """
 
-    class_: Literal["prompt", "programmatic"] = Field(alias="class", default="prompt")
-    """Agent class: 'prompt' for YAML-only, 'programmatic' for custom Python."""
+    type_: Literal["prompt", "programmatic"] = Field(alias="type", default="prompt")
+    """Agent type: 'prompt' for YAML-only, 'programmatic' for custom Python."""
 
-    identity: Identity | str | None = None
-    """Agent's identity - who it is (string or Identity object)."""
+    module: str | None = None
+    """Module path for programmatic agents (e.g., 'llm_agent.agents.joke_teller')."""
+
+    factory: str = "Factory"
+    """Factory class name for programmatic agents (default: 'Factory')."""
+
+    directive: Directive | str | None = None
+    """Agent's directive - why it exists (string or Directive object)."""
 
     method: str | None = None
     """Agent's operational method - how it works."""

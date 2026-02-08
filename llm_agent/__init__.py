@@ -3,7 +3,8 @@
 from llm_learn.core.types import ScoredEntity
 from llm_learn.memory.atomic import Fact
 
-from llm_agent.core.agent import Agent, Config
+from llm_agent.core.agent import Agent, Config, Identity
+from llm_agent.core.errors import AgentError, ConfigError
 from llm_agent.core.llm import (
     CompletionResult,
     HTTPBackend,
@@ -32,10 +33,10 @@ from llm_agent.core.tools import (
 from llm_agent.core.tools.factory import ToolFactory
 from llm_agent.core.traits import (
     BaseTrait,
+    Directive,
+    DirectiveTrait,
     HTTPConfig,
     HTTPTrait,
-    Identity,
-    IdentityTrait,
     LearnConfig,
     LearnTrait,
     LLMConfig,
@@ -47,7 +48,6 @@ from llm_agent.core.traits import (
     Trait,
 )
 from llm_agent.core.traits.factory import TraitFactory
-from llm_agent.errors import AgentError, ConfigError
 
 
 __version__ = "0.0.0"
@@ -56,6 +56,7 @@ __all__ = [
     # Agents
     "Agent",
     "Config",
+    "Identity",
     # Errors
     "AgentError",
     "ConfigError",
@@ -79,8 +80,8 @@ __all__ = [
     "ToolResult",
     # Traits
     "BaseTrait",
-    "Identity",
-    "IdentityTrait",
+    "Directive",
+    "DirectiveTrait",
     "LearnConfig",
     "LearnTrait",
     "LLMConfig",

@@ -7,7 +7,7 @@ This file tests configuration models that are still in use.
 
 import pytest
 
-from llm_agent.core.traits.identity import Identity
+from llm_agent.core.traits.identity import Directive
 from llm_agent.runtime.server.config import (
     AgentConfigYAML,
     AgentServerConfig,
@@ -26,13 +26,13 @@ class TestAgentServerConfig:
     def test_agent_config_yaml(self):
         """Parse agent config from dict."""
         config = AgentConfigYAML(
-            identity=Identity(prompt="Test prompt"),
+            directive=Directive(prompt="Test prompt"),
             task=TaskConfigYAML(description="Do things"),
             tools={"shell": {"allowed_commands": ["ls"]}},
             schedule=ScheduleConfigYAML(interval=300),
         )
-        assert config.class_ == "prompt"
-        assert config.identity.prompt == "Test prompt"
+        assert config.type_ == "prompt"
+        assert config.directive.prompt == "Test prompt"
         assert config.schedule.interval == 300
 
     def test_agent_server_config_from_dict(self):
@@ -43,7 +43,7 @@ class TestAgentServerConfig:
             "agents": {
                 "test-agent": {
                     "class": "prompt",
-                    "identity": {"prompt": "Be helpful"},
+                    "directive": {"prompt": "Be helpful"},
                     "task": {"description": "Help users"},
                 }
             },
@@ -53,7 +53,7 @@ class TestAgentServerConfig:
         assert config.server.port == 9000
         assert config.llm["base_url"] == "http://localhost:8000/v1"
         assert "test-agent" in config.agents
-        assert config.agents["test-agent"].identity.prompt == "Be helpful"
+        assert config.agents["test-agent"].directive.prompt == "Be helpful"
 
 
 class TestScheduleConfigYAML:
@@ -117,17 +117,17 @@ class TestAgentConfigYAML:
             identity="Test prompt",
             task=TaskConfigYAML(description="Test"),
         )
-        assert config.class_ == "prompt"
+        assert config.type_ == "prompt"
 
     def test_programmatic_class(self):
-        """AgentConfigYAML accepts 'programmatic' class."""
+        """AgentConfigYAML accepts 'programmatic' type."""
         raw = {
-            "class": "programmatic",
+            "type": "programmatic",
             "identity": "Test prompt",
             "task": {"description": "Test"},
         }
         config = AgentConfigYAML(**raw)
-        assert config.class_ == "programmatic"
+        assert config.type_ == "programmatic"
 
     def test_tools_default_empty(self):
         """AgentConfigYAML defaults tools to empty dict."""
