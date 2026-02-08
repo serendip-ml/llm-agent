@@ -32,7 +32,7 @@ from llm_agent.core.platform import PlatformContext
 from llm_agent.core.runnable import Runnable
 from llm_agent.core.task import Task, TaskResult
 from llm_agent.core.tools.factory import ToolFactory
-from llm_agent.core.traits.factory import TraitFactory
+from llm_agent.core.traits.factory import Factory as TraitFactory
 
 
 __all__ = [

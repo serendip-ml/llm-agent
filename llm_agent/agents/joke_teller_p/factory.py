@@ -18,5 +18,5 @@ class Factory(BaseFactory):
     """
 
     agent_class = JokeTellerAgent
-    required_traits = [TN.LLM, TN.LEARN]
+    required_traits = [TN.DIRECTIVE, TN.LLM, TN.LEARN]
     default_tools = {}  # This agent doesn't need tools (uses traits directly in code)

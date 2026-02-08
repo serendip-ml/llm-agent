@@ -4,11 +4,11 @@ from enum import Enum
 
 from llm_agent.core.traits.base import BaseTrait, Trait
 from llm_agent.core.traits.directive import Directive, DirectiveTrait, MethodTrait
-from llm_agent.core.traits.factory import TraitFactory
+from llm_agent.core.traits.factory import Factory
 from llm_agent.core.traits.http import HTTPConfig, HTTPTrait
 from llm_agent.core.traits.learn import LearnConfig, LearnTrait
 from llm_agent.core.traits.llm import LLMConfig, LLMTrait
-from llm_agent.core.traits.registry import TraitRegistry
+from llm_agent.core.traits.registry import Registry
 from llm_agent.core.traits.saia import SAIAConfig, SAIATrait
 from llm_agent.core.traits.tools import ToolsTrait
 
@@ -20,23 +20,23 @@ class TraitName(str, Enum):
     Agents can declare required/optional traits using these enum values.
     """
 
+    DIRECTIVE = "directive"
     LLM = "llm"
     LEARN = "learn"
     HTTP = "http"
     SAIA = "saia"
     TOOLS = "tools"
-    IDENTITY = "identity"
     METHOD = "method"
 
 
 # All trait types available in the platform
 ALL_TRAITS: list[TraitName] = [
+    TraitName.DIRECTIVE,
     TraitName.LLM,
     TraitName.LEARN,
     TraitName.HTTP,
     TraitName.SAIA,
     TraitName.TOOLS,
-    TraitName.IDENTITY,
     TraitName.METHOD,
 ]
 
@@ -48,10 +48,9 @@ __all__ = [
     # Names & Catalogs
     "TraitName",
     "ALL_TRAITS",
-    # Factory
-    "TraitFactory",
-    # Registry
-    "TraitRegistry",
+    # Factory & Registry
+    "Factory",
+    "Registry",
     # Directive/Method
     "Directive",
     "DirectiveTrait",

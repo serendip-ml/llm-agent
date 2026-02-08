@@ -14,6 +14,9 @@ from typing import Any
 
 from appinfra.log import Logger
 
+from .tools.factory import ToolFactory
+from .traits.factory import Factory as TraitFactory
+
 
 class PlatformContext:
     """Central container for all platform resources.
@@ -54,6 +57,10 @@ class PlatformContext:
         self._lg = lg
         self._config = config
 
+        # Create factories for trait/tool creation
+        self._tool_factory = ToolFactory()
+        self._trait_factory = TraitFactory(platform=self)
+
         self._lg.info("platform context initialized")
 
     @classmethod
@@ -90,6 +97,16 @@ class PlatformContext:
     def config(self) -> dict[str, Any]:
         """Platform configuration."""
         return self._config
+
+    @property
+    def trait_factory(self) -> TraitFactory:
+        """Trait factory for creating trait instances."""
+        return self._trait_factory
+
+    @property
+    def tool_factory(self) -> ToolFactory:
+        """Tool factory for creating tool instances."""
+        return self._tool_factory
 
     def llm_config(self) -> dict[str, Any]:
         """Get LLM configuration.

@@ -94,24 +94,20 @@ class Factory:
         if self.agent_class is None:
             raise ConfigError(f"{self.__class__.__name__} must set agent_class class variable")
 
-        # Parse profile → construct Identity
+        # Parse profile → construct Identity (required)
         identity = self._build_identity(config)
-
-        # Parse identity prompt → construct Directive
-        directive = self._build_directive(config)
 
         # Extract agent-specific config
         agent_config = config.get("config", {})
 
-        # Instantiate agent
+        # Instantiate agent (only identity is required)
         agent = self.agent_class(  # type: ignore[call-arg]
             lg=self._lg,
             identity=identity,
-            directive=directive,
             **agent_config,
         )
 
-        # Attach standard traits
+        # Create and attach traits (all handled uniformly)
         self._attach_traits(agent, config)
 
         return agent
@@ -138,32 +134,12 @@ class Factory:
         # Use Identity.from_config to properly resolve IDs
         return Identity.from_config(profile, defaults={"name": name})
 
-    def _build_directive(self, config: dict[str, Any]) -> Directive:
-        """Build Directive from identity field.
-
-        Args:
-            config: Full config dict from manifest.
-
-        Returns:
-            Constructed Directive.
-
-        Raises:
-            ConfigError: If identity field missing.
-        """
-        identity_prompt = config.get("identity")
-        if not identity_prompt:
-            raise ConfigError("identity is required")
-
-        if isinstance(identity_prompt, str):
-            return Directive(prompt=identity_prompt)
-        else:
-            return Directive(**identity_prompt)
-
     def _attach_traits(self, agent: Agent, config: dict[str, Any]) -> None:
         """Create and attach traits for the agent.
 
-        Creates fresh trait instances from platform configuration.
-        Each agent gets its own trait instances (no sharing).
+        Only creates traits that are explicitly requested via:
+        - config['traits']['required']
+        - self.required_traits class variable
 
         Args:
             agent: Agent instance.
@@ -172,79 +148,87 @@ class Factory:
         Raises:
             TraitNotFoundError: If required traits cannot be created.
         """
-        # Create and attach LLMTrait if available
-        if self._platform.llm_config():
-            self._add_llm_trait(agent)
+        # Determine which traits to create
+        traits_to_create = self._determine_required_traits(config)
 
-        # Create and attach LearnTrait if available
-        if self._platform.learn_config():
-            self._add_learn_trait(agent)
+        # Create each requested trait using platform.trait_factory
+        for trait_name in traits_to_create:
+            trait = self._create_trait(trait_name, agent, config)
+            agent.add_trait(trait)
+            self._lg.debug("created trait", extra={"agent": agent.name, "trait": trait_name.value})
 
-        # Validate trait requirements
-        self._validate_trait_requirements(agent, config)
+        # Validate all required traits were created
+        self._validate_trait_requirements(agent, config, traits_to_create)
 
         # Configure tools from YAML or factory defaults
         self._configure_tools(agent, config)
 
-    def _add_llm_trait(self, agent: Agent) -> None:
-        """Create and attach LLMTrait."""
-        from ..traits.llm import LLMTrait
+    def _determine_required_traits(self, config: dict[str, Any]) -> list[TraitName]:
+        """Determine which traits to create for this agent.
 
-        llm_trait = LLMTrait(self._lg, self._platform.llm_config())
-        agent.add_trait(llm_trait)
-        self._lg.debug("created LLMTrait", extra={"agent": agent.name})
+        Args:
+            config: Full config dict from manifest.
 
-    def _add_learn_trait(self, agent: Agent) -> None:
-        """Create and attach LearnTrait with agent-specific identity."""
-        from ..traits.learn import LearnConfig, LearnTrait
+        Returns:
+            List of trait names to create.
+        """
+        traits_config = config.get("traits", {})
+        if "required" in traits_config:
+            # Config takes priority - convert strings to TraitName
+            return [TraitName(name) for name in traits_config["required"]]
+        elif self.required_traits:
+            # Use factory class variable
+            return self.required_traits
+        else:
+            # No traits specified - create none
+            return []
 
-        learn_config_dict = self._platform.learn_config()
-        if not learn_config_dict:
-            return
+    def _create_trait(self, trait_name: TraitName, agent: Agent, config: dict[str, Any]) -> Any:
+        """Create a trait instance using platform.trait_factory.
 
-        learn_config = LearnConfig(
-            identity=agent.identity,
-            llm=learn_config_dict.get("llm", {}),
-            db=learn_config_dict["db"],
-            embedder_url=learn_config_dict.get("embedder_url"),
-            embedder_model=learn_config_dict.get("embedder_model", "default"),
-            embedder_timeout=learn_config_dict.get("embedder_timeout", 30.0),
+        Delegates to trait_factory.create() which handles validation and routing.
+
+        Args:
+            trait_name: Type of trait to create.
+            agent: Agent instance (needed for agent-specific config like identity).
+            config: Full config dict from manifest.
+
+        Returns:
+            Created trait instance.
+
+        Raises:
+            ConfigError: If required configuration is missing.
+            ValueError: If trait type is unknown.
+        """
+        return self._platform.trait_factory.create(
+            trait_name=trait_name,  # Pass enum directly
+            agent_config=config,
+            identity=agent.identity,  # For LearnTrait
         )
 
-        learn_trait = LearnTrait(self._lg, learn_config)
-        agent.add_trait(learn_trait)
-        self._lg.debug("created LearnTrait", extra={"agent": agent.name})
-
-    def _validate_trait_requirements(self, agent: Agent, config: dict[str, Any]) -> None:
-        """Validate that required traits are attached.
+    def _validate_trait_requirements(
+        self, agent: Agent, config: dict[str, Any], required: list[TraitName]
+    ) -> None:
+        """Validate that required traits were successfully created.
 
         Args:
             agent: Agent instance with traits attached.
             config: Full config dict from manifest.
+            required: List of trait names that should have been created.
 
         Raises:
             TraitNotFoundError: If required traits are missing.
         """
-        # Determine required traits (priority: config > class variable > none)
-        required: list[TraitName] = []
-
-        traits_config = config.get("traits", {})
-        if "required" in traits_config:
-            # Config takes priority - convert strings to TraitName
-            required = [TraitName(name) for name in traits_config["required"]]
-        elif self.required_traits:
-            # Use factory class variable
-            required = self.required_traits
-
         if not required:
-            # No requirements specified - skip validation
             return
 
         # Map trait names to classes for validation
+        from ..traits.directive import DirectiveTrait
         from ..traits.learn import LearnTrait
         from ..traits.llm import LLMTrait
 
         trait_class_map = {
+            TraitName.DIRECTIVE: DirectiveTrait,
             TraitName.LLM: LLMTrait,
             TraitName.LEARN: LearnTrait,
         }
@@ -282,21 +266,19 @@ class Factory:
             # No tools configured - skip
             return
 
-        # Create ToolFactory and bind LearnTrait if available
-        from ..tools.factory import ToolFactory
+        # Bind LearnTrait to platform.tool_factory if available
         from ..traits.learn import LearnTrait
 
-        tool_factory = ToolFactory()
         learn_trait = agent.get_trait(LearnTrait)  # type: ignore[arg-type]
         if learn_trait:
-            tool_factory.set_learn_trait(learn_trait)
+            self._platform.tool_factory.set_learn_trait(learn_trait)
 
         # Create ToolsTrait
         tools_trait = ToolsTrait()
 
         # Create and register each configured tool
         for tool_name, tool_config in tools_config.items():
-            tool = tool_factory.create(tool_name, tool_config)
+            tool = self._platform.tool_factory.create(tool_name, tool_config)
             if tool is None:
                 self._lg.warning(
                     "tool could not be created",

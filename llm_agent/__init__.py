@@ -27,7 +27,7 @@ from llm_agent.core.tools import (
     ToolCall,
     ToolCallResult,
     ToolExecutionResult,
-    ToolRegistry,
+    Registry,
     ToolResult,
 )
 from llm_agent.core.tools.factory import ToolFactory
@@ -47,7 +47,7 @@ from llm_agent.core.traits import (
     ToolsTrait,
     Trait,
 )
-from llm_agent.core.traits.factory import TraitFactory
+from llm_agent.core.traits.factory import Factory as TraitFactory
 
 
 __version__ = "0.0.0"
@@ -76,7 +76,7 @@ __all__ = [
     "ToolCall",
     "ToolCallResult",
     "ToolExecutionResult",
-    "ToolRegistry",
+    "Registry",
     "ToolResult",
     # Traits
     "BaseTrait",

@@ -7,14 +7,14 @@ from typing import Any
 from llm_agent.core.tools.base import Tool
 
 
-class ToolRegistry:
+class Registry:
     """Registry of tools available to an agent.
 
     Manages tool registration and provides tools in formats needed
     by LLM backends (e.g., OpenAI function calling format).
 
     Example:
-        registry = ToolRegistry()
+        registry = Registry()
         registry.register(shell_tool)
         registry.register(file_tool)
 

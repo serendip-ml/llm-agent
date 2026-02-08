@@ -17,7 +17,6 @@ from appinfra.log import Logger
 from pydantic import BaseModel
 
 from ...core.agent import Agent, ExecutionResult, Identity
-from ...core.traits.directive import Directive
 
 
 class Joke(BaseModel):
@@ -54,7 +53,6 @@ class JokeTellerAgent(Agent):
         self,
         lg: Logger,
         identity: Identity,
-        directive: Directive,
         max_retries: int = 3,
         similarity_threshold: float = 0.85,
     ) -> None:
@@ -63,13 +61,11 @@ class JokeTellerAgent(Agent):
         Args:
             lg: Logger instance.
             identity: Agent identity for addressing/naming.
-            directive: Agent directive (purpose/why it exists).
             max_retries: Maximum attempts to generate novel joke.
             similarity_threshold: Minimum similarity to consider a duplicate (0.0-1.0).
         """
         super().__init__(lg)
         self._identity = identity
-        self._directive = directive
         self._max_retries = max_retries
         self._similarity_threshold = similarity_threshold
         self._cycle_count = 0
@@ -345,7 +341,13 @@ Try a completely different style or topic."""
 
         retry_text = f"\n\n{retry_feedback}" if retry_feedback else ""
 
-        return f"""{self._directive.prompt}
+        # Get directive from traits
+        from ...core.traits.directive import DirectiveTrait
+
+        directive_trait = self.get_trait(DirectiveTrait)  # type: ignore[arg-type]
+        directive_prompt = directive_trait.directive.prompt if directive_trait else ""
+
+        return f"""{directive_prompt}
 
 {context_text}
 

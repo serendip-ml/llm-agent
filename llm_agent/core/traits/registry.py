@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseTrait)
 
 
-class TraitRegistry:
+class Registry:
     """Registry of available platform traits.
 
     Manages the collection of configured traits that can be attached to agents.
@@ -29,7 +29,7 @@ class TraitRegistry:
 
     Example:
         # Platform creates registry with configured traits
-        registry = TraitRegistry(lg)
+        registry = Registry(lg)
         registry.register(LLMTrait(lg, llm_config))
         registry.register(LearnTrait(lg, learn_config))
 
@@ -205,4 +205,4 @@ class TraitRegistry:
     def __repr__(self) -> str:
         """String representation of registry."""
         trait_names = [t.__name__ for t in self._traits]
-        return f"TraitRegistry({', '.join(trait_names)})"
+        return f"Registry({', '.join(trait_names)})"

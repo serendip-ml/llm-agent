@@ -14,7 +14,7 @@ from llm_agent.core.tools.builtin import (
 )
 from llm_agent.core.tools.executor import SimpleToolExecutor, ToolExecutionResult
 from llm_agent.core.tools.factory import ToolFactory
-from llm_agent.core.tools.registry import ToolRegistry
+from llm_agent.core.tools.registry import Registry
 
 
 class ToolName(str, Enum):
@@ -56,7 +56,7 @@ __all__ = [
     "ALL_TOOLS",
     # Factory & Registry
     "ToolFactory",
-    "ToolRegistry",
+    "Registry",
     # Executor
     "SimpleToolExecutor",
     "ToolExecutionResult",
