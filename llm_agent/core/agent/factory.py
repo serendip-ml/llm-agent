@@ -279,13 +279,18 @@ class Factory:
         if learn_trait:
             self._platform.tool_factory.set_learn_trait(learn_trait)
 
-        # Create ToolsTrait and populate with configured tools
-        tools_trait = ToolsTrait()
-        self._create_and_register_tools(agent, tools_config, tools_trait)
+        try:
+            # Create ToolsTrait and populate with configured tools
+            tools_trait = ToolsTrait()
+            self._create_and_register_tools(agent, tools_config, tools_trait)
 
-        # Attach ToolsTrait if any tools were created
-        if tools_trait.has_tools():
-            agent.add_trait(tools_trait)
+            # Attach ToolsTrait if any tools were created
+            if tools_trait.has_tools():
+                agent.add_trait(tools_trait)
+        finally:
+            # Clear learn_trait to avoid leaking state between agents
+            if learn_trait:
+                self._platform.tool_factory.set_learn_trait(None)
 
     def _create_and_register_tools(
         self, agent: Agent, tools_config: dict[str, dict[str, Any]], tools_trait: Any
