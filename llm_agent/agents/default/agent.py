@@ -129,14 +129,7 @@ class Agent(BaseAgent):
         # Execute task
         prompt = saia_trait.saia.compose(context, task)
         saia_result = await saia_trait.saia.complete(prompt)
-
-        result = ExecutionResult(
-            success=saia_result.completed,
-            content=saia_result.output,
-            iterations=saia_result.iterations,
-            tokens_used=saia_result.score.total_tokens if saia_result.score else 0,
-            trace_id=saia_result.trace_id,
-        )
+        result = saia_trait.to_execution_result(saia_result)
 
         # Add turn to conversation if trait present
         self._record_conversation_turn(task, result)
