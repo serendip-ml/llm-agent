@@ -153,13 +153,7 @@ class Agent(Runnable):
         Raises:
             DuplicateTraitError: If a trait of this type is already added.
         """
-        from ..errors import DuplicateTraitError, TraitAlreadyRegisteredError
-
-        try:
-            self._traits.register(trait)
-        except TraitAlreadyRegisteredError as e:
-            # Maintain backward compatibility with DuplicateTraitError
-            raise DuplicateTraitError(str(e)) from e
+        self._traits.register(trait)
 
         if self._started:
             trait.on_start()
@@ -222,5 +216,11 @@ class Agent(Runnable):
     def _stop_traits(self) -> None:
         """Stop all attached traits. Call from stop()."""
         for trait in self._traits.all():
-            trait.on_stop()
+            try:
+                trait.on_stop()
+            except Exception as e:
+                self._lg.warning(
+                    "error stopping trait",
+                    extra={"trait": type(trait).__name__, "exception": e},
+                )
         self._started = False

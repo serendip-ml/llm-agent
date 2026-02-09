@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
-    from llm_agent.core.agent import Agent
+    from llm_agent.core.agent import Agent, Identity
     from llm_agent.core.platform import PlatformContext
     from llm_agent.core.traits import TraitName
     from llm_agent.core.traits.builtin.directive import DirectiveTrait, MethodTrait
@@ -160,7 +160,7 @@ class Factory:
         return DirectiveTrait(agent, directive)
 
     def create_learn_trait(
-        self, agent: Agent, identity: Any, learn_config: dict[str, Any] | None
+        self, agent: Agent, identity: Identity | None, learn_config: dict[str, Any] | None
     ) -> LearnTrait:
         """Create LearnTrait with agent-specific identity.
 

@@ -16,7 +16,7 @@ from appinfra.app.tools import Tool, ToolConfig
 if TYPE_CHECKING:
     from multiprocessing.queues import Queue
 
-    from llm_agent.core.traits.builtin.learn import LearnConfig, LearnTrait
+    from llm_agent.core.traits.builtin.learn import LearnConfig
     from llm_agent.runtime import AgentInfo, AgentRegistry, Core
     from llm_agent.runtime.server import AgentServerConfig
     from llm_agent.runtime.server.protocol.base import Request, Response
@@ -72,7 +72,7 @@ class ServeTool(Tool):
         self._register_agents(registry, core, config)
 
         self._log_startup(config)
-        self._run_server(config, core, None)
+        self._run_server(config, core)
         return 0
 
     def _create_learn_config(self, config: AgentServerConfig) -> LearnConfig | None:
@@ -94,13 +94,6 @@ class ServeTool(Tool):
             embedder_timeout=config.learn.embedder_timeout,
             # Note: profile_config and agent_name are set per-agent in factory
         )
-
-    def _create_learn_trait(self, learn_config: LearnConfig | None) -> None:
-        """Deprecated - traits now require agents, removed in refactor.
-
-        LearnConfig is passed directly to agent factories instead.
-        """
-        return None
 
     def _create_registry(self) -> AgentRegistry:
         """Create agent registry."""
@@ -140,20 +133,15 @@ class ServeTool(Tool):
         self,
         config: AgentServerConfig,
         core: Core,
-        learn_trait: LearnTrait | None,
     ) -> None:
-        """Run the server with signal handling.
-
-        Note: learn_trait is a template for per-agent traits and doesn't
-        need on_start() called - each agent runtime starts its own trait.
-        """
+        """Run the server with signal handling."""
 
         request_q: Queue[Any] = mp.Queue()
         response_q: Queue[Any] = mp.Queue()
         shutdown_state = {"requested": False}
 
         def do_shutdown() -> None:
-            self._do_shutdown(shutdown_state, core, learn_trait)
+            self._do_shutdown(shutdown_state, core)
 
         self._install_signal_handlers(do_shutdown)
         server = self._build_server(config, request_q, response_q)
@@ -173,13 +161,8 @@ class ServeTool(Tool):
         self,
         state: dict[str, bool],
         core: Core,
-        learn_trait: LearnTrait | None,
     ) -> None:
-        """Execute shutdown sequence (idempotent).
-
-        Note: learn_trait is a template only - each agent runtime
-        manages its own trait lifecycle.
-        """
+        """Execute shutdown sequence (idempotent)."""
         if state["requested"]:
             return
         state["requested"] = True

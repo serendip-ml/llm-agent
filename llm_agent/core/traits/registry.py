@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 from appinfra.log import Logger
 
-from ..errors import TraitAlreadyRegisteredError, TraitNotFoundError
+from ..errors import DuplicateTraitError, TraitNotFoundError
 from .base import BaseTrait
 
 
@@ -65,11 +65,11 @@ class Registry:
             trait: Trait instance to register.
 
         Raises:
-            TraitAlreadyRegisteredError: If a trait of this type is already registered.
+            DuplicateTraitError: If a trait of this type is already registered.
         """
         trait_type = type(trait)
         if trait_type in self._traits:
-            raise TraitAlreadyRegisteredError(
+            raise DuplicateTraitError(
                 f"Trait {trait_type.__name__} is already registered. "
                 "Use replace() to update an existing trait."
             )
@@ -79,7 +79,7 @@ class Registry:
             name = trait.trait_name
             existing = self._by_name.get(name)
             if existing is not None and type(existing) is not trait_type:
-                raise TraitAlreadyRegisteredError(
+                raise DuplicateTraitError(
                     f"Trait name '{name}' is already registered for {type(existing).__name__}."
                 )
 

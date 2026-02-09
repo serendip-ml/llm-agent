@@ -13,6 +13,7 @@ from llm_agent import (
     ToolResult,
 )
 from llm_agent.core.tools.base import BaseTool
+from llm_agent.core.traits.builtin.tools import ToolsTrait
 
 
 pytestmark = pytest.mark.unit
@@ -138,8 +139,6 @@ class TestToolsTrait:
         return MagicMock()
 
     def test_register_tool(self, mock_agent):
-        from llm_agent.core.traits.builtin.tools import ToolsTrait
-
         trait = ToolsTrait(mock_agent)
         tool = ShellTool()
 
@@ -149,8 +148,6 @@ class TestToolsTrait:
         assert trait.registry.get("shell") is tool
 
     def test_unregister_tool(self, mock_agent):
-        from llm_agent.core.traits.builtin.tools import ToolsTrait
-
         trait = ToolsTrait(mock_agent)
         trait.register(ShellTool())
 
@@ -159,8 +156,6 @@ class TestToolsTrait:
         assert trait.has_tools() is False
 
     def test_trait_lifecycle(self, mock_agent):
-        from llm_agent.core.traits.builtin.tools import ToolsTrait
-
         trait = ToolsTrait(mock_agent)
 
         trait.on_start()
@@ -169,8 +164,6 @@ class TestToolsTrait:
         assert trait.agent is mock_agent
 
     def test_empty_registry(self, mock_agent):
-        from llm_agent.core.traits.builtin.tools import ToolsTrait
-
         trait = ToolsTrait(mock_agent)
 
         assert trait.has_tools() is False

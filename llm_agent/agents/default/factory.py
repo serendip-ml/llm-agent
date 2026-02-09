@@ -78,6 +78,7 @@ class Factory(BaseFactory):
         Returns:
             Configured Agent ready to start.
         """
+        # Absolute import to avoid circular dependency
         from llm_agent.core.agent import _substitute_in_dict
 
         # Apply variable substitutions
@@ -116,6 +117,7 @@ class Factory(BaseFactory):
 
     def _build_system_prompt(self, agent: Agent) -> str | None:
         """Build system prompt from identity and method traits."""
+        # Absolute import to avoid circular dependency
         from llm_agent.core.traits.builtin.directive import DirectiveTrait, MethodTrait
 
         parts: list[str] = []
@@ -224,6 +226,7 @@ class Factory(BaseFactory):
         recall_limit: int,
     ) -> str:
         """Recall past solutions and format as context string."""
+        # Absolute import to avoid circular dependency
         from llm_agent.core.memory import (
             format_solutions_context,
             recall_chronological,

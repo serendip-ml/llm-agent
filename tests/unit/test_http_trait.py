@@ -21,54 +21,10 @@ from llm_agent.runtime.server.protocol.v1 import (
     RememberRequest,
     RememberResponse,
 )
+from tests.helpers import create_mock_trait
 
 
 pytestmark = pytest.mark.unit
-
-
-def create_mock_trait(trait_class, **mock_attrs):
-    """Create a mock trait that works with the registry.
-
-    Creates an object whose type() returns the trait_class, allowing
-    registry lookups to work correctly.
-
-    Args:
-        trait_class: The trait class (e.g., LLMTrait, LearnTrait)
-        **mock_attrs: Attribute/method names and their return values or properties
-
-    Returns:
-        Mock object with correct type for registry.
-    """
-
-    # Create a minimal object
-    class MockHolder:
-        pass
-
-    obj = MockHolder()
-
-    # Add mock methods/attributes to __dict__ BEFORE setting __class__
-    # This avoids triggering property descriptors
-    for attr_name, config in mock_attrs.items():
-        if isinstance(config, MagicMock):
-            # Already a mock, use it directly
-            mock_attr = config
-        elif isinstance(config, dict):
-            # Dict config for MagicMock
-            mock_attr = MagicMock(**config)
-        else:
-            # For simple scalar values, store them directly (not as MagicMock)
-            # This is important for properties like has_embedder that return bool
-            if isinstance(config, (bool, int, str)):
-                mock_attr = config
-            else:
-                # For lists and other objects, create a MagicMock that returns them
-                mock_attr = MagicMock(return_value=config)
-        obj.__dict__[attr_name] = mock_attr
-
-    # Set __class__ AFTER populating __dict__
-    obj.__class__ = trait_class
-
-    return obj
 
 
 class TestHTTPConfig:
@@ -187,11 +143,6 @@ class TestHTTPTrait:
         trait = HTTPTrait(mock_agent)
 
         assert not trait.is_running
-
-    def test_on_start_without_attach_raises(self, mock_agent):
-        """Test removed - HTTPTrait now requires agent in constructor."""
-        # No longer applicable - agent is required in __init__
-        pass
 
 
 class TestProtocolMessages:
@@ -508,6 +459,7 @@ class TestHTTPTraitLifecycle:
     def mock_agent(self):
         agent = MagicMock()
         agent.name = "test-agent"
+        agent.lg = MagicMock()
         return agent
 
     @patch("llm_agent.runtime.server.http.mp.Queue")

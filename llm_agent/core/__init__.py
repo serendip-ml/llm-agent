@@ -25,7 +25,6 @@ from .errors import (
     AgentError,
     ConfigError,
     DuplicateTraitError,
-    TraitAlreadyRegisteredError,
     TraitError,
     TraitNotFoundError,
 )
@@ -49,7 +48,6 @@ __all__ = [
     "DuplicateTraitError",
     "TraitError",
     "TraitNotFoundError",
-    "TraitAlreadyRegisteredError",
     # Platform
     "PlatformContext",
     # Factories

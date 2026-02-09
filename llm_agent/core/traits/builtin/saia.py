@@ -67,7 +67,7 @@ class SAIATrait(BaseTrait):
         # Use SAIA verbs
         saia_trait = agent.require_trait(SAIATrait)
         result = await saia_trait.saia.complete("Analyze this code...")
-        verified = await agent.saia.verify(output, "is valid JSON")
+        verified = await saia_trait.saia.verify(output, "is valid JSON")
     """
 
     def __init__(self, agent: Agent, backend: Backend, config: SAIAConfig | None = None) -> None:

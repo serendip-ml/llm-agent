@@ -214,6 +214,25 @@ class Factory:
             identity=agent.identity,  # type: ignore[attr-defined]  # For LearnTrait
         )
 
+    def _build_trait_class_map(self) -> dict[TraitName, type]:
+        """Build mapping from trait names to trait classes for validation."""
+        from ..traits.builtin.directive import DirectiveTrait, MethodTrait
+        from ..traits.builtin.http import HTTPTrait
+        from ..traits.builtin.learn import LearnTrait
+        from ..traits.builtin.llm import LLMTrait
+        from ..traits.builtin.saia import SAIATrait
+        from ..traits.builtin.tools import ToolsTrait
+
+        return {
+            TraitName.DIRECTIVE: DirectiveTrait,
+            TraitName.LLM: LLMTrait,
+            TraitName.LEARN: LearnTrait,
+            TraitName.METHOD: MethodTrait,
+            TraitName.HTTP: HTTPTrait,
+            TraitName.SAIA: SAIATrait,
+            TraitName.TOOLS: ToolsTrait,
+        }
+
     def _validate_trait_requirements(
         self, agent: Agent, config: dict[str, Any], required: list[TraitName]
     ) -> None:
@@ -230,17 +249,7 @@ class Factory:
         if not required:
             return
 
-        # Map trait names to classes for validation
-        from ..traits.builtin.directive import DirectiveTrait, MethodTrait
-        from ..traits.builtin.learn import LearnTrait
-        from ..traits.builtin.llm import LLMTrait
-
-        trait_class_map = {
-            TraitName.DIRECTIVE: DirectiveTrait,
-            TraitName.LLM: LLMTrait,
-            TraitName.LEARN: LearnTrait,
-            TraitName.METHOD: MethodTrait,
-        }
+        trait_class_map = self._build_trait_class_map()
 
         # Validate each required trait is attached
         missing: list[str] = []

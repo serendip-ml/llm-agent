@@ -111,7 +111,7 @@ class HTTPTrait(BaseTrait):
     def on_start(self) -> None:
         """Start HTTP server and IPC thread."""
         if self._server is None:
-            raise RuntimeError("HTTPTrait not attached - call attach() first")
+            raise RuntimeError("HTTPServer not initialized")
 
         self._server.start()
         self._start_ipc_thread()
@@ -147,7 +147,6 @@ class HTTPTrait(BaseTrait):
 
     def _start_ipc_thread(self) -> None:
         """Start background thread for IPC processing."""
-        assert self.agent is not None
         self._ipc_shutdown.clear()
         self._ipc_thread = threading.Thread(
             target=self._ipc_loop,
@@ -238,14 +237,12 @@ class HTTPTrait(BaseTrait):
         """Handle health check request."""
         from llm_agent.runtime.server.protocol.v1 import HealthResponse
 
-        assert self.agent is not None
         return HealthResponse(id=request.id, status="ok", agent_name=self.agent.name)
 
     def _handle_complete(self, request: Request) -> Response:
         """Handle completion request."""
         from llm_agent.runtime.server.protocol.v1 import CompleteRequest, CompleteResponse
 
-        assert self.agent is not None
         complete_fn: Callable[..., Any] | None = getattr(self.agent, "complete", None)
         if complete_fn is None:
             return self._complete_error(request.id, "Agent does not support complete()")
@@ -286,7 +283,6 @@ class HTTPTrait(BaseTrait):
         """Handle remember request."""
         from llm_agent.runtime.server.protocol.v1 import RememberRequest, RememberResponse
 
-        assert self.agent is not None
         remember_fn: Callable[..., int] | None = getattr(self.agent, "remember", None)
         if remember_fn is None:
             return RememberResponse(
@@ -309,7 +305,6 @@ class HTTPTrait(BaseTrait):
         """Handle forget request."""
         from llm_agent.runtime.server.protocol.v1 import ForgetRequest, ForgetResponse
 
-        assert self.agent is not None
         forget_fn: Callable[..., None] | None = getattr(self.agent, "forget", None)
         if forget_fn is None:
             return ForgetResponse(
@@ -330,7 +325,6 @@ class HTTPTrait(BaseTrait):
         """Handle recall request."""
         from llm_agent.runtime.server.protocol.v1 import RecallRequest, RecallResponse
 
-        assert self.agent is not None
         recall_fn: Callable[..., Any] | None = getattr(self.agent, "recall", None)
         if recall_fn is None:
             return RecallResponse(
@@ -368,7 +362,6 @@ class HTTPTrait(BaseTrait):
         """Handle feedback request."""
         from llm_agent.runtime.server.protocol.v1 import FeedbackRequest, FeedbackResponse
 
-        assert self.agent is not None
         feedback_fn: Callable[..., None] | None = getattr(self.agent, "feedback", None)
         if feedback_fn is None:
             return FeedbackResponse(
