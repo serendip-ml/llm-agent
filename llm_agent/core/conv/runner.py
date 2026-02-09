@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 
-from llm_agent.core.conversation import Compactor, Conversation
+from llm_agent.core.conv import Compactor, Conversation
 from llm_agent.core.llm.types import Message
 from llm_agent.core.task import Task, TaskResult
 

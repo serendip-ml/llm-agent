@@ -20,7 +20,7 @@ from llm_agent.core.traits.base import Trait
 
 if TYPE_CHECKING:
     from llm_agent.core.agent import Agent
-    from llm_agent.core.tools.registry import ToolRegistry
+    from llm_agent.core.tools.registry import Registry
 
 
 @dataclass
@@ -157,7 +157,7 @@ def _tool_to_tooldef(tool: Any) -> ToolDef:
     )
 
 
-def _create_executor(registry: ToolRegistry, lg: Logger) -> Any:
+def _create_executor(registry: Registry, lg: Logger) -> Any:
     """Create async tool executor for SAIA.
 
     Runs sync tool.execute() in a thread pool to avoid blocking the event loop.

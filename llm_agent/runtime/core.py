@@ -312,6 +312,9 @@ class Core:
         # Convert LearnConfig to dict for pickling (handles DotDict from appinfra)
         learn_config_dict = self._learn_config.to_dict() if self._learn_config else None
 
+        # Determine factory module (per-agent for programmatic, default for prompt)
+        factory_module = handle.config.get("module", self._factory_module)
+
         handle.process = mp.Process(
             target=_subprocess_entry,
             args=(
@@ -322,7 +325,7 @@ class Core:
                 learn_config_dict,
                 self._variables,
                 self._log_config,
-                self._factory_module,
+                factory_module,  # Per-agent module for programmatic agents
             ),
             name=f"agent-{handle.name}",
             daemon=True,
@@ -388,9 +391,18 @@ def _subprocess_entry(
 
     try:
         lg = Logger.from_queue_config(log_config, name=f"agent/{name}")
-        learn_trait = _create_learn_trait(lg, learn_config_dict)
-        factory = _load_agent_factory(lg, factory_module, llm_config, learn_trait)
 
+        # Create platform context for this agent subprocess
+        from llm_agent.core.platform import PlatformContext
+
+        platform = PlatformContext.from_config(
+            lg=lg,
+            llm_config=llm_config,
+            learn_config=learn_config_dict,
+        )
+
+        # Load and create agent using new factory architecture
+        factory = _load_agent_factory(factory_module, platform)
         agent = factory.create(config, variables=variables)
         agent.start()
 
@@ -404,26 +416,24 @@ def _subprocess_entry(
         channel.send(Message(type=MessageType.ERROR, payload={"error": str(e)}))
 
 
-def _create_learn_trait(lg: Any, learn_config_dict: dict[str, Any] | None) -> Any:
-    """Create LearnTrait from config dict if provided."""
-    if learn_config_dict is None:
-        return None
+def _load_agent_factory(factory_module: str, platform: Any) -> Any:
+    """Load agent factory from module with descriptive error handling.
 
-    from llm_agent.core.traits.learn import LearnConfig, LearnTrait
+    Args:
+        factory_module: Module path containing Factory class.
+        platform: PlatformContext instance.
 
-    learn_config = LearnConfig(**learn_config_dict)
-    return LearnTrait(_lg=lg, config=learn_config)
+    Returns:
+        Factory instance.
 
-
-def _load_agent_factory(
-    lg: Any, factory_module: str, llm_config: dict[str, Any], learn_trait: Any
-) -> Any:
-    """Load agent factory from module with descriptive error handling."""
+    Raises:
+        RuntimeError: If factory cannot be loaded.
+    """
     import importlib
 
     try:
         module = importlib.import_module(factory_module)
-        return module.Factory(lg=lg, llm_config=llm_config, learn_trait=learn_trait)
+        return module.Factory(platform=platform)
     except (ImportError, AttributeError) as e:
         raise RuntimeError(f"Failed to load agent factory from {factory_module}: {e}") from e
 

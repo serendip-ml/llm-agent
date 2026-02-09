@@ -18,7 +18,7 @@ from llm_agent.core.tools.base import ToolCall, ToolCallResult, ToolResult
 if TYPE_CHECKING:
     from appinfra.log import Logger
 
-    from llm_agent.core.tools.registry import ToolRegistry
+    from llm_agent.core.tools.registry import Registry
 
 
 class ToolExecutionResult(BaseModel):
@@ -62,7 +62,7 @@ class SimpleToolExecutor:
                 break
     """
 
-    def __init__(self, lg: Logger, registry: ToolRegistry) -> None:
+    def __init__(self, lg: Logger, registry: Registry) -> None:
         """Initialize executor.
 
         Args:

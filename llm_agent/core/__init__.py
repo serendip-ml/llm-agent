@@ -5,6 +5,7 @@ This package contains the core abstractions for building agents:
 - agent: Base Agent class with trait composition
 - config: Agent configuration
 - conversation: Conversation management utilities
+- errors: Core exceptions
 - factory: Factory classes for creating traits and tools
 - task: Task definitions and results
 - traits: Composable agent behaviors (SAIA, LLM, HTTP, Learn, etc.)
@@ -13,17 +14,25 @@ This package contains the core abstractions for building agents:
 """
 
 from llm_agent.core.agent import Agent, Config, ExecutionResult
-from llm_agent.core.conversation import (
+from llm_agent.core.conv import (
     Compactor,
     Conversation,
     ConversationConfig,
     SlidingWindowCompactor,
     SummarizingCompactor,
 )
+from llm_agent.core.errors import (
+    AgentError,
+    ConfigError,
+    TraitAlreadyRegisteredError,
+    TraitError,
+    TraitNotFoundError,
+)
+from llm_agent.core.platform import PlatformContext
 from llm_agent.core.runnable import Runnable
 from llm_agent.core.task import Task, TaskResult
 from llm_agent.core.tools.factory import ToolFactory
-from llm_agent.core.traits.factory import TraitFactory
+from llm_agent.core.traits.factory import Factory as TraitFactory
 
 
 __all__ = [
@@ -33,6 +42,14 @@ __all__ = [
     # Agents
     "Agent",
     "Config",
+    # Errors
+    "AgentError",
+    "ConfigError",
+    "TraitError",
+    "TraitNotFoundError",
+    "TraitAlreadyRegisteredError",
+    # Platform
+    "PlatformContext",
     # Factories
     "ToolFactory",
     "TraitFactory",

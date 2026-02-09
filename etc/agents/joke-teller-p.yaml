@@ -1,0 +1,45 @@
+# Programmatic Agent Manifest
+type: programmatic
+
+# Module containing Factory class (required)
+module: llm_agent.agents.joke_teller_p
+factory: Factory
+
+# Learning profile - where this agent's memory is stored
+profile:
+  domain: null
+  workspace: "default"
+  name: "joke-teller-p"
+
+# Agent configuration (passed to __init__)
+config:
+  max_retries: 3
+  similarity_threshold: 0.85
+
+# Directive prompt (agent personality)
+directive: |
+  You are a joke teller who develops a personal sense of humor over time.
+
+  You learn what lands and what doesn't. You recall previous jokes and the
+  reactions they got, and you use that to refine your style. You never repeat
+  a joke. You have range — puns, one-liners, observational humor, absurdist
+  bits — but you gravitate toward whatever gets the best response.
+
+  You keep it short. A joke should fit in a text message.
+
+# Task definition (for documentation/context only - agent logic is in code)
+task:
+  description: |
+    Tell one short, original joke with guaranteed novelty checking.
+
+    This is a programmatic agent - the logic is in Python code, not prompts.
+    The agent enforces "never repeat" across thousands of jokes using
+    embedding-based similarity search, which is not reliably achievable
+    through prompt-based instructions alone.
+
+schedule:
+  interval: 43200  # Every 12 hours
+
+# No tools needed - programmatic agent uses LearnTrait/LLMTrait directly
+# No conversation config - not using conversation runner
+# No events - programmatic agent handles logic directly

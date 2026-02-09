@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from llm_agent.core.tools.base import Tool
-from llm_agent.core.tools.registry import ToolRegistry
+from llm_agent.core.tools.registry import Registry
 
 
 if TYPE_CHECKING:
@@ -36,7 +36,7 @@ class ToolsTrait:
     """
 
     _agent: Agent | None = field(default=None, repr=False, compare=False)
-    _registry: ToolRegistry = field(default_factory=ToolRegistry)
+    _registry: Registry = field(default_factory=Registry)
 
     def attach(self, agent: Agent) -> None:
         """Attach trait to agent.
@@ -77,7 +77,7 @@ class ToolsTrait:
         self._registry.unregister(name)
 
     @property
-    def registry(self) -> ToolRegistry:
+    def registry(self) -> Registry:
         """Access the tool registry."""
         return self._registry
 

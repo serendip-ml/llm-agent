@@ -1,6 +1,6 @@
-"""Identity and method traits for agents.
+"""Directive and method traits for agents.
 
-Identity: "Who I am" - the agent's core identity and purpose.
+Directive: "Why I exist" - the agent's core purpose and instructions.
 Method: "How I operate" - the agent's operational approach, which can evolve.
 """
 
@@ -13,30 +13,30 @@ from pydantic import BaseModel, Field
 from llm_agent.core.traits.base import BaseTrait
 
 
-class Identity(BaseModel):
-    """Agent's identity - who it is and what it's trying to be good at.
+class Directive(BaseModel):
+    """Agent's directive - why it exists and what it's trying to accomplish.
 
-    An identity defines the agent's core purpose and persona, injected into
+    A directive defines the agent's core purpose and instructions, injected into
     every prompt. The prompt is the source of truth for agent behavior.
 
     Future: structured constraints and success signals will be added
     for enforcement and measurement. Design TBD based on concrete use cases.
 
     Example YAML config:
-        identity: |
+        directive: |
             You are a code reviewer. Your goal is to catch all issues in one pass.
 
             Be critical and evidence-based. Verify before flagging.
             No false positives. No nitpicks that waste developer time.
 
     Or with the full object syntax:
-        identity:
+        directive:
           prompt: |
             You are a code reviewer...
     """
 
     prompt: str
-    """The identity prompt - injected into system prompt."""
+    """The directive prompt - injected into system prompt."""
 
     # Placeholder for future structured behavior (constraints, signals, etc.)
     # Design TBD based on concrete use cases like code review agent.
@@ -44,50 +44,50 @@ class Identity(BaseModel):
     """Reserved for future structured constraints/signals."""
 
 
-class IdentityTrait(BaseTrait):
-    """Trait for agents that have an identity.
+class DirectiveTrait(BaseTrait):
+    """Trait for agents that have a directive.
 
-    Holds the agent's identity and injects it into prompts.
-    Identity is immutable - it defines who the agent is.
+    Holds the agent's directive and injects it into prompts.
+    Directive is immutable - it defines why the agent exists.
 
     Usage:
-        identity = Identity(
+        directive = Directive(
             prompt="You are a code reviewer. Be critical and evidence-based."
         )
-        trait = IdentityTrait(identity)
+        trait = DirectiveTrait(directive)
         agent.add_trait(trait)
 
     Or with a simple string:
-        trait = IdentityTrait("You are a code reviewer.")
+        trait = DirectiveTrait("You are a code reviewer.")
         agent.add_trait(trait)
     """
 
-    def __init__(self, identity: Identity | str) -> None:
-        """Initialize identity trait.
+    def __init__(self, directive: Directive | str) -> None:
+        """Initialize directive trait.
 
         Args:
-            identity: The agent's identity (Identity object or prompt string).
+            directive: The agent's directive (Directive object or prompt string).
         """
         super().__init__()
-        if isinstance(identity, str):
-            identity = Identity(prompt=identity)
-        self._identity = identity
+        if isinstance(directive, str):
+            directive = Directive(prompt=directive)
+        self._directive = directive
 
     @property
-    def identity(self) -> Identity:
-        """The agent's identity."""
-        return self._identity
+    def directive(self) -> Directive:
+        """The agent's directive."""
+        return self._directive
 
     def build_prompt(self, base_prompt: str) -> str:
-        """Build system prompt with identity injected.
+        """Build system prompt with directive injected.
 
         Args:
             base_prompt: The base system prompt.
 
         Returns:
-            System prompt with identity prepended.
+            System prompt with directive prepended.
         """
-        return f"{self._identity.prompt}\n\n{base_prompt}"
+        return f"{self._directive.prompt}\n\n{base_prompt}"
 
 
 class MethodTrait(BaseTrait):
