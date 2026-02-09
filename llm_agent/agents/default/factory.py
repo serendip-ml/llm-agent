@@ -100,6 +100,9 @@ class Factory(BaseFactory):
         self._add_saia_trait(agent, config)  # type: ignore[arg-type]
         self._configure_event_handlers(agent, config)  # type: ignore[arg-type]
 
+        # Add HTTP trait if configured (handled separately from base factory)
+        self._add_http_trait(agent, config)  # type: ignore[arg-type]
+
         return agent  # type: ignore[return-value]
 
     def _add_saia_trait(self, agent: Agent, config: dict[str, Any]) -> None:
@@ -114,6 +117,31 @@ class Factory(BaseFactory):
             system_prompt=system_prompt,
         )
         agent.add_trait(SAIATrait(agent, self._get_backend(), saia_config))
+
+    def _add_http_trait(self, agent: Agent, config: dict[str, Any]) -> None:
+        """Add HTTPTrait with HTTPHandler if HTTP is configured.
+
+        Args:
+            agent: Agent instance to add HTTP trait to.
+            config: Configuration dictionary (may contain 'http' section).
+        """
+        http_config_dict = config.get("http")
+        if not http_config_dict:
+            return
+
+        from llm_agent.core.traits.builtin.http import HTTPConfig, HTTPTrait
+
+        from .http import HTTPHandler
+
+        # Create HTTPHandler to handle protocol methods
+        handler = HTTPHandler(agent)
+
+        # Parse HTTP config (dict with host, port, title, description)
+        http_config = HTTPConfig(**http_config_dict)
+
+        # Create and attach HTTPTrait with handler
+        agent.add_trait(HTTPTrait(agent, config=http_config, handler=handler))
+        self._lg.debug("http trait added", extra={"agent": agent.name})
 
     def _build_system_prompt(self, agent: Agent) -> str | None:
         """Build system prompt from identity and method traits."""
@@ -138,24 +166,26 @@ class Factory(BaseFactory):
     def _configure_event_handlers(self, agent: Agent, config: dict[str, Any]) -> None:
         """Configure event handlers from YAML config.
 
-        If events are specified in config, create custom handlers that override
-        the default handlers. This allows declarative configuration of memory
-        strategies and prompt composition per event.
+        Registers default handlers (chronological for schedule, semantic for question).
+        If events are specified in config, use those settings instead.
 
         Args:
             agent: The agent to configure handlers for.
             config: Agent configuration dict (may contain 'events' section).
         """
         events_config = config.get("events", {})
-        if not events_config:
-            # No custom event config - agent will use default handlers
-            return
 
-        # For each configured event, create a custom handler
-        for event_name, event_config in events_config.items():
+        # Default event configurations
+        defaults = {
+            "schedule": {"recall_strategy": "chronological", "recall_limit": 5},
+            "question": {"recall_strategy": "semantic", "recall_limit": 5},
+        }
+
+        # Merge defaults with user config (user overrides defaults)
+        for event_name, default_config in defaults.items():
+            user_config = events_config.get(event_name, {})
+            event_config = {**default_config, **user_config}
             handler = self._create_event_handler(agent, event_name, event_config)
-            # Register handler - this will override default handlers after agent.start()
-            # We need to register after traits are added but before start() is called
             agent._dispatcher.on(event_name, handler)
 
     def _create_event_handler(
@@ -174,73 +204,13 @@ class Factory(BaseFactory):
         recall_strategy = event_config.get("recall_strategy", "chronological")
         recall_limit = event_config.get("recall_limit", 5)
 
-        async def handler(**kwargs: Any) -> dict[str, Any]:
+        async def handler(**kwargs: Any) -> Any:
             """Custom event handler from YAML config."""
-            return await self._execute_event_handler(
-                agent_name=kwargs.get("agent_name", agent.name),
-                saia_trait=kwargs.get("saia_trait"),
-                learn_trait=kwargs.get("learn_trait"),
-                task=kwargs.get("task") or kwargs.get("question", ""),
+            task = kwargs.get("task") or kwargs.get("question", "")
+            return await agent.handle_task(
+                task=task,
                 recall_strategy=recall_strategy,
                 recall_limit=recall_limit,
             )
 
         return handler
-
-    async def _execute_event_handler(
-        self,
-        agent_name: str,
-        saia_trait: Any,
-        learn_trait: Any | None,
-        task: str,
-        recall_strategy: str,
-        recall_limit: int,
-    ) -> dict[str, Any]:
-        """Execute event handler with configured memory strategy."""
-        if saia_trait is None:
-            return {
-                "success": False,
-                "content": "SAIATrait not attached",
-                "iterations": 0,
-                "tokens_used": 0,
-            }
-
-        context = self._recall_context(learn_trait, task, agent_name, recall_strategy, recall_limit)
-        prompt = saia_trait.saia.compose(context, task)
-        saia_result = await saia_trait.saia.complete(prompt)
-
-        return {
-            "success": saia_result.completed,
-            "content": saia_result.output,
-            "iterations": saia_result.iterations,
-            "tokens_used": saia_result.score.total_tokens if saia_result.score else 0,
-            "trace_id": saia_result.trace_id,
-        }
-
-    def _recall_context(
-        self,
-        learn_trait: Any | None,
-        task: str,
-        agent_name: str,
-        recall_strategy: str,
-        recall_limit: int,
-    ) -> str:
-        """Recall past solutions and format as context string."""
-        # Absolute import to avoid circular dependency
-        from llm_agent.core.memory import (
-            format_solutions_context,
-            recall_chronological,
-            recall_semantic,
-        )
-
-        if learn_trait is None:
-            return ""
-
-        if recall_strategy == "semantic":
-            past = recall_semantic(
-                learn_trait, query=task, limit=recall_limit, agent_name=agent_name
-            )
-        else:  # chronological
-            past = recall_chronological(learn_trait, agent_name, limit=recall_limit)
-
-        return format_solutions_context(past)

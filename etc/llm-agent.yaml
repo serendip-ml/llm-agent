@@ -15,7 +15,7 @@ llm: !include './llm.yaml'
 # Each agent specifies its own profile in agent YAML
 learn:
   db: !include './infra.yaml#dbs.main'
-  # embedder_url: http://localhost:8001/v1  # Enable for RAG/semantic search
+  # embedder_url: http://localhost:8001/v1  # Optional: Enable for RAG/semantic search (set via EMBEDDER_URL env)
 
 # Agent definitions
 agents:

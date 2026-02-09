@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
-from llm_saia import SAIA, Backend, ToolDef
+from llm_saia import SAIA, Backend, TaskResult, ToolDef
 
+from ...runnable import ExecutionResult
 from ..base import BaseTrait
 
 
@@ -129,6 +130,23 @@ class SAIATrait(BaseTrait):
         if self._saia is None:
             raise RuntimeError("SAIATrait not started - ensure agent.start() was called")
         return self._saia
+
+    def to_execution_result(self, saia_result: TaskResult) -> ExecutionResult:
+        """Convert SAIA TaskResult to ExecutionResult.
+
+        Args:
+            saia_result: Result from SAIA execution.
+
+        Returns:
+            ExecutionResult with converted fields.
+        """
+        return ExecutionResult(
+            success=saia_result.completed,
+            content=saia_result.output,
+            iterations=saia_result.iterations,
+            tokens_used=saia_result.score.total_tokens if saia_result.score else 0,
+            trace_id=saia_result.trace_id,
+        )
 
     def _get_tools_and_executor(self) -> tuple[list[ToolDef], Any]:
         """Get tools and executor from ToolsTrait if available."""

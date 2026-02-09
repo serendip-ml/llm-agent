@@ -201,11 +201,21 @@ class TestAgentExecution:
     def agent_with_saia(self, mock_logger, mock_saia_trait):
         """Create agent with SAIATrait attached."""
         from llm_agent.agents.default import Agent as DefaultAgent
+        from llm_agent.agents.default.factory import Factory
+        from llm_agent.core.platform import PlatformContext
 
         agent = DefaultAgent(
             lg=mock_logger, identity=Identity.from_name("test"), default_prompt="Test task"
         )
         agent._traits.register(mock_saia_trait)
+
+        # Register event handlers using factory's method (handlers now live in factory)
+        # Create a minimal mock platform just for the logger
+        mock_platform = MagicMock(spec=PlatformContext)
+        mock_platform.logger = mock_logger
+        factory = Factory(mock_platform)
+        factory._configure_event_handlers(agent, {})  # Empty config = use defaults
+
         return agent
 
     def test_run_once_without_saia_trait_fails(self, mock_logger):
