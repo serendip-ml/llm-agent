@@ -28,22 +28,21 @@ class Registry:
     Provides type-safe access and trait discovery.
 
     Example:
-        # Platform creates registry with configured traits
-        registry = Registry(lg)
-        registry.register(LLMTrait(agent, llm_config))
-        registry.register(LearnTrait(agent, learn_config))
+        # Agent uses registry internally to manage its traits
+        agent = MyAgent(lg, config)
 
-        # Factory accesses traits by type
-        llm_trait = registry.get(LLMTrait)
-        if registry.has(LearnTrait):
-            learn_trait = registry.get(LearnTrait)
+        # Traits are registered via agent.add_trait()
+        agent.add_trait(LLMTrait(agent, llm_config))
+        agent.add_trait(LearnTrait(agent, learn_config))
 
-        # Or by name (if trait declares trait_name)
-        llm_trait = registry.get_by_name(TraitName.LLM)
+        # Access traits by type through agent
+        llm_trait = agent.get_trait(LLMTrait)
+        if llm_trait:
+            # Use the trait
+            pass
 
-        # Attach all available traits to agent
-        for trait in registry.all():
-            agent.add_trait(trait)
+        # Or require it (raises if missing)
+        learn_trait = agent.require_trait(LearnTrait)
     """
 
     def __init__(self, lg: Logger) -> None:

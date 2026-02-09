@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from llm_agent.core.agent import Agent, Identity
     from llm_agent.core.platform import PlatformContext
     from llm_agent.core.traits import TraitName
-    from llm_agent.core.traits.builtin.directive import DirectiveTrait, MethodTrait
+    from llm_agent.core.traits.builtin.directive import Directive, DirectiveTrait, MethodTrait
     from llm_agent.core.traits.builtin.learn import LearnTrait
     from llm_agent.core.traits.builtin.llm import LLMConfig, LLMTrait
 
@@ -26,10 +26,10 @@ class Factory:
         trait_factory = Factory(lg, platform)
 
         # Generic creation
-        trait = trait_factory.create("llm", agent_config={}, identity=agent.identity)
+        trait = trait_factory.create("llm", agent, agent_config={}, identity=agent.identity)
 
         # Or direct
-        llm_trait = trait_factory.create_llm_trait(platform.llm_config())
+        llm_trait = trait_factory.create_llm_trait(agent, platform.llm_config())
     """
 
     def __init__(self, platform: PlatformContext) -> None:
@@ -115,9 +115,8 @@ class Factory:
         Raises:
             ConfigError: If llm_config is None or invalid.
         """
-        from llm_agent.core.traits.builtin.llm import LLMTrait
-
         from ..errors import ConfigError
+        from .builtin.llm import LLMTrait
 
         if not llm_config:
             raise ConfigError("LLM configuration required but not provided")
@@ -125,7 +124,7 @@ class Factory:
         return LLMTrait(agent, llm_config)
 
     def create_directive_trait(
-        self, agent: Agent, config: str | dict[str, Any] | None
+        self, agent: Agent, config: str | dict[str, Any] | Directive | None
     ) -> DirectiveTrait:
         """Create DirectiveTrait from string or dict config.
 
@@ -139,9 +138,8 @@ class Factory:
         Raises:
             ConfigError: If config is None or invalid.
         """
-        from llm_agent.core.traits.builtin.directive import Directive, DirectiveTrait
-
         from ..errors import ConfigError
+        from .builtin.directive import Directive, DirectiveTrait
 
         if not config:
             raise ConfigError("Directive configuration required but not provided")
@@ -175,9 +173,8 @@ class Factory:
         Raises:
             ConfigError: If learn_config is None or missing required fields.
         """
-        from llm_agent.core.traits.builtin.learn import LearnConfig, LearnTrait
-
         from ..errors import ConfigError
+        from .builtin.learn import LearnConfig, LearnTrait
 
         if not learn_config:
             raise ConfigError("Learning configuration required but not provided")
@@ -208,9 +205,8 @@ class Factory:
         Raises:
             ConfigError: If method is None or empty.
         """
-        from llm_agent.core.traits.builtin.directive import MethodTrait
-
         from ..errors import ConfigError
+        from .builtin.directive import MethodTrait
 
         if not method:
             raise ConfigError("Method configuration required but not provided")

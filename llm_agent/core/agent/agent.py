@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 from appinfra import DotDict
 from appinfra.log import Logger
 
+from ..errors import TraitNotFoundError
 from ..runnable import Runnable
 from ..traits.base import BaseTrait
 from ..traits.registry import Registry as TraitRegistry
@@ -94,6 +95,11 @@ class Agent(Runnable):
         - traits.all() - get all trait instances
         - traits.count() - count attached traits
         - traits.types() - get all trait types
+
+        Note:
+            While the registry exposes mutation methods (register, replace, clear),
+            prefer using agent.add_trait() to add traits. This ensures proper
+            lifecycle management if the agent is already started.
 
         Returns:
             The agent's trait registry.
@@ -192,8 +198,6 @@ class Agent(Runnable):
         Raises:
             TraitNotFoundError: If the trait is not attached.
         """
-        from ..errors import TraitNotFoundError
-
         try:
             return self._traits.require(trait_type)
         except TraitNotFoundError as e:
@@ -209,9 +213,10 @@ class Agent(Runnable):
 
     def _start_traits(self) -> None:
         """Start all attached traits. Call from start()."""
-        self._started = True
         for trait in self._traits.all():
             trait.on_start()
+        # Only mark as started after all traits successfully initialize
+        self._started = True
 
     def _stop_traits(self) -> None:
         """Stop all attached traits. Call from stop()."""

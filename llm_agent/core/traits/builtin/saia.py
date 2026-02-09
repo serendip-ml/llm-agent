@@ -132,7 +132,7 @@ class SAIATrait(BaseTrait):
 
     def _get_tools_and_executor(self) -> tuple[list[ToolDef], Any]:
         """Get tools and executor from ToolsTrait if available."""
-        from llm_agent.core.traits.builtin.tools import ToolsTrait
+        from .tools import ToolsTrait
 
         tools_trait = self.agent.get_trait(ToolsTrait)
         if tools_trait is None or not tools_trait.has_tools():

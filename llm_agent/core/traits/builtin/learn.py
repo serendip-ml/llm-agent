@@ -340,7 +340,7 @@ class LearnTrait(BaseTrait):
             content=response.content,
             model=response.model or self._llm_defaults.get("model", "unknown"),
             tokens_used=tokens_used,
-            latency_ms=0,  # Latency tracking not implemented for recall operations
+            latency_ms=0,  # Latency tracking not implemented for completion operations
             tool_calls=None,
         )
 

@@ -290,12 +290,17 @@ class Factory:
             self._platform.tool_factory.set_learn_trait(learn_trait)
 
         try:
-            # Create ToolsTrait and populate with configured tools
-            tools_trait = ToolsTrait(agent)
+            # Get or create ToolsTrait and populate with configured tools
+            tools_trait = agent.get_trait(ToolsTrait)
+            is_new = tools_trait is None
+            if is_new:
+                tools_trait = ToolsTrait(agent)
+
+            assert tools_trait is not None  # Either retrieved or just created
             self._create_and_register_tools(agent, tools_config, tools_trait)
 
-            # Attach ToolsTrait if any tools were created
-            if tools_trait.has_tools():
+            # Attach ToolsTrait if any tools were created (only if newly created)
+            if is_new and tools_trait.has_tools():
                 agent.add_trait(tools_trait)
         finally:
             # Clear learn_trait to avoid leaking state between agents

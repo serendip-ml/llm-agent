@@ -38,7 +38,7 @@ def create_mock_trait(trait_class, **mock_attrs):
         else:
             # For simple scalar values, store them directly (not as MagicMock)
             # This is important for properties like has_embedder that return bool
-            if isinstance(config, (bool, int, str)):
+            if isinstance(config, (bool, int, float, str)):
                 mock_attr = config
             else:
                 # For lists and other objects, create a MagicMock that returns them
