@@ -262,7 +262,10 @@ class TestHTTPTraitHandleRequest:
     @pytest.fixture
     def http_trait(self, agent):
         """Create HTTPTrait attached to agent."""
-        trait = HTTPTrait(agent)
+        from llm_agent.agents.default.http import HTTPHandler
+
+        handler = HTTPHandler(agent)
+        trait = HTTPTrait(agent, handler=handler)
         return trait
 
     def test_handle_health_request(self, http_trait):
@@ -406,8 +409,11 @@ class TestHTTPTraitHandleRequest:
         agent._traits.register(mock_llm_trait)
         agent._traits.register(mock_learn_trait)
 
-        # Create HTTPTrait with agent
-        http_trait = HTTPTrait(agent)
+        # Create HTTPTrait with handler
+        from llm_agent.agents.default.http import HTTPHandler
+
+        handler = HTTPHandler(agent)
+        http_trait = HTTPTrait(agent, handler=handler)
 
         req = RecallRequest(id="req-1", query="programming")
         resp = http_trait.handle_request(req)
@@ -432,20 +438,23 @@ class TestHTTPTraitHandleRequest:
         assert "Unknown response_id" in resp.error
 
     def test_handle_complete_agent_without_complete(self, mock_logger):
-        """Verify error when agent doesn't support complete()."""
-        # Create agent without complete method
-        mock_agent = MagicMock(spec=["name", "lg"])
-        mock_agent.name = "test-agent"
-        mock_agent.lg = mock_logger
+        """Verify error when agent doesn't support complete() (missing LLMTrait)."""
+        from llm_agent.agents.default import Agent as DefaultAgent
+        from llm_agent.agents.default.http import HTTPHandler
 
-        http_trait = HTTPTrait(mock_agent)
+        # Create agent without LLMTrait
+        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+
+        # Create HTTPTrait with handler (handler will fail when LLMTrait is missing)
+        handler = HTTPHandler(agent)
+        http_trait = HTTPTrait(agent, handler=handler)
 
         req = CompleteRequest(id="req-1", query="Hello")
         resp = http_trait.handle_request(req)
 
         assert isinstance(resp, CompleteResponse)
         assert resp.success is False
-        assert "does not support complete()" in resp.error
+        assert "LLMTrait not attached" in resp.error
 
 
 class TestHTTPTraitLifecycle:

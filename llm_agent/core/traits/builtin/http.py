@@ -68,15 +68,19 @@ class HTTPTrait(BaseTrait):
         - on_stop(): Stops IPC thread and server
     """
 
-    def __init__(self, agent: Agent, config: HTTPConfig | None = None) -> None:
+    def __init__(
+        self, agent: Agent, config: HTTPConfig | None = None, handler: Any | None = None
+    ) -> None:
         """Initialize HTTP trait.
 
         Args:
             agent: The agent this trait belongs to.
             config: HTTP configuration.
+            handler: Optional HTTP protocol handler (must implement complete, remember, etc.).
         """
         super().__init__(agent)
         self.config = config or HTTPConfig()
+        self._handler = handler
 
         from llm_agent.runtime.server.http import HTTPServer, HTTPServerConfig
 
@@ -243,9 +247,8 @@ class HTTPTrait(BaseTrait):
         """Handle completion request."""
         from llm_agent.runtime.server.protocol.v1 import CompleteRequest, CompleteResponse
 
-        complete_fn: Callable[..., Any] | None = getattr(self.agent, "complete", None)
-        if complete_fn is None:
-            return self._complete_error(request.id, "Agent does not support complete()")
+        if self._handler is None:
+            return self._complete_error(request.id, "No HTTP handler configured")
 
         req = (
             request
@@ -253,7 +256,7 @@ class HTTPTrait(BaseTrait):
             else CompleteRequest(**request.model_dump())
         )
         try:
-            result = complete_fn(query=req.query, system_prompt=req.system_prompt)
+            result = self._handler.complete(query=req.query, system_prompt=req.system_prompt)
             return CompleteResponse(
                 id=req.id,
                 response_id=result.id,
@@ -283,10 +286,9 @@ class HTTPTrait(BaseTrait):
         """Handle remember request."""
         from llm_agent.runtime.server.protocol.v1 import RememberRequest, RememberResponse
 
-        remember_fn: Callable[..., int] | None = getattr(self.agent, "remember", None)
-        if remember_fn is None:
+        if self._handler is None:
             return RememberResponse(
-                id=request.id, success=False, error="Agent does not support remember()", fact_id=-1
+                id=request.id, success=False, error="No HTTP handler configured", fact_id=-1
             )
 
         req = (
@@ -295,7 +297,7 @@ class HTTPTrait(BaseTrait):
             else RememberRequest(**request.model_dump())
         )
         try:
-            fact_id = remember_fn(fact=req.fact, category=req.category)
+            fact_id = self._handler.remember(fact=req.fact, category=req.category)
             return RememberResponse(id=req.id, fact_id=fact_id)
         except Exception as e:
             self.agent.lg.warning("remember request failed", extra={"exception": e})
@@ -305,17 +307,14 @@ class HTTPTrait(BaseTrait):
         """Handle forget request."""
         from llm_agent.runtime.server.protocol.v1 import ForgetRequest, ForgetResponse
 
-        forget_fn: Callable[..., None] | None = getattr(self.agent, "forget", None)
-        if forget_fn is None:
-            return ForgetResponse(
-                id=request.id, success=False, error="Agent does not support forget()"
-            )
+        if self._handler is None:
+            return ForgetResponse(id=request.id, success=False, error="No HTTP handler configured")
 
         req = (
             request if isinstance(request, ForgetRequest) else ForgetRequest(**request.model_dump())
         )
         try:
-            forget_fn(fact_id=req.fact_id)
+            self._handler.forget(fact_id=req.fact_id)
             return ForgetResponse(id=req.id)
         except Exception as e:
             self.agent.lg.warning("forget request failed", extra={"exception": e})
@@ -325,17 +324,14 @@ class HTTPTrait(BaseTrait):
         """Handle recall request."""
         from llm_agent.runtime.server.protocol.v1 import RecallRequest, RecallResponse
 
-        recall_fn: Callable[..., Any] | None = getattr(self.agent, "recall", None)
-        if recall_fn is None:
-            return RecallResponse(
-                id=request.id, success=False, error="Agent does not support recall()"
-            )
+        if self._handler is None:
+            return RecallResponse(id=request.id, success=False, error="No HTTP handler configured")
 
         req = (
             request if isinstance(request, RecallRequest) else RecallRequest(**request.model_dump())
         )
         try:
-            scored_facts = recall_fn(
+            scored_facts = self._handler.recall(
                 query=req.query,
                 top_k=req.top_k,
                 min_similarity=req.min_similarity,
@@ -362,10 +358,9 @@ class HTTPTrait(BaseTrait):
         """Handle feedback request."""
         from llm_agent.runtime.server.protocol.v1 import FeedbackRequest, FeedbackResponse
 
-        feedback_fn: Callable[..., None] | None = getattr(self.agent, "feedback", None)
-        if feedback_fn is None:
+        if self._handler is None:
             return FeedbackResponse(
-                id=request.id, success=False, error="Agent does not support feedback()"
+                id=request.id, success=False, error="No HTTP handler configured"
             )
 
         req = (
@@ -374,7 +369,7 @@ class HTTPTrait(BaseTrait):
             else FeedbackRequest(**request.model_dump())
         )
         try:
-            feedback_fn(
+            self._handler.feedback(
                 response_id=req.response_id,
                 signal=req.signal,
                 correction=req.correction,
