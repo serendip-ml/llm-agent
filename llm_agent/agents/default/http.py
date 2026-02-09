@@ -111,7 +111,7 @@ class HTTPHandler:
         self,
         query: str,
         top_k: int = 5,
-        min_similarity: float = 0.0,
+        min_similarity: float = 0.5,
         categories: list[str] | None = None,
     ) -> list[Any]:
         """Recall facts similar to query using LearnTrait.

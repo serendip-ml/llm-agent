@@ -38,8 +38,7 @@ task:
     through prompt-based instructions alone.
 
 schedule:
-  #interval: 43200  # Every 12 hours
-  interval: 60  # Every 1 minute
+  interval: 43200  # Every 12 hours
 
 # No tools needed - programmatic agent uses LearnTrait/LLMTrait directly
 # No conversation config - not using conversation runner

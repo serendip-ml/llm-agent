@@ -17,6 +17,7 @@ from appinfra.log import Logger
 from pydantic import BaseModel
 
 from ...core.agent import Agent, ExecutionResult, Identity
+from ...core.llm.backend import StructuredOutputError
 from ...core.traits.builtin.directive import DirectiveTrait
 from ...core.traits.builtin.learn import LearnTrait
 from ...core.traits.builtin.llm import LLMTrait
@@ -128,13 +129,11 @@ class JokeTellerAgent(Agent):
 
             return self._complete_cycle(learn_trait, joke, attempts)
 
+        except StructuredOutputError as e:
+            self._lg.warning("joke generation failed", extra={"error": str(e)})
+            return ExecutionResult(success=False, content=f"Error: {e}", iterations=1)
         except Exception as e:
-            from ...core.llm.backend import StructuredOutputError
-
-            if isinstance(e, StructuredOutputError):
-                self._lg.warning("joke generation failed", extra={"error": str(e)})
-            else:
-                self._lg.warning("joke generation failed", extra={"exception": e})
+            self._lg.warning("joke generation failed", extra={"exception": e})
             return ExecutionResult(success=False, content=f"Error: {e}", iterations=1)
 
     def _complete_cycle(

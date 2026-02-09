@@ -7,6 +7,7 @@ and other methods expected by the runtime runner.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
@@ -22,6 +23,13 @@ from ...core.traits.builtin.saia import SAIATrait
 if TYPE_CHECKING:
     from llm_agent.core.agent import Identity
     from llm_agent.core.traits.builtin.conv import ConversationTrait
+
+
+@dataclass
+class _ConclusionSummary:
+    """Summary of agent execution findings."""
+
+    summary: str
 
 
 class Agent(BaseAgent):
@@ -182,11 +190,14 @@ class Agent(BaseAgent):
 
         conv_trait = self.get_trait(ConversationTrait)
 
-        # Option A: Conversation replaces recall
+        # Prefer conversation context if available and non-empty
         if conv_trait is not None:
-            return self._format_conversation_context(conv_trait)
-        else:
-            return self._recall_context(learn_trait, task, recall_strategy, recall_limit)
+            conv_context = self._format_conversation_context(conv_trait)
+            if conv_context:
+                return conv_context
+
+        # Fall back to recall if no conversation context
+        return self._recall_context(learn_trait, task, recall_strategy, recall_limit)
 
     def _format_conversation_context(self, conv_trait: ConversationTrait) -> str:
         """Format conversation history as context string."""
@@ -235,17 +246,9 @@ class Agent(BaseAgent):
 
     async def _summarize_outcome(self, saia_trait: SAIATrait, content: str) -> str:
         """Summarize execution outcome using SAIA extract."""
-        from dataclasses import dataclass
-
-        @dataclass
-        class ConclusionSummary:
-            """Summary of agent execution findings."""
-
-            summary: str
-
         summary_result = await saia_trait.saia.extract(
             content,
-            ConclusionSummary,
+            _ConclusionSummary,
             instructions=(
                 "Summarize the key findings and conclusions from this agent "
                 "execution. Be concise — focus on what was discovered, not "

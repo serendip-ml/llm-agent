@@ -181,9 +181,10 @@ class Factory(BaseFactory):
             "question": {"recall_strategy": "semantic", "recall_limit": 5},
         }
 
-        # Merge defaults with user config
+        # Merge defaults with user config (user overrides defaults)
         for event_name, default_config in defaults.items():
-            event_config = events_config.get(event_name, default_config)
+            user_config = events_config.get(event_name, {})
+            event_config = {**default_config, **user_config}
             handler = self._create_event_handler(agent, event_name, event_config)
             agent._dispatcher.on(event_name, handler)
 
