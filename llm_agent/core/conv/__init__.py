@@ -27,14 +27,14 @@ Example:
     messages = conversation.messages()
 """
 
-from llm_agent.core.conv.compactor import (
+from .compactor import (
     Compactor,
     SlidingWindowCompactor,
     SummarizingCompactor,
 )
-from llm_agent.core.conv.conversation import Conversation, ConversationConfig
-from llm_agent.core.conv.runner import ConversationRunner
-from llm_agent.core.conv.tokens import (
+from .conversation import Conversation, ConversationConfig
+from .runner import ConversationRunner
+from .tokens import (
     DEFAULT_CHARS_PER_TOKEN,
     estimate_message_tokens,
     estimate_tokens,

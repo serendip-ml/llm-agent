@@ -13,26 +13,26 @@ This package contains the core abstractions for building agents:
 - llm: LLM backend abstractions
 """
 
-from llm_agent.core.agent import Agent, Config, ExecutionResult
-from llm_agent.core.conv import (
+from .agent import Agent, Config, ExecutionResult
+from .conv import (
     Compactor,
     Conversation,
     ConversationConfig,
     SlidingWindowCompactor,
     SummarizingCompactor,
 )
-from llm_agent.core.errors import (
+from .errors import (
     AgentError,
     ConfigError,
     TraitAlreadyRegisteredError,
     TraitError,
     TraitNotFoundError,
 )
-from llm_agent.core.platform import PlatformContext
-from llm_agent.core.runnable import Runnable
-from llm_agent.core.task import Task, TaskResult
-from llm_agent.core.tools.factory import ToolFactory
-from llm_agent.core.traits.factory import Factory as TraitFactory
+from .platform import PlatformContext
+from .runnable import Runnable
+from .task import Task, TaskResult
+from .tools.factory import ToolFactory
+from .traits.factory import Factory as TraitFactory
 
 
 __all__ = [

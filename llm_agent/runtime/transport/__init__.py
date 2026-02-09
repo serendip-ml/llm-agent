@@ -5,8 +5,8 @@ Provides pluggable transport layer:
 - [Future] ZMQChannel: ZeroMQ-based (distributed deployment)
 """
 
-from llm_agent.runtime.transport.base import Channel, Message, MessageType, Request, Response
-from llm_agent.runtime.transport.queue import QueueChannel, create_channel_pair
+from .base import Channel, Message, MessageType, Request, Response
+from .queue import QueueChannel, create_channel_pair
 
 
 __all__ = [

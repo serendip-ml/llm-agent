@@ -2,8 +2,8 @@
 
 from enum import StrEnum
 
-from llm_agent.core.traits.base import BaseTrait, Trait
-from llm_agent.core.traits.builtin import (
+from .base import BaseTrait, Trait
+from .builtin import (
     Directive,
     DirectiveTrait,
     HTTPConfig,
@@ -17,8 +17,8 @@ from llm_agent.core.traits.builtin import (
     SAIATrait,
     ToolsTrait,
 )
-from llm_agent.core.traits.factory import Factory
-from llm_agent.core.traits.registry import Registry
+from .factory import Factory
+from .registry import Registry
 
 
 class TraitName(StrEnum):

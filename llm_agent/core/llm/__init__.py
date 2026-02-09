@@ -1,8 +1,8 @@
 """LLM backend abstraction."""
 
-from llm_agent.core.llm.backend import HTTPBackend, LLMBackend, LLMError, StructuredOutputError
-from llm_agent.core.llm.caller import LLMCaller
-from llm_agent.core.llm.types import CompletionResult, Message
+from .backend import HTTPBackend, LLMBackend, LLMError, StructuredOutputError
+from .caller import LLMCaller
+from .types import CompletionResult, Message
 
 
 __all__ = [

@@ -11,8 +11,8 @@ from llm_infer.client import ChatResponse, LLMClient
 from llm_infer.client import Factory as LLMClientFactory
 from pydantic import BaseModel, ValidationError
 
-from llm_agent.core.llm.backend import StructuredOutputError
-from llm_agent.core.llm.types import CompletionResult, Message
+from ...llm.backend import StructuredOutputError
+from ...llm.types import CompletionResult, Message
 
 
 if TYPE_CHECKING:

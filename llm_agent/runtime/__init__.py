@@ -8,11 +8,11 @@ This package provides the operational infrastructure for running agents:
 - AgentState: Lifecycle state machine
 """
 
-from llm_agent.runtime.core import Core
-from llm_agent.runtime.handle import AgentHandle, AgentInfo
-from llm_agent.runtime.registry import AgentRegistry
-from llm_agent.runtime.runner import AgentRunner
-from llm_agent.runtime.state import AgentState, InvalidTransitionError, can_transition, transition
+from .core import Core
+from .handle import AgentHandle, AgentInfo
+from .registry import AgentRegistry
+from .runner import AgentRunner
+from .state import AgentState, InvalidTransitionError, can_transition, transition
 
 
 __all__ = [

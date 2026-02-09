@@ -10,7 +10,7 @@ import time
 from queue import Empty
 from typing import TYPE_CHECKING
 
-from llm_agent.runtime.transport.base import Message, Request, Response
+from .base import Message, Request, Response
 
 
 if TYPE_CHECKING:

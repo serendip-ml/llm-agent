@@ -8,7 +8,7 @@ from typing import Any, Protocol, cast
 
 import httpx
 
-from llm_agent.core.llm.types import CompletionResult, Message
+from .types import CompletionResult, Message
 
 
 class LLMBackend(Protocol):

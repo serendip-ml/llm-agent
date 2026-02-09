@@ -13,7 +13,7 @@ import httpcore
 import httpx
 from httpcore._backends.base import SOCKET_OPTION
 
-from llm_agent.core.tools.base import BaseTool, ToolResult
+from ..base import BaseTool, ToolResult
 
 
 class _PinnedIPBackend(httpcore.SyncBackend):

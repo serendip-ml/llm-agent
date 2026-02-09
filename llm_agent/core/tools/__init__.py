@@ -2,8 +2,8 @@
 
 from enum import StrEnum
 
-from llm_agent.core.tools.base import BaseTool, Tool, ToolCall, ToolCallResult, ToolResult
-from llm_agent.core.tools.builtin import (
+from .base import BaseTool, Tool, ToolCall, ToolCallResult, ToolResult
+from .builtin import (
     CompleteTaskTool,
     FileReadTool,
     FileWriteTool,
@@ -12,9 +12,9 @@ from llm_agent.core.tools.builtin import (
     RememberTool,
     ShellTool,
 )
-from llm_agent.core.tools.executor import SimpleToolExecutor, ToolExecutionResult
-from llm_agent.core.tools.factory import ToolFactory
-from llm_agent.core.tools.registry import Registry
+from .executor import SimpleToolExecutor, ToolExecutionResult
+from .factory import ToolFactory
+from .registry import Registry
 
 
 class ToolName(StrEnum):

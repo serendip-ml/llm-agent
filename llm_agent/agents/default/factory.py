@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from llm_agent.agents.default.agent import Agent
-from llm_agent.core.agent import Factory as BaseFactory
-from llm_agent.core.traits.builtin.saia import SAIAConfig, SAIATrait
+from ...core.agent import Factory as BaseFactory
+from ...core.traits.builtin.saia import SAIAConfig, SAIATrait
+from .agent import Agent
 
 
 if TYPE_CHECKING:

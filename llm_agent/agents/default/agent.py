@@ -14,14 +14,14 @@ from typing import TYPE_CHECKING, Any
 from appinfra.log import Logger
 from appinfra.time import time
 
-from llm_agent.core.agent import Agent as BaseAgent
-from llm_agent.core.dispatcher import Dispatcher
-from llm_agent.core.memory import (
+from ...core.agent import Agent as BaseAgent
+from ...core.dispatcher import Dispatcher
+from ...core.memory import (
     format_solutions_context,
     recall_chronological,
     recall_semantic,
 )
-from llm_agent.core.runnable import ExecutionResult
+from ...core.runnable import ExecutionResult
 
 
 if TYPE_CHECKING:

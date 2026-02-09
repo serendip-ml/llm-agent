@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from llm_agent.runtime.state import AgentState
+from .state import AgentState
 
 
 if TYPE_CHECKING:

@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 from appinfra.log.mp import LogQueueListener
 
-from llm_agent.runtime.handle import AgentHandle, AgentInfo
-from llm_agent.runtime.state import AgentState, transition
-from llm_agent.runtime.transport import Message, MessageType, Request, create_channel_pair
+from .handle import AgentHandle, AgentInfo
+from .state import AgentState, transition
+from .transport import Message, MessageType, Request, create_channel_pair
 
 
 if TYPE_CHECKING:

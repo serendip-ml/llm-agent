@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from llm_agent.core.tools.base import Tool
-from llm_agent.core.tools.registry import Registry
+from ...tools.base import Tool
+from ...tools.registry import Registry
 
 
 if TYPE_CHECKING:

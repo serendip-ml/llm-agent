@@ -6,7 +6,7 @@ import re
 import subprocess
 from typing import Any
 
-from llm_agent.core.tools.base import BaseTool, ToolResult
+from ..base import BaseTool, ToolResult
 
 
 # Shell metacharacters that enable command chaining/injection

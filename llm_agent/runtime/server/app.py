@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
-from llm_agent.runtime.server.management import create_management_routes
+from .management import create_management_routes
 
 
 if TYPE_CHECKING:

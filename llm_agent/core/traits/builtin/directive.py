@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from llm_agent.core.traits.base import BaseTrait
+from ..base import BaseTrait
 
 
 class Directive(BaseModel):

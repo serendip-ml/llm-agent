@@ -12,7 +12,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from llm_agent.runtime.server.protocol.management import (
+from .protocol.management import (
     AskAgentRequest,
     AskAgentResponse,
     FeedbackAgentRequest,

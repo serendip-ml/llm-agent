@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Path, Request
 
-from llm_agent.runtime.server.protocol.v1 import (
+from .protocol.v1 import (
     CompleteRequest,
     CompleteResponse,
     FeedbackRequest,

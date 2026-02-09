@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from llm_agent.core.agent.types import ExecutionResult
+from .agent.types import ExecutionResult
 
 
 __all__ = ["Runnable", "ExecutionResult"]

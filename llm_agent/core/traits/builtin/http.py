@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from appinfra.log import Logger
 from fastapi import APIRouter
 
-from llm_agent.runtime.server.protocol.base import Request, Response
+from ....runtime.server.protocol.base import Request, Response
 
 
 if TYPE_CHECKING:

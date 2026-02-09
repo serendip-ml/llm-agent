@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from llm_agent.core.llm import Message
-from llm_agent.core.tools.base import ToolCall, ToolCallResult, ToolResult
+from ..llm import Message
+from .base import ToolCall, ToolCallResult, ToolResult
 
 
 if TYPE_CHECKING:

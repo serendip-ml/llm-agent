@@ -1,11 +1,11 @@
 """Built-in traits for composable agent capabilities."""
 
-from llm_agent.core.traits.builtin.directive import Directive, DirectiveTrait, MethodTrait
-from llm_agent.core.traits.builtin.http import HTTPConfig, HTTPTrait
-from llm_agent.core.traits.builtin.learn import LearnConfig, LearnTrait
-from llm_agent.core.traits.builtin.llm import LLMConfig, LLMTrait
-from llm_agent.core.traits.builtin.saia import SAIAConfig, SAIATrait
-from llm_agent.core.traits.builtin.tools import ToolsTrait
+from .directive import Directive, DirectiveTrait, MethodTrait
+from .http import HTTPConfig, HTTPTrait
+from .learn import LearnConfig, LearnTrait
+from .llm import LLMConfig, LLMTrait
+from .saia import SAIAConfig, SAIATrait
+from .tools import ToolsTrait
 
 
 __all__ = [

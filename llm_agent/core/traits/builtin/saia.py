@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from appinfra.log import Logger
 from llm_saia import SAIA, Backend, ToolDef
 
-from llm_agent.core.traits.base import Trait
+from ..base import Trait
 
 
 if TYPE_CHECKING:

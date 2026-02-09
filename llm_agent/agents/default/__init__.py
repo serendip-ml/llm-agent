@@ -1,7 +1,7 @@
 """Default agent - config-driven, no learning."""
 
-from llm_agent.agents.default.agent import Agent
-from llm_agent.agents.default.factory import Factory
+from .agent import Agent
+from .factory import Factory
 
 
 __all__ = [

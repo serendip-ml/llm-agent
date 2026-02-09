@@ -7,9 +7,8 @@ from typing import TypeVar
 
 from appinfra.log import Logger
 
-from llm_agent.core.runnable import Runnable
-from llm_agent.core.traits.base import Trait
-
+from ..runnable import Runnable
+from ..traits.base import Trait
 from .types import ExecutionResult
 
 

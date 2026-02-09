@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-from llm_agent.core.llm import Message
+from ..llm import Message
 
 
 if TYPE_CHECKING:
