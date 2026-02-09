@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from appinfra.db.pg import PG
-from appinfra.log import Logger
 from llm_infer.client import ChatResponse, LLMClient
 from llm_infer.client import Factory as LLMClientFactory
 from llm_learn import LearnClient
@@ -16,6 +15,7 @@ from llm_learn.inference import ContextBuilder, Embedder
 from llm_learn.memory.atomic import Fact
 
 from ...llm.types import CompletionResult
+from ..base import BaseTrait
 from .llm import LLMConfig, _resolve_llm_defaults
 
 
@@ -89,8 +89,7 @@ class LearnConfig:
         }
 
 
-@dataclass
-class LearnTrait:
+class LearnTrait(BaseTrait):
     """Learn capability trait for memory, feedback, and learned completions.
 
     Wraps llm_learn.LearnClient, LLMClient, and Embedder to provide
@@ -106,12 +105,12 @@ class LearnTrait:
     Example:
         from llm_agent.core.traits import LearnTrait, LearnConfig, LLMConfig
 
-        learn_trait = LearnTrait(lg, LearnConfig(
+        agent = Agent(lg, config)
+        learn_trait = LearnTrait(agent, LearnConfig(
             profile_id="123",
             llm=LLMConfig(base_url="http://localhost:8000/v1"),
             embedder_url="http://localhost:8001/v1",
         ))
-        agent = Agent(lg, config)
         agent.add_trait(learn_trait)
         agent.start()
 
@@ -122,29 +121,25 @@ class LearnTrait:
         agent.get_trait(LearnTrait).remember("User prefers concise answers")
 
     Lifecycle:
-        - attach(): Stores agent reference
         - on_start(): Creates LearnClient, LLMClient, Embedder, ContextBuilder
         - on_stop(): Closes LLMClient and Embedder
     """
 
-    _lg: Logger
-    config: LearnConfig
-
-    _agent: Agent | None = field(default=None, repr=False, compare=False)
-    _database: Database | None = field(default=None, repr=False, compare=False)
-    _learn: LearnClient | None = field(default=None, repr=False, compare=False)
-    _embedder: Embedder | None = field(default=None, repr=False, compare=False)
-    _context: ContextBuilder | None = field(default=None, repr=False, compare=False)
-    _client: LLMClient | None = field(default=None, repr=False, compare=False)
-    _llm_defaults: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
-
-    def attach(self, agent: Agent) -> None:
-        """Attach trait to agent.
+    def __init__(self, agent: Agent, config: LearnConfig) -> None:
+        """Initialize learn trait.
 
         Args:
-            agent: The agent this trait is attached to.
+            agent: The agent this trait belongs to.
+            config: Learn configuration.
         """
-        self._agent = agent
+        super().__init__(agent)
+        self.config = config
+        self._database: Database | None = None
+        self._learn: LearnClient | None = None
+        self._embedder: Embedder | None = None
+        self._context: ContextBuilder | None = None
+        self._client: LLMClient | None = None
+        self._llm_defaults: dict[str, Any] = {}
 
     def _create_learn_client(self, database: Database) -> LearnClient:
         """Create learn client from config using identity or legacy path."""
@@ -152,11 +147,11 @@ class LearnTrait:
 
         if identity is not None:
             return LearnClient.from_identity(
-                lg=self._lg, identity=identity, database=database, ensure_schema=True
+                lg=self.agent.lg, identity=identity, database=database, ensure_schema=True
             )
         elif self.config.profile_id is not None:
             return LearnClient(
-                lg=self._lg,
+                lg=self.agent.lg,
                 profile_id=self.config.profile_id,
                 database=database,
                 ensure_schema=True,
@@ -193,8 +188,8 @@ class LearnTrait:
         # Create database from config
         if self.config.db is None:
             raise ConfigError("LearnConfig.db is required")
-        pg = PG(self._lg, self.config.db)
-        self._database = Database(self._lg, pg)
+        pg = PG(self.agent.lg, self.config.db)
+        self._database = Database(self.agent.lg, pg)
 
         # Create learn client and context builder
         self._learn = self._create_learn_client(self._database)
@@ -202,7 +197,7 @@ class LearnTrait:
 
         # Create LLM client for completions
         llm_config = self.config.llm or {}
-        self._client = LLMClientFactory(self._lg).from_config(llm_config)
+        self._client = LLMClientFactory(self.agent.lg).from_config(llm_config)
         self._llm_defaults = _resolve_llm_defaults(llm_config)
 
         # Create embedder if URL provided

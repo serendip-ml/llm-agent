@@ -55,9 +55,16 @@ class TestStructuredOutputE2E:
     @pytest.fixture
     def trait(self):
         """Create LLMTrait connected to LLM server."""
+        from unittest.mock import Mock
+
         lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+
+        # Create a mock agent with required lg property
+        mock_agent = Mock()
+        mock_agent.lg = lg
+
         trait = LLMTrait(
-            lg,
+            mock_agent,
             config={
                 "type": "openai_compatible",
                 "base_url": LLM_BASE_URL,

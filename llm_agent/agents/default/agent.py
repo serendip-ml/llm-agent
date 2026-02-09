@@ -50,8 +50,8 @@ class Agent(BaseAgent):
 
         identity = Identity.from_name("explorer")
         agent = Agent(lg, identity=identity, default_prompt="Analyze the codebase")
-        agent.add_trait(SAIATrait(lg=lg, backend=backend))
-        agent.add_trait(ToolsTrait())
+        agent.add_trait(SAIATrait(agent, backend=backend))
+        agent.add_trait(ToolsTrait(agent))
         agent.start()
 
         result = agent.run_once()

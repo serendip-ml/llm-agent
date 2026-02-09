@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
+    from llm_agent.core.agent import Agent
     from llm_agent.core.platform import PlatformContext
     from llm_agent.core.traits import TraitName
     from llm_agent.core.traits.builtin.directive import DirectiveTrait, MethodTrait
@@ -53,6 +54,7 @@ class Factory:
     def create(
         self,
         trait_name: TraitName,  # Use enum, not string
+        agent: Agent,
         agent_config: dict[str, Any],
         **kwargs: Any,
     ) -> Trait:
@@ -60,6 +62,7 @@ class Factory:
 
         Args:
             trait_name: Trait type (TraitName enum).
+            agent: Agent instance that will own this trait.
             agent_config: Agent's config dict (for directive, method fields).
             **kwargs: Additional args (e.g., identity for LearnTrait).
 
@@ -75,28 +78,35 @@ class Factory:
         if not creator:
             raise ConfigError(f"Unknown trait type: {trait_name}")
 
-        return creator(agent_config, **kwargs)
+        return creator(agent, agent_config, **kwargs)
 
-    def _create_directive(self, agent_config: dict[str, Any], **kwargs: Any) -> DirectiveTrait:
+    def _create_directive(
+        self, agent: Agent, agent_config: dict[str, Any], **kwargs: Any
+    ) -> DirectiveTrait:
         """Route to create_directive_trait."""
-        return self.create_directive_trait(agent_config.get("directive"))
+        return self.create_directive_trait(agent, agent_config.get("directive"))
 
-    def _create_llm(self, agent_config: dict[str, Any], **kwargs: Any) -> LLMTrait:
+    def _create_llm(self, agent: Agent, agent_config: dict[str, Any], **kwargs: Any) -> LLMTrait:
         """Route to create_llm_trait."""
-        return self.create_llm_trait(self._platform.llm_config())
+        return self.create_llm_trait(agent, self._platform.llm_config())
 
-    def _create_learn(self, agent_config: dict[str, Any], **kwargs: Any) -> LearnTrait:
+    def _create_learn(
+        self, agent: Agent, agent_config: dict[str, Any], **kwargs: Any
+    ) -> LearnTrait:
         """Route to create_learn_trait."""
-        return self.create_learn_trait(kwargs.get("identity"), self._platform.learn_config())
+        return self.create_learn_trait(agent, kwargs.get("identity"), self._platform.learn_config())
 
-    def _create_method(self, agent_config: dict[str, Any], **kwargs: Any) -> MethodTrait:
+    def _create_method(
+        self, agent: Agent, agent_config: dict[str, Any], **kwargs: Any
+    ) -> MethodTrait:
         """Route to create_method_trait."""
-        return self.create_method_trait(agent_config.get("method"))
+        return self.create_method_trait(agent, agent_config.get("method"))
 
-    def create_llm_trait(self, llm_config: LLMConfig | None) -> LLMTrait:
+    def create_llm_trait(self, agent: Agent, llm_config: LLMConfig | None) -> LLMTrait:
         """Create LLMTrait with LLM backend configuration.
 
         Args:
+            agent: Agent instance that will own this trait.
             llm_config: LLM backend configuration dict.
 
         Returns:
@@ -112,12 +122,15 @@ class Factory:
         if not llm_config:
             raise ConfigError("LLM configuration required but not provided")
 
-        return LLMTrait(self._lg, llm_config)
+        return LLMTrait(agent, llm_config)
 
-    def create_directive_trait(self, config: str | dict[str, Any] | None) -> DirectiveTrait:
+    def create_directive_trait(
+        self, agent: Agent, config: str | dict[str, Any] | None
+    ) -> DirectiveTrait:
         """Create DirectiveTrait from string or dict config.
 
         Args:
+            agent: Agent instance that will own this trait.
             config: Directive prompt string or dict with 'prompt' key.
 
         Returns:
@@ -144,12 +157,15 @@ class Factory:
                 f"Directive config must be str, dict, or Directive, got {type(config).__name__}"
             )
 
-        return DirectiveTrait(directive)
+        return DirectiveTrait(agent, directive)
 
-    def create_learn_trait(self, identity: Any, learn_config: dict[str, Any] | None) -> LearnTrait:
+    def create_learn_trait(
+        self, agent: Agent, identity: Any, learn_config: dict[str, Any] | None
+    ) -> LearnTrait:
         """Create LearnTrait with agent-specific identity.
 
         Args:
+            agent: Agent instance that will own this trait.
             identity: Agent's identity for memory addressing.
             learn_config: Learning configuration dict (db, embedder_url, etc.).
 
@@ -177,12 +193,13 @@ class Factory:
             embedder_model=learn_config.get("embedder_model", "default"),
             embedder_timeout=learn_config.get("embedder_timeout", 30.0),
         )
-        return LearnTrait(self._lg, config)
+        return LearnTrait(agent, config)
 
-    def create_method_trait(self, method: str | None) -> MethodTrait:
+    def create_method_trait(self, agent: Agent, method: str | None) -> MethodTrait:
         """Create MethodTrait from method string.
 
         Args:
+            agent: Agent instance that will own this trait.
             method: Method/approach description.
 
         Returns:
@@ -198,4 +215,4 @@ class Factory:
         if not method:
             raise ConfigError("Method configuration required but not provided")
 
-        return MethodTrait(method)
+        return MethodTrait(agent, method)

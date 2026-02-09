@@ -30,8 +30,8 @@ class Registry:
     Example:
         # Platform creates registry with configured traits
         registry = Registry(lg)
-        registry.register(LLMTrait(lg, llm_config))
-        registry.register(LearnTrait(lg, learn_config))
+        registry.register(LLMTrait(agent, llm_config))
+        registry.register(LearnTrait(agent, learn_config))
 
         # Factory accesses traits by type
         llm_trait = registry.get(LLMTrait)

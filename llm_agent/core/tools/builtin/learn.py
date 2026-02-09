@@ -24,7 +24,7 @@ class RememberTool(BaseTool):
         from llm_agent.core.traits.builtin.learn import LearnTrait, LearnConfig
         from llm_agent.core.tools.builtin.learn import RememberTool
 
-        learn_trait = LearnTrait(lg, LearnConfig(...))
+        learn_trait = LearnTrait(agent, LearnConfig(...))
         tool = RememberTool(learn_trait)
         result = tool.execute(fact="User prefers Python", category="preferences")
     """
@@ -85,7 +85,7 @@ class RecallTool(BaseTool):
         from llm_agent.core.traits.builtin.learn import LearnTrait, LearnConfig
         from llm_agent.core.tools.builtin.learn import RecallTool
 
-        learn_trait = LearnTrait(lg, LearnConfig(...))
+        learn_trait = LearnTrait(agent, LearnConfig(...))
         tool = RecallTool(learn_trait)
         result = tool.execute(query="user preferences", limit=5)
     """

@@ -9,13 +9,13 @@ or add SAIATrait for structured operations, or use both.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 from llm_saia import SAIA, Backend, ToolDef
 
-from ..base import Trait
+from ..base import BaseTrait
 
 
 if TYPE_CHECKING:
@@ -40,8 +40,7 @@ class SAIAConfig:
     """Default system prompt for SAIA operations."""
 
 
-@dataclass
-class SAIATrait(Trait):
+class SAIATrait(BaseTrait):
     """Provides SAIA verb vocabulary to agents.
 
     SAIA offers structured LLM operations through semantic verbs:
@@ -59,7 +58,7 @@ class SAIATrait(Trait):
         # Create agent with SAIA
         agent = MyAgent(lg, config)  # Your Agent subclass
         agent.add_trait(SAIATrait(
-            lg=lg,
+            agent,
             backend=AnthropicBackend(),
             config=SAIAConfig(terminal_tool="complete_task"),
         ))
@@ -71,25 +70,24 @@ class SAIATrait(Trait):
         verified = await agent.saia.verify(output, "is valid JSON")
     """
 
-    _lg: Logger
-    backend: Backend
-    config: SAIAConfig = field(default_factory=SAIAConfig)
+    def __init__(self, agent: Agent, backend: Backend, config: SAIAConfig | None = None) -> None:
+        """Initialize SAIA trait.
 
-    _agent: Agent | None = field(default=None, repr=False, compare=False)
-    _saia: SAIA | None = field(default=None, repr=False, compare=False)
-
-    def attach(self, agent: Agent) -> None:
-        """Attach trait to agent."""
-        self._agent = agent
+        Args:
+            agent: The agent this trait belongs to.
+            backend: SAIA backend instance.
+            config: SAIA configuration.
+        """
+        super().__init__(agent)
+        self.backend = backend
+        self.config = config or SAIAConfig()
+        self._saia: SAIA | None = None
 
     def on_start(self) -> None:
         """Build SAIA instance on agent start."""
-        if self._agent is None:
-            raise RuntimeError("SAIATrait not attached to agent")
-
         tools, executor = self._get_tools_and_executor()
 
-        self._lg.debug(
+        self.agent.lg.debug(
             "SAIA tools configured",
             extra={
                 "tool_count": len(tools),
@@ -103,7 +101,7 @@ class SAIATrait(Trait):
             .backend(self.backend)
             .max_iterations(self.config.max_iterations)
             .timeout(self.config.timeout_secs)
-            .logger(self._lg)
+            .logger(self.agent.lg)
         )
         if tools and executor:
             builder = builder.tools(tools, executor)
@@ -113,13 +111,13 @@ class SAIATrait(Trait):
             builder = builder.terminal_tool(self.config.terminal_tool)
 
         self._saia = builder.build()
-        self._lg.debug("SAIA trait started")
+        self.agent.lg.debug("SAIA trait started")
 
     def on_stop(self) -> None:
         """Clean up on agent stop."""
         # Backend cleanup handled by caller (they own the backend)
         self._saia = None
-        self._lg.debug("SAIA trait stopped")
+        self.agent.lg.debug("SAIA trait stopped")
 
     @property
     def saia(self) -> SAIA:
@@ -136,14 +134,12 @@ class SAIATrait(Trait):
         """Get tools and executor from ToolsTrait if available."""
         from llm_agent.core.traits.builtin.tools import ToolsTrait
 
-        assert self._agent is not None
-
-        tools_trait = self._agent.get_trait(ToolsTrait)
+        tools_trait = self.agent.get_trait(ToolsTrait)
         if tools_trait is None or not tools_trait.has_tools():
             return [], None
 
         tools = [_tool_to_tooldef(t) for t in tools_trait.registry.list_tools()]
-        executor = _create_executor(tools_trait.registry, self._lg)
+        executor = _create_executor(tools_trait.registry, self.agent.lg)
 
         return tools, executor
 

@@ -26,6 +26,51 @@ from llm_agent.runtime.server.protocol.v1 import (
 pytestmark = pytest.mark.unit
 
 
+def create_mock_trait(trait_class, **mock_attrs):
+    """Create a mock trait that works with the registry.
+
+    Creates an object whose type() returns the trait_class, allowing
+    registry lookups to work correctly.
+
+    Args:
+        trait_class: The trait class (e.g., LLMTrait, LearnTrait)
+        **mock_attrs: Attribute/method names and their return values or properties
+
+    Returns:
+        Mock object with correct type for registry.
+    """
+
+    # Create a minimal object
+    class MockHolder:
+        pass
+
+    obj = MockHolder()
+
+    # Add mock methods/attributes to __dict__ BEFORE setting __class__
+    # This avoids triggering property descriptors
+    for attr_name, config in mock_attrs.items():
+        if isinstance(config, MagicMock):
+            # Already a mock, use it directly
+            mock_attr = config
+        elif isinstance(config, dict):
+            # Dict config for MagicMock
+            mock_attr = MagicMock(**config)
+        else:
+            # For simple scalar values, store them directly (not as MagicMock)
+            # This is important for properties like has_embedder that return bool
+            if isinstance(config, (bool, int, str)):
+                mock_attr = config
+            else:
+                # For lists and other objects, create a MagicMock that returns them
+                mock_attr = MagicMock(return_value=config)
+        obj.__dict__[attr_name] = mock_attr
+
+    # Set __class__ AFTER populating __dict__
+    obj.__class__ = trait_class
+
+    return obj
+
+
 class TestHTTPConfig:
     """Tests for HTTPConfig."""
 
@@ -101,49 +146,52 @@ class TestHTTPTrait:
     def mock_logger(self):
         return MagicMock()
 
-    def test_init_with_default_config(self, mock_logger):
-        trait = HTTPTrait(lg=mock_logger)
+    @pytest.fixture
+    def mock_agent(self, mock_logger):
+        """Create a mock agent with required properties."""
+        agent = MagicMock()
+        agent.name = "test-agent"
+        agent.lg = mock_logger
+        return agent
+
+    def test_init_with_default_config(self, mock_agent):
+        trait = HTTPTrait(mock_agent)
 
         assert trait.config.host == "127.0.0.1"
         assert trait.config.port == 8080
 
-    def test_init_with_custom_config(self, mock_logger):
+    def test_init_with_custom_config(self, mock_agent):
         config = HTTPConfig(port=9000)
-        trait = HTTPTrait(lg=mock_logger, config=config)
+        trait = HTTPTrait(mock_agent, config=config)
 
         assert trait.config.port == 9000
 
-    def test_attach(self, mock_logger):
-        trait = HTTPTrait(lg=mock_logger)
-        mock_agent = MagicMock()
-        mock_agent.name = "test-agent"
+    def test_agent_assigned(self, mock_agent):
+        """HTTPTrait receives agent on construction."""
+        trait = HTTPTrait(mock_agent)
 
-        with patch("llm_agent.runtime.server.http.HTTPServer"):
-            trait.attach(mock_agent)
-
-        assert trait._agent == mock_agent
+        assert trait.agent == mock_agent
         assert trait._server is not None
 
-    def test_url_property(self, mock_logger):
-        trait = HTTPTrait(lg=mock_logger, config=HTTPConfig(host="localhost", port=8080))
+    def test_url_property(self, mock_agent):
+        trait = HTTPTrait(mock_agent, config=HTTPConfig(host="localhost", port=8080))
 
         assert trait.url == "http://localhost:8080"
 
-    def test_url_property_ephemeral_port(self, mock_logger):
-        trait = HTTPTrait(lg=mock_logger, config=HTTPConfig(port=0))
+    def test_url_property_ephemeral_port(self, mock_agent):
+        trait = HTTPTrait(mock_agent, config=HTTPConfig(port=0))
 
         assert trait.url is None
 
-    def test_is_running_false_when_not_started(self, mock_logger):
-        trait = HTTPTrait(lg=mock_logger)
+    def test_is_running_false_when_not_started(self, mock_agent):
+        trait = HTTPTrait(mock_agent)
 
         assert not trait.is_running
 
-    def test_on_start_without_attach_raises(self, mock_logger):
-        trait = HTTPTrait(lg=mock_logger)
-
-        with pytest.raises(RuntimeError, match="not attached"):
-            trait.on_start()
+    def test_on_start_without_attach_raises(self, mock_agent):
+        """Test removed - HTTPTrait now requires agent in constructor."""
+        # No longer applicable - agent is required in __init__
+        pass
 
 
 class TestProtocolMessages:
@@ -212,13 +260,15 @@ class TestHTTPTraitHandleRequest:
         """Create mock LLMTrait."""
         from llm_agent.core.traits.builtin.llm import LLMTrait
 
-        trait = MagicMock(spec=LLMTrait)
-        trait.complete.return_value = CompletionResult(
-            id="resp-123",
-            content="Hello!",
-            model="gpt-4",
-            tokens_used=25,
-            latency_ms=100,
+        trait = create_mock_trait(
+            LLMTrait,
+            complete=CompletionResult(
+                id="resp-123",
+                content="Hello!",
+                model="gpt-4",
+                tokens_used=25,
+                latency_ms=100,
+            ),
         )
         return trait
 
@@ -227,28 +277,41 @@ class TestHTTPTraitHandleRequest:
         """Create mock LearnTrait."""
         from llm_agent.core.traits.builtin.learn import LearnTrait
 
-        trait = MagicMock(spec=LearnTrait)
-        trait.remember.return_value = 42
-        trait.has_embedder = False  # No embedder by default
+        trait = create_mock_trait(
+            LearnTrait,
+            remember={"return_value": 42},
+            recall={
+                "return_value": [
+                    MagicMock(
+                        entity=MagicMock(
+                            id=42, content="User prefers Python", category="preferences"
+                        ),
+                        score=0.85,
+                    )
+                ]
+            },
+            forget=MagicMock(),
+            feedback=MagicMock(),
+            record_feedback=MagicMock(),
+            has_embedder=False,
+        )
         return trait
 
     @pytest.fixture
     def agent(self, mock_logger, mock_llm_trait, mock_learn_trait):
         """Create a test agent with mocked traits."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.builtin.learn import LearnTrait
-        from llm_agent.core.traits.builtin.llm import LLMTrait
 
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
-        agent._traits[LLMTrait] = mock_llm_trait
-        agent._traits[LearnTrait] = mock_learn_trait
+        # Use registry's register method to add mock traits
+        agent._traits.register(mock_llm_trait)
+        agent._traits.register(mock_learn_trait)
         return agent
 
     @pytest.fixture
-    def http_trait(self, mock_logger, agent):
+    def http_trait(self, agent):
         """Create HTTPTrait attached to agent."""
-        trait = HTTPTrait(lg=mock_logger)
-        trait._agent = agent
+        trait = HTTPTrait(agent)
         return trait
 
     def test_handle_health_request(self, http_trait):
@@ -381,20 +444,19 @@ class TestHTTPTraitHandleRequest:
         mock_scored_entity.entity = mock_fact
         mock_scored_entity.score = 0.85
 
-        # Create mock traits
-        mock_llm_trait = MagicMock(spec=LLMTrait)
-        mock_learn_trait = MagicMock(spec=LearnTrait)
-        mock_learn_trait.recall.return_value = [mock_scored_entity]
-        mock_learn_trait.has_embedder = True
+        # Create mock traits with correct type for registry lookup
+        mock_llm_trait = create_mock_trait(LLMTrait)
+        mock_learn_trait = create_mock_trait(
+            LearnTrait, recall={"return_value": [mock_scored_entity]}, has_embedder=True
+        )
 
         # Create agent with traits
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
-        agent._traits[LLMTrait] = mock_llm_trait
-        agent._traits[LearnTrait] = mock_learn_trait
+        agent._traits.register(mock_llm_trait)
+        agent._traits.register(mock_learn_trait)
 
-        # Create HTTPTrait and attach agent
-        http_trait = HTTPTrait(lg=mock_logger)
-        http_trait._agent = agent
+        # Create HTTPTrait with agent
+        http_trait = HTTPTrait(agent)
 
         req = RecallRequest(id="req-1", query="programming")
         resp = http_trait.handle_request(req)
@@ -421,11 +483,11 @@ class TestHTTPTraitHandleRequest:
     def test_handle_complete_agent_without_complete(self, mock_logger):
         """Verify error when agent doesn't support complete()."""
         # Create agent without complete method
-        mock_agent = MagicMock(spec=["name"])
+        mock_agent = MagicMock(spec=["name", "lg"])
         mock_agent.name = "test-agent"
+        mock_agent.lg = mock_logger
 
-        http_trait = HTTPTrait(lg=mock_logger)
-        http_trait._agent = mock_agent
+        http_trait = HTTPTrait(mock_agent)
 
         req = CompleteRequest(id="req-1", query="Hello")
         resp = http_trait.handle_request(req)
@@ -477,8 +539,7 @@ class TestHTTPTraitLifecycle:
         mock_builder.build.return_value = mock_server
 
         config = HTTPConfig(host="0.0.0.0", port=9000, title="Test API")
-        trait = HTTPTrait(lg=mock_logger, config=config)
-        trait.attach(mock_agent)
+        trait = HTTPTrait(mock_agent, config=config)
         trait.on_start()
 
         mock_server.start_subprocess.assert_called_once()
@@ -513,8 +574,7 @@ class TestHTTPTraitLifecycle:
         mock_builder.routes.done.return_value = mock_builder
         mock_builder.build.return_value = mock_server
 
-        trait = HTTPTrait(lg=mock_logger)
-        trait.attach(mock_agent)
+        trait = HTTPTrait(mock_agent)
         trait.on_start()
         trait.on_stop()
 
@@ -534,18 +594,18 @@ class TestHTTPTraitIPCLoop:
 
         from llm_agent.runtime.server.protocol.v1 import HealthRequest
 
-        trait = HTTPTrait(lg=mock_logger)
+        # Create mock agent
+        mock_agent = MagicMock()
+        mock_agent.name = "test-agent"
+        mock_agent.lg = mock_logger
+
+        trait = HTTPTrait(mock_agent)
 
         # Create mock server with real queues for testing
         mock_server = MagicMock()
         mock_server.request_queue = Queue()
         mock_server.response_queue = Queue()
         trait._server = mock_server
-
-        # Create mock agent that will cause handle_request to fail
-        mock_agent = MagicMock()
-        mock_agent.name = "test-agent"
-        trait._agent = mock_agent
 
         # Patch handle_request to raise an exception
         original_handle = trait.handle_request

@@ -6,11 +6,15 @@ Method: "How I operate" - the agent's operational approach, which can evolve.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from ..base import BaseTrait
+
+
+if TYPE_CHECKING:
+    from llm_agent.core.agent import Agent
 
 
 class Directive(BaseModel):
@@ -54,21 +58,22 @@ class DirectiveTrait(BaseTrait):
         directive = Directive(
             prompt="You are a code reviewer. Be critical and evidence-based."
         )
-        trait = DirectiveTrait(directive)
+        trait = DirectiveTrait(agent, directive)
         agent.add_trait(trait)
 
     Or with a simple string:
-        trait = DirectiveTrait("You are a code reviewer.")
+        trait = DirectiveTrait(agent, "You are a code reviewer.")
         agent.add_trait(trait)
     """
 
-    def __init__(self, directive: Directive | str) -> None:
+    def __init__(self, agent: Agent, directive: Directive | str) -> None:
         """Initialize directive trait.
 
         Args:
+            agent: The agent this trait belongs to.
             directive: The agent's directive (Directive object or prompt string).
         """
-        super().__init__()
+        super().__init__(agent)
         if isinstance(directive, str):
             directive = Directive(prompt=directive)
         self._directive = directive
@@ -93,11 +98,12 @@ class DirectiveTrait(BaseTrait):
 class MethodTrait(BaseTrait):
     """Trait for agents that have an operational method.
 
-    Holds the agent's method - how it operates. Unlike identity, method
+    Holds the agent's method - how it operates. Unlike directive, method
     can evolve over time based on learning and feedback.
 
     Usage:
         trait = MethodTrait(
+            agent,
             "- Read the full diff before commenting\\n"
             "- Prioritize security over style\\n"
             "- Be concise but thorough"
@@ -111,13 +117,14 @@ class MethodTrait(BaseTrait):
                      "- Always check for SQL injection")
     """
 
-    def __init__(self, method: str) -> None:
+    def __init__(self, agent: Agent, method: str) -> None:
         """Initialize method trait.
 
         Args:
+            agent: The agent this trait belongs to.
             method: The agent's operational method.
         """
-        super().__init__()
+        super().__init__(agent)
         self._method = method
 
     @property

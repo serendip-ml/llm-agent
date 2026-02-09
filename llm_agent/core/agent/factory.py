@@ -209,6 +209,7 @@ class Factory:
         """
         return self._platform.trait_factory.create(
             trait_name=trait_name,  # Pass enum directly
+            agent=agent,  # Pass agent to factory
             agent_config=config,
             identity=agent.identity,  # type: ignore[attr-defined]  # For LearnTrait
         )
@@ -281,7 +282,7 @@ class Factory:
 
         try:
             # Create ToolsTrait and populate with configured tools
-            tools_trait = ToolsTrait()
+            tools_trait = ToolsTrait(agent)
             self._create_and_register_tools(agent, tools_config, tools_trait)
 
             # Attach ToolsTrait if any tools were created

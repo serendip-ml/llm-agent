@@ -24,6 +24,7 @@ from .conv import (
 from .errors import (
     AgentError,
     ConfigError,
+    DuplicateTraitError,
     TraitAlreadyRegisteredError,
     TraitError,
     TraitNotFoundError,
@@ -45,6 +46,7 @@ __all__ = [
     # Errors
     "AgentError",
     "ConfigError",
+    "DuplicateTraitError",
     "TraitError",
     "TraitNotFoundError",
     "TraitAlreadyRegisteredError",

@@ -112,7 +112,7 @@ class Factory(BaseFactory):
             timeout_secs=config.get("timeout_secs", 0),
             system_prompt=system_prompt,
         )
-        agent.add_trait(SAIATrait(_lg=self._lg, backend=self._get_backend(), config=saia_config))
+        agent.add_trait(SAIATrait(agent, self._get_backend(), saia_config))
 
     def _build_system_prompt(self, agent: Agent) -> str | None:
         """Build system prompt from identity and method traits."""

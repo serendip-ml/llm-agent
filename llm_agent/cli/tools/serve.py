@@ -66,13 +66,13 @@ class ServeTool(Tool):
         self._apply_cli_overrides(config)
 
         learn_config = self._create_learn_config(config)
-        learn_trait = self._create_learn_trait(learn_config)
+        # Note: learn_trait removed - was a template not actually used in shutdown
         registry = self._create_registry()
         core = self._create_core(registry, config, learn_config)
         self._register_agents(registry, core, config)
 
         self._log_startup(config)
-        self._run_server(config, core, learn_trait)
+        self._run_server(config, core, None)
         return 0
 
     def _create_learn_config(self, config: AgentServerConfig) -> LearnConfig | None:
@@ -95,14 +95,12 @@ class ServeTool(Tool):
             # Note: profile_config and agent_name are set per-agent in factory
         )
 
-    def _create_learn_trait(self, learn_config: LearnConfig | None) -> LearnTrait | None:
-        """Create LearnTrait from config for main process use."""
-        from llm_agent.core.traits.builtin.learn import LearnTrait
+    def _create_learn_trait(self, learn_config: LearnConfig | None) -> None:
+        """Deprecated - traits now require agents, removed in refactor.
 
-        if learn_config is None:
-            return None
-
-        return LearnTrait(_lg=self.lg, config=learn_config)
+        LearnConfig is passed directly to agent factories instead.
+        """
+        return None
 
     def _create_registry(self) -> AgentRegistry:
         """Create agent registry."""

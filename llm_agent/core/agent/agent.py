@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TypeVar
+from typing import Any, TypeVar
 
+from appinfra import DotDict
 from appinfra.log import Logger
 
 from ..runnable import Runnable
-from ..traits.base import Trait
+from ..traits.base import BaseTrait
+from ..traits.registry import Registry as TraitRegistry
 from .types import ExecutionResult
 
 
-TraitT = TypeVar("TraitT", bound=Trait)
+TraitT = TypeVar("TraitT", bound=BaseTrait)
 
 
 class Agent(Runnable):
@@ -41,14 +43,21 @@ class Agent(Runnable):
                 self._stop_traits()
     """
 
-    def __init__(self, lg: Logger) -> None:
+    def __init__(self, lg: Logger, config: DotDict | dict[str, Any] | None = None) -> None:
         """Initialize agent.
 
         Args:
             lg: Logger instance.
+            config: Agent configuration (converted to DotDict if dict, empty if None).
         """
         self._lg = lg
-        self._traits: dict[type[Trait], Trait] = {}
+        if isinstance(config, DotDict):
+            self._config = config
+        elif config is not None:
+            self._config = DotDict(**config)
+        else:
+            self._config = DotDict()
+        self._traits = TraitRegistry(lg)
         self._started = False
 
     @property
@@ -56,6 +65,40 @@ class Agent(Runnable):
     def name(self) -> str:
         """Agent identifier."""
         ...
+
+    @property
+    def lg(self) -> Logger:
+        """Logger instance for this agent.
+
+        All traits should use self.agent.lg instead of storing their own logger.
+        """
+        return self._lg
+
+    @property
+    def config(self) -> DotDict:
+        """Agent configuration.
+
+        Returns empty DotDict if no configuration was provided.
+        Traits can access agent configuration via this method.
+
+        Returns:
+            Agent's configuration as DotDict.
+        """
+        return self._config
+
+    @property
+    def traits(self) -> TraitRegistry:
+        """Trait registry for this agent.
+
+        Provides introspection of attached traits:
+        - traits.all() - get all trait instances
+        - traits.count() - count attached traits
+        - traits.types() - get all trait types
+
+        Returns:
+            The agent's trait registry.
+        """
+        return self._traits
 
     @abstractmethod
     def start(self) -> None:
@@ -98,28 +141,26 @@ class Agent(Runnable):
     # Trait Management
     # =========================================================================
 
-    def add_trait(self, trait: Trait) -> None:
+    def add_trait(self, trait: BaseTrait) -> None:
         """Add a trait to this agent.
 
-        Traits are attached immediately upon adding. If the agent is already
-        started, the trait's on_start() is called automatically.
+        Traits must be constructed with this agent as a parameter. If the agent
+        is already started, the trait's on_start() is called automatically.
 
         Args:
-            trait: The trait instance to add.
+            trait: The trait instance to add (must be constructed with this agent).
 
         Raises:
-            ValueError: If a trait of this type is already added.
-            Exception: If trait.attach() fails (trait is rolled back).
+            DuplicateTraitError: If a trait of this type is already added.
         """
-        trait_type = type(trait)
-        if trait_type in self._traits:
-            raise ValueError(f"Trait {trait_type.__name__} already added")
-        self._traits[trait_type] = trait
+        from ..errors import DuplicateTraitError, TraitAlreadyRegisteredError
+
         try:
-            trait.attach(self)
-        except Exception:
-            del self._traits[trait_type]
-            raise
+            self._traits.register(trait)
+        except TraitAlreadyRegisteredError as e:
+            # Maintain backward compatibility with DuplicateTraitError
+            raise DuplicateTraitError(str(e)) from e
+
         if self._started:
             trait.on_start()
 
@@ -132,9 +173,9 @@ class Agent(Runnable):
         Returns:
             The trait instance, or None if not attached.
         """
-        return self._traits.get(trait_type)  # type: ignore[return-value]
+        return self._traits.get(trait_type)
 
-    def has_trait(self, trait_type: type[Trait]) -> bool:
+    def has_trait(self, trait_type: type[BaseTrait]) -> bool:
         """Check if a trait is attached.
 
         Args:
@@ -143,7 +184,7 @@ class Agent(Runnable):
         Returns:
             True if the trait is attached.
         """
-        return trait_type in self._traits
+        return self._traits.has(trait_type)
 
     def require_trait(self, trait_type: type[TraitT]) -> TraitT:
         """Get a required trait, raising if not attached.
@@ -155,15 +196,18 @@ class Agent(Runnable):
             The trait instance.
 
         Raises:
-            RuntimeError: If the trait is not attached.
+            TraitNotFoundError: If the trait is not attached.
         """
-        trait = self.get_trait(trait_type)
-        if trait is None:
-            raise RuntimeError(
+        from ..errors import TraitNotFoundError
+
+        try:
+            return self._traits.require(trait_type)
+        except TraitNotFoundError as e:
+            # Re-raise with agent-specific message
+            raise TraitNotFoundError(
                 f"{trait_type.__name__} required but not attached - "
                 f"add it with agent.add_trait({trait_type.__name__}(...))"
-            )
-        return trait
+            ) from e
 
     # =========================================================================
     # Trait Lifecycle Helpers
@@ -172,11 +216,11 @@ class Agent(Runnable):
     def _start_traits(self) -> None:
         """Start all attached traits. Call from start()."""
         self._started = True
-        for trait in self._traits.values():
+        for trait in self._traits.all():
             trait.on_start()
 
     def _stop_traits(self) -> None:
         """Stop all attached traits. Call from stop()."""
-        for trait in self._traits.values():
+        for trait in self._traits.all():
             trait.on_stop()
         self._started = False
