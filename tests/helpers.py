@@ -14,7 +14,7 @@ def create_mock_trait(trait_class, **mock_attrs):
         **mock_attrs: Attributes to add to the mock. Values can be:
             - MagicMock: Used directly
             - dict: Passed as **kwargs to MagicMock
-            - bool/int/str: Stored directly (not as mock)
+            - bool/int/float/str: Stored directly (not as mock)
             - Other: Wrapped in MagicMock(return_value=...)
 
     Returns:

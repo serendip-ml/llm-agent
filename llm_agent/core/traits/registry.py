@@ -213,6 +213,29 @@ class Registry:
         """
         return len(self._traits)
 
+    def unregister(self, trait_type: type[BaseTrait]) -> None:
+        """Unregister a trait by type.
+
+        Args:
+            trait_type: The trait class to unregister.
+
+        Raises:
+            TraitNotFoundError: If trait is not registered.
+        """
+        if trait_type not in self._traits:
+            raise TraitNotFoundError(
+                f"Trait {trait_type.__name__} is not registered and cannot be unregistered."
+            )
+
+        trait = self._traits[trait_type]
+        del self._traits[trait_type]
+
+        # Remove name mapping if it exists
+        if hasattr(trait, "trait_name"):
+            self._by_name.pop(trait.trait_name, None)
+
+        self._lg.debug("trait unregistered", extra={"trait": trait_type.__name__})
+
     def clear(self) -> None:
         """Remove all traits from registry."""
         self._traits.clear()

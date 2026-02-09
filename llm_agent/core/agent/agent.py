@@ -162,7 +162,12 @@ class Agent(Runnable):
         self._traits.register(trait)
 
         if self._started:
-            trait.on_start()
+            try:
+                trait.on_start()
+            except Exception:
+                # Unregister trait if start failed to avoid partial initialization
+                self._traits.unregister(type(trait))
+                raise
 
     def get_trait(self, trait_type: type[TraitT]) -> TraitT | None:
         """Get an attached trait by its type.
