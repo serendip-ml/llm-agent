@@ -334,15 +334,16 @@ Return your joke in JSON format with 'text' and 'style' fields."""
             )
 
     def _save_joke(self, learn_trait: LearnTrait, joke: Joke) -> None:
-        """Save joke to memory with embedding for future novelty checking."""
-        try:
-            # remember() automatically creates embeddings if embedder available
-            fact_id = learn_trait.remember(
-                fact=joke.text,
-                category="joke",
-                source="system",
-                confidence=1.0,
-            )
-            self._lg.debug("joke saved", extra={"fact_id": fact_id, "style": joke.style})
-        except Exception as e:
-            self._lg.error("failed to save joke", extra={"exception": e})
+        """Save joke to memory with embedding for future novelty checking.
+
+        Raises:
+            Exception: If joke save fails (caller should handle to mark run as failed).
+        """
+        # remember() automatically creates embeddings if embedder available
+        fact_id = learn_trait.remember(
+            fact=joke.text,
+            category="joke",
+            source="system",
+            confidence=1.0,
+        )
+        self._lg.debug("joke saved", extra={"fact_id": fact_id, "style": joke.style})
