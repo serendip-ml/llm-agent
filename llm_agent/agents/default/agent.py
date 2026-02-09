@@ -7,7 +7,7 @@ and other methods expected by the runtime runner.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
 from appinfra.time import time
@@ -103,7 +103,7 @@ class Agent(BaseAgent):
         task: str,
         recall_strategy: str = "chronological",
         recall_limit: int = 5,
-    ) -> dict[str, Any]:
+    ) -> ExecutionResult:
         """Handle task execution with configurable memory recall.
 
         This is the core event handler used by schedule/question events.
@@ -114,18 +114,13 @@ class Agent(BaseAgent):
             recall_limit: Maximum number of past solutions to recall.
 
         Returns:
-            Dict with execution result fields.
+            ExecutionResult with outcome.
         """
         saia_trait = self.get_trait(SAIATrait)
         learn_trait = self.get_trait(LearnTrait)
 
         if saia_trait is None:
-            return {
-                "success": False,
-                "content": "SAIATrait not attached",
-                "iterations": 0,
-                "tokens_used": 0,
-            }
+            return ExecutionResult(success=False, content="SAIATrait not attached")
 
         # Recall past solutions for context
         context = self._recall_context(learn_trait, task, recall_strategy, recall_limit)
@@ -134,23 +129,19 @@ class Agent(BaseAgent):
         prompt = saia_trait.saia.compose(context, task)
         saia_result = await saia_trait.saia.complete(prompt)
 
-        result = self._build_result_dict(saia_result)
+        result = ExecutionResult(
+            success=saia_result.completed,
+            content=saia_result.output,
+            iterations=saia_result.iterations,
+            tokens_used=saia_result.score.total_tokens if saia_result.score else 0,
+            trace_id=saia_result.trace_id,
+        )
 
         # Persist successful outcomes
-        if result["success"] and learn_trait is not None:
+        if result.success and learn_trait is not None:
             await self._persist_outcome(learn_trait, saia_trait, task, result)
 
         return result
-
-    def _build_result_dict(self, saia_result: Any) -> dict[str, Any]:
-        """Build result dict from SAIA execution result."""
-        return {
-            "success": saia_result.completed,
-            "content": saia_result.output,
-            "iterations": saia_result.iterations,
-            "tokens_used": saia_result.score.total_tokens if saia_result.score else 0,
-            "trace_id": saia_result.trace_id,
-        }
 
     def _recall_context(
         self,
@@ -183,17 +174,16 @@ class Agent(BaseAgent):
         learn_trait: LearnTrait,
         saia_trait: SAIATrait,
         task: str,
-        result: dict[str, Any],
+        result: ExecutionResult,
     ) -> None:
         """Persist execution outcome to learning database."""
-        content = result.get("content", "").strip()
-        if not content:
+        if not result.content.strip():
             return
 
         try:
-            summary = await self._summarize_outcome(saia_trait, content)
+            summary = await self._summarize_outcome(saia_trait, result.content)
             if summary:
-                self._record_solution(learn_trait, task, result, content, summary)
+                self._record_solution(learn_trait, task, result, summary)
         except Exception as e:
             self._lg.warning(
                 "failed to persist solution", extra={"agent": self.name, "exception": e}
@@ -224,8 +214,7 @@ class Agent(BaseAgent):
         self,
         learn_trait: LearnTrait,
         task: str,
-        result: dict[str, Any],
-        content: str,
+        result: ExecutionResult,
         summary: str,
     ) -> None:
         """Record solution to learning database."""
@@ -233,23 +222,23 @@ class Agent(BaseAgent):
             agent_name=self.name,
             problem=task,
             problem_context={
-                "iterations": result.get("iterations", 0),
-                "trace_id": result.get("trace_id", ""),
+                "iterations": result.iterations,
+                "trace_id": result.trace_id,
             },
             answer={
-                "success": result.get("success", False),
-                "output": content,
-                "iterations": result.get("iterations", 0),
+                "success": result.success,
+                "output": result.content,
+                "iterations": result.iterations,
             },
             answer_text=summary,
-            tokens_used=result.get("tokens_used", 0),
-            latency_ms=0,
+            tokens_used=result.tokens_used,
+            latency_ms=result.latency_ms,
             category="execution",
             source="agent",
         )
         self._lg.debug(
             "solution persisted",
-            extra={"agent": self.name, "tokens": result.get("tokens_used", 0)},
+            extra={"agent": self.name, "tokens": result.tokens_used},
         )
 
     def run_once(self) -> ExecutionResult:
@@ -289,36 +278,12 @@ class Agent(BaseAgent):
         return await self._run_with_dispatcher()
 
     async def _run_with_dispatcher(self) -> ExecutionResult:
-        """Run execution using event orchestrator."""
-        saia_trait = self.get_trait(SAIATrait)
-        learn_trait = self.get_trait(LearnTrait)
-
-        if saia_trait is None:
-            return ExecutionResult(success=False, content="SAIATrait not attached")
-
-        result_dict = await self._dispatcher.trigger(
-            "schedule",
+        """Run execution with chronological recall (for repeated tasks)."""
+        return await self.handle_task(
             task=self._default_prompt,
-            agent_name=self.name,
-            saia_trait=saia_trait,
-            learn_trait=learn_trait,
+            recall_strategy="chronological",
+            recall_limit=5,
         )
-
-        return self._convert_to_execution_result(result_dict)
-
-    def _convert_to_execution_result(self, result_dict: Any) -> ExecutionResult:
-        """Convert orchestrator result dict to ExecutionResult."""
-        if isinstance(result_dict, dict):
-            return ExecutionResult(
-                success=result_dict.get("success", False),
-                content=result_dict.get("content", ""),
-                iterations=result_dict.get("iterations", 0),
-                tokens_used=result_dict.get("tokens_used", 0),
-                trace_id=result_dict.get("trace_id", ""),
-            )
-        else:
-            # If handler returned ExecutionResult directly
-            return result_dict  # type: ignore[no-any-return]
 
     def ask(self, question: str) -> str:
         """Ask the agent a question.
@@ -334,22 +299,12 @@ class Agent(BaseAgent):
         return result.content
 
     async def _ask_async(self, question: str) -> ExecutionResult:
-        """Async implementation of ask() using event orchestration."""
-        saia_trait = self.get_trait(SAIATrait)
-        learn_trait = self.get_trait(LearnTrait)
-
-        if saia_trait is None:
-            return ExecutionResult(success=False, content="SAIATrait not attached")
-
-        result_dict = await self._dispatcher.trigger(
-            "question",
-            question=question,
-            agent_name=self.name,
-            saia_trait=saia_trait,
-            learn_trait=learn_trait,
+        """Async implementation of ask() with semantic recall (for varied questions)."""
+        return await self.handle_task(
+            task=question,
+            recall_strategy="semantic",
+            recall_limit=5,
         )
-
-        return self._convert_to_execution_result(result_dict)
 
     def record_feedback(self, message: str) -> None:
         """Record feedback (no-op for non-learning agent)."""

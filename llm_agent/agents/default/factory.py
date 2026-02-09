@@ -203,7 +203,7 @@ class Factory(BaseFactory):
         recall_strategy = event_config.get("recall_strategy", "chronological")
         recall_limit = event_config.get("recall_limit", 5)
 
-        async def handler(**kwargs: Any) -> dict[str, Any]:
+        async def handler(**kwargs: Any) -> Any:
             """Custom event handler from YAML config."""
             task = kwargs.get("task") or kwargs.get("question", "")
             return await agent.handle_task(
