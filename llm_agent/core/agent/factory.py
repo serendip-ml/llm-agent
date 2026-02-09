@@ -91,6 +91,10 @@ class Factory:
         if self.agent_class is None:
             raise ConfigError(f"{self.__class__.__name__} must set agent_class class variable")
 
+        # Apply variable substitutions to config if provided
+        if variables:
+            config = _substitute_in_dict(config, variables)
+
         # Parse profile → construct Identity (required)
         identity = self._build_identity(config)
 

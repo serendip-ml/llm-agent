@@ -104,11 +104,16 @@ class Registry:
         old = self._traits.get(trait_type)
         self._traits[trait_type] = trait
 
-        # Update name mapping if trait has one, or remove stale name if replacing with unnamed
+        # Remove old name mapping if it exists and differs from new name
+        if old is not None and hasattr(old, "trait_name"):
+            old_name = old.trait_name
+            new_name = getattr(trait, "trait_name", None)
+            if old_name != new_name:
+                self._by_name.pop(old_name, None)
+
+        # Set new name mapping if trait has one
         if hasattr(trait, "trait_name"):
             self._by_name[trait.trait_name] = trait
-        elif old is not None and hasattr(old, "trait_name"):
-            self._by_name.pop(old.trait_name, None)
 
         self._lg.debug("trait replaced", extra={"trait": trait_type.__name__})
 

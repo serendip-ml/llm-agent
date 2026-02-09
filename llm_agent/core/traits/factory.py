@@ -137,8 +137,12 @@ class Factory:
             directive = Directive(prompt=config)
         elif isinstance(config, dict):
             directive = Directive(**config)
+        elif isinstance(config, Directive):
+            directive = config
         else:
-            directive = config  # Already a Directive
+            raise ConfigError(
+                f"Directive config must be str, dict, or Directive, got {type(config).__name__}"
+            )
 
         return DirectiveTrait(directive)
 
