@@ -13,7 +13,7 @@ profile:
 
 # Agent configuration (passed to __init__)
 config:
-  max_retries: 3
+  max_retries: 10
   similarity_threshold: 0.85
 
 # Directive prompt (agent personality)
@@ -38,7 +38,8 @@ task:
     through prompt-based instructions alone.
 
 schedule:
-  interval: 43200  # Every 12 hours
+  #interval: 43200  # Every 12 hours
+  interval: 60  # Every 1 minute
 
 # No tools needed - programmatic agent uses LearnTrait/LLMTrait directly
 # No conversation config - not using conversation runner
