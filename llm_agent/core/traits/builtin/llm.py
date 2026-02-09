@@ -280,9 +280,17 @@ class LLMTrait(BaseTrait):
         Raises:
             StructuredOutputError: If JSON is invalid or doesn't match schema.
         """
+        from ...llm.json_cleaner import JSONCleaner
+
         try:
-            data = json.loads(content)
+            cleaner = JSONCleaner()
+            cleaned = cleaner.clean(content)
+            data = json.loads(cleaned)
         except json.JSONDecodeError as e:
+            self._agent._lg.warning(
+                "failed to parse LLM JSON output",
+                extra={"raw_content": content, "error": str(e)},
+            )
             raise StructuredOutputError(f"Invalid JSON in response: {e}") from e
 
         try:
