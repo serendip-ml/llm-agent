@@ -1,5 +1,6 @@
 """Built-in traits for composable agent capabilities."""
 
+from .conv import ConversationTrait, ConversationTraitConfig
 from .directive import Directive, DirectiveTrait, MethodTrait
 from .http import HTTPConfig, HTTPTrait
 from .learn import LearnConfig, LearnTrait
@@ -9,6 +10,9 @@ from .tools import ToolsTrait
 
 
 __all__ = [
+    # Conversation
+    "ConversationTrait",
+    "ConversationTraitConfig",
     # Directive/Method
     "Directive",
     "DirectiveTrait",

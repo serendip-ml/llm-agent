@@ -21,6 +21,7 @@ from ...core.traits.builtin.saia import SAIATrait
 
 if TYPE_CHECKING:
     from llm_agent.core.agent import Identity
+    from llm_agent.core.traits.builtin.conv import ConversationTrait
 
 
 class Agent(BaseAgent):
@@ -122,8 +123,8 @@ class Agent(BaseAgent):
         if saia_trait is None:
             return ExecutionResult(success=False, content="SAIATrait not attached")
 
-        # Recall past solutions for context
-        context = self._recall_context(learn_trait, task, recall_strategy, recall_limit)
+        # Get context (conversation if available, otherwise recall from learning)
+        context = self._get_context(learn_trait, task, recall_strategy, recall_limit)
 
         # Execute task
         prompt = saia_trait.saia.compose(context, task)
@@ -136,6 +137,9 @@ class Agent(BaseAgent):
             tokens_used=saia_result.score.total_tokens if saia_result.score else 0,
             trace_id=saia_result.trace_id,
         )
+
+        # Add turn to conversation if trait present
+        self._record_conversation_turn(task, result)
 
         # Persist successful outcomes
         if result.success and learn_trait is not None:
@@ -168,6 +172,53 @@ class Agent(BaseAgent):
             past = recall_chronological(learn_trait, self.name, limit=recall_limit)
 
         return format_solutions_context(past)
+
+    def _get_context(
+        self,
+        learn_trait: LearnTrait | None,
+        task: str,
+        recall_strategy: str,
+        recall_limit: int,
+    ) -> str:
+        """Get context for task execution.
+
+        Uses conversation history if ConversationTrait is present,
+        otherwise falls back to solution recall from LearnTrait.
+        """
+        from ...core.traits.builtin.conv import ConversationTrait
+
+        conv_trait = self.get_trait(ConversationTrait)
+
+        # Option A: Conversation replaces recall
+        if conv_trait is not None:
+            return self._format_conversation_context(conv_trait)
+        else:
+            return self._recall_context(learn_trait, task, recall_strategy, recall_limit)
+
+    def _format_conversation_context(self, conv_trait: ConversationTrait) -> str:
+        """Format conversation history as context string."""
+        messages = conv_trait.get_context()
+        if not messages:
+            return ""
+
+        # Format messages as text (skip system message, it's in SAIA config)
+        parts = []
+        for msg in messages:
+            if msg.role == "system":
+                continue
+            role = msg.role.capitalize()
+            content = msg.content
+            parts.append(f"{role}: {content}")
+
+        return "\n\n".join(parts)
+
+    def _record_conversation_turn(self, task: str, result: ExecutionResult) -> None:
+        """Record conversation turn if ConversationTrait is present."""
+        from ...core.traits.builtin.conv import ConversationTrait
+
+        conv_trait = self.get_trait(ConversationTrait)
+        if conv_trait is not None:
+            conv_trait.add_turn(task, result.content)
 
     async def _persist_outcome(
         self,
