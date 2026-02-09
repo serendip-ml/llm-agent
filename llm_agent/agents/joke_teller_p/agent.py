@@ -280,8 +280,13 @@ Return your joke in JSON format with 'text' and 'style' fields."""
             return self._evaluate_similarity(joke_text, similar_facts[0])
 
         except Exception as e:
-            self._lg.warning("novelty check failed, assuming novel", extra={"exception": e})
-            return NoveltyCheck(is_novel=True, max_similarity=0.0, similar_joke=None)
+            # Fail closed: reject joke when novelty check system fails to maintain
+            # the "never repeat" guarantee. Caller will retry with a new joke.
+            self._lg.warning(
+                "novelty check failed, rejecting joke to maintain never-repeat guarantee",
+                extra={"exception": e, "joke": joke_text},
+            )
+            return NoveltyCheck(is_novel=False, max_similarity=1.0, similar_joke=None)
 
     def _evaluate_similarity(self, joke_text: str, closest: Any) -> NoveltyCheck:
         """Evaluate similarity of joke against closest match.
