@@ -218,24 +218,7 @@ class Agent(BaseAgent):
         summary: str,
     ) -> None:
         """Record solution to learning database."""
-        learn_trait.learn.solutions.record(
-            agent_name=self.name,
-            problem=task,
-            problem_context={
-                "iterations": result.iterations,
-                "trace_id": result.trace_id,
-            },
-            answer={
-                "success": result.success,
-                "output": result.content,
-                "iterations": result.iterations,
-            },
-            answer_text=summary,
-            tokens_used=result.tokens_used,
-            latency_ms=result.latency_ms,
-            category="execution",
-            source="agent",
-        )
+        learn_trait.record_solution(self.name, task, result, summary)
         self._lg.debug(
             "solution persisted",
             extra={"agent": self.name, "tokens": result.tokens_used},

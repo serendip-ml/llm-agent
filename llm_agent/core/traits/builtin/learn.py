@@ -15,6 +15,7 @@ from llm_learn.inference import ContextBuilder, Embedder
 from llm_learn.memory.atomic import Fact
 
 from ...llm.types import CompletionResult
+from ...runnable import ExecutionResult
 from ..base import BaseTrait
 from .llm import LLMConfig, _resolve_llm_defaults
 
@@ -533,4 +534,42 @@ class LearnTrait(BaseTrait):
             context=context,
             chosen=chosen,
             rejected=rejected,
+        )
+
+    # =========================================================================
+    # Solutions
+    # =========================================================================
+
+    def record_solution(
+        self,
+        agent_name: str,
+        problem: str,
+        result: ExecutionResult,
+        summary: str,
+    ) -> None:
+        """Record execution solution from ExecutionResult.
+
+        Args:
+            agent_name: Name of the agent that solved the problem.
+            problem: The problem/task that was executed.
+            result: The execution result with outcome details.
+            summary: Human-readable summary of the solution.
+        """
+        self.learn.solutions.record(
+            agent_name=agent_name,
+            problem=problem,
+            problem_context={
+                "iterations": result.iterations,
+                "trace_id": result.trace_id,
+            },
+            answer={
+                "success": result.success,
+                "output": result.content,
+                "iterations": result.iterations,
+            },
+            answer_text=summary,
+            tokens_used=result.tokens_used,
+            latency_ms=result.latency_ms,
+            category="execution",
+            source="agent",
         )
