@@ -12,7 +12,7 @@ import time
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from llm_agent.runtime.transport import Message, MessageType, Response
+from .transport import Message, MessageType, Response
 
 
 if TYPE_CHECKING:

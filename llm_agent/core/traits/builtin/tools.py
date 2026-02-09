@@ -2,57 +2,46 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from llm_agent.core.tools.base import Tool
-from llm_agent.core.tools.registry import Registry
+from ...tools.base import Tool
+from ...tools.registry import Registry
+from ..base import BaseTrait
 
 
 if TYPE_CHECKING:
     from llm_agent.core.agent import Agent
 
 
-@dataclass
-class ToolsTrait:
+class ToolsTrait(BaseTrait):
     """Tool capability trait.
 
     Manages a registry of tools available to the agent. Tools can be
-    registered before or after attaching to an agent.
+    registered after creation.
 
     Example:
         from llm_agent.core.traits import ToolsTrait
         from llm_agent.core.tools import ShellTool, FileReadTool
 
-        tools_trait = ToolsTrait()
+        agent = Agent(lg, config)
+        tools_trait = ToolsTrait(agent)
         tools_trait.register(ShellTool())
         tools_trait.register(FileReadTool())
 
-        agent = Agent(lg, config)
         agent.add_trait(tools_trait)
         agent.start()
 
         # Agent can now use tools during execute()
     """
 
-    _agent: Agent | None = field(default=None, repr=False, compare=False)
-    _registry: Registry = field(default_factory=Registry)
-
-    def attach(self, agent: Agent) -> None:
-        """Attach trait to agent.
+    def __init__(self, agent: Agent) -> None:
+        """Initialize tools trait.
 
         Args:
-            agent: The agent this trait is attached to.
+            agent: The agent this trait belongs to.
         """
-        self._agent = agent
-
-    def on_start(self) -> None:
-        """Called when agent starts. No-op for ToolsTrait."""
-        pass
-
-    def on_stop(self) -> None:
-        """Called when agent stops. No-op for ToolsTrait."""
-        pass
+        super().__init__(agent)
+        self._registry = Registry()
 
     def register(self, tool: Tool) -> None:
         """Register a tool.

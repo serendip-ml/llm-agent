@@ -3,9 +3,9 @@
 from llm_learn.core.types import ScoredEntity
 from llm_learn.memory.atomic import Fact
 
-from llm_agent.core.agent import Agent, Config, Identity
-from llm_agent.core.errors import AgentError, ConfigError
-from llm_agent.core.llm import (
+from .core.agent import Agent, Config, Identity
+from .core.errors import AgentError, ConfigError
+from .core.llm import (
     CompletionResult,
     HTTPBackend,
     LLMBackend,
@@ -13,8 +13,8 @@ from llm_agent.core.llm import (
     Message,
     StructuredOutputError,
 )
-from llm_agent.core.task import Task, TaskCompletion, TaskResult, TaskStatus
-from llm_agent.core.tools import (
+from .core.task import Task, TaskCompletion, TaskResult, TaskStatus
+from .core.tools import (
     BaseTool,
     CompleteTaskTool,
     FileReadTool,
@@ -30,8 +30,8 @@ from llm_agent.core.tools import (
     ToolExecutionResult,
     ToolResult,
 )
-from llm_agent.core.tools.factory import ToolFactory
-from llm_agent.core.traits import (
+from .core.tools.factory import ToolFactory
+from .core.traits import (
     BaseTrait,
     Directive,
     DirectiveTrait,
@@ -47,7 +47,7 @@ from llm_agent.core.traits import (
     ToolsTrait,
     Trait,
 )
-from llm_agent.core.traits.factory import Factory as TraitFactory
+from .core.traits.factory import Factory as TraitFactory
 
 
 __version__ = "0.0.0"

@@ -13,8 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from llm_agent.core.conv.tokens import estimate_message_tokens
-from llm_agent.core.llm import Message
+from ..llm import Message
+from .tokens import estimate_message_tokens
 
 
 @dataclass

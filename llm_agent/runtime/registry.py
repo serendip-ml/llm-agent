@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from llm_agent.runtime.handle import AgentHandle, AgentInfo
-from llm_agent.runtime.state import AgentState
+from .handle import AgentHandle, AgentInfo
+from .state import AgentState
 
 
 if TYPE_CHECKING:

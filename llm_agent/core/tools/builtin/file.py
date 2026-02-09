@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from llm_agent.core.tools.base import BaseTool, ToolResult
+from ..base import BaseTool, ToolResult
 
 
 class _FileToolBase(BaseTool):

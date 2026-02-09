@@ -9,15 +9,15 @@ from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 
-from llm_agent.core.conv import Compactor, Conversation
-from llm_agent.core.llm.types import Message
-from llm_agent.core.task import Task, TaskResult
+from ..llm.types import Message
+from ..task import Task, TaskResult
+from . import Compactor, Conversation
 
 
 if TYPE_CHECKING:
     from llm_saia import SAIA
 
-    from llm_agent.core.traits.llm import LLMTrait
+    from llm_agent.core.traits.builtin.llm import LLMTrait
 
 
 # Type alias for identity prompt builder

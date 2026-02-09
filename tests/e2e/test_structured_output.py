@@ -10,7 +10,7 @@ from appinfra.log import LogConfig, LoggerFactory
 from pydantic import BaseModel
 
 from llm_agent.core.llm.types import Message
-from llm_agent.core.traits.llm import LLMTrait
+from llm_agent.core.traits.builtin.llm import LLMTrait
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]
@@ -55,9 +55,16 @@ class TestStructuredOutputE2E:
     @pytest.fixture
     def trait(self):
         """Create LLMTrait connected to LLM server."""
+        from unittest.mock import Mock
+
         lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+
+        # Create a mock agent with required lg property
+        mock_agent = Mock()
+        mock_agent.lg = lg
+
         trait = LLMTrait(
-            lg,
+            mock_agent,
             config={
                 "type": "openai_compatible",
                 "base_url": LLM_BASE_URL,

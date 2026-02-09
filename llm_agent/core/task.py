@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from llm_agent.core.tools.base import ToolCallResult
+from .tools.base import ToolCallResult
 
 
 class TaskStatus(StrEnum):

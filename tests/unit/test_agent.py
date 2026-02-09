@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from llm_agent.core.agent import Agent, ExecutionResult, Identity, _substitute_variables
+from tests.helpers import create_mock_trait
 
 
 pytestmark = pytest.mark.unit
@@ -92,7 +93,7 @@ class TestAgentLifecycle:
 
     def test_start_calls_trait_on_start(self, agent):
         mock_trait = MagicMock()
-        agent._traits[type(mock_trait)] = mock_trait
+        agent._traits.register(mock_trait)
 
         agent.start()
 
@@ -100,7 +101,7 @@ class TestAgentLifecycle:
 
     def test_stop_calls_trait_on_stop(self, agent):
         mock_trait = MagicMock()
-        agent._traits[type(mock_trait)] = mock_trait
+        agent._traits.register(mock_trait)
         agent._started = True
 
         agent.stop()
@@ -128,17 +129,18 @@ class TestAgentTraits:
 
         agent.add_trait(mock_trait)
 
-        mock_trait.attach.assert_called_once_with(agent)
+        # Trait is registered in agent's registry
         assert agent.has_trait(type(mock_trait))
 
-    def test_add_duplicate_trait_raises(self, agent, mock_logger):
-        from llm_agent.core.traits.llm import LLMTrait
+    def test_add_duplicate_trait_raises(self, agent):
+        from llm_agent.core.errors import DuplicateTraitError
+        from llm_agent.core.traits.builtin.llm import LLMTrait
 
-        trait1 = LLMTrait(mock_logger, {})
+        trait1 = LLMTrait(agent, {})
         agent.add_trait(trait1)
 
-        with pytest.raises(ValueError, match="already added"):
-            trait2 = LLMTrait(mock_logger, {})
+        with pytest.raises(DuplicateTraitError, match="already registered"):
+            trait2 = LLMTrait(agent, {})
             agent.add_trait(trait2)
 
     def test_get_trait(self, agent):
@@ -163,7 +165,9 @@ class TestAgentTraits:
         assert result is mock_trait
 
     def test_require_trait_not_found_raises(self, agent):
-        with pytest.raises(RuntimeError, match="required but not attached"):
+        from llm_agent.core.errors import TraitNotFoundError
+
+        with pytest.raises(TraitNotFoundError, match="required but not attached"):
             agent.require_trait(MagicMock)
 
 
@@ -180,25 +184,28 @@ class TestAgentExecution:
         """Create mock SAIATrait with mock SAIA."""
         from llm_saia import TaskResult
 
-        from llm_agent.core.traits.saia import SAIATrait
+        from llm_agent.core.traits.builtin.saia import SAIATrait
 
-        trait = MagicMock(spec=SAIATrait)
-        trait.saia = MagicMock()
-        trait.saia.complete = AsyncMock(
+        # Create mock saia that returns TaskResult
+        mock_saia = MagicMock()
+        mock_saia.complete = AsyncMock(
             return_value=TaskResult(completed=True, output="Test output", iterations=1, history=[])
         )
+
+        # Create trait with correct type for registry lookup
+        # Use _saia (the backing field) instead of saia (the property)
+        trait = create_mock_trait(SAIATrait, _saia=mock_saia)
         return trait
 
     @pytest.fixture
     def agent_with_saia(self, mock_logger, mock_saia_trait):
         """Create agent with SAIATrait attached."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.saia import SAIATrait
 
         agent = DefaultAgent(
             lg=mock_logger, identity=Identity.from_name("test"), default_prompt="Test task"
         )
-        agent._traits[SAIATrait] = mock_saia_trait
+        agent._traits.register(mock_saia_trait)
         return agent
 
     def test_run_once_without_saia_trait_fails(self, mock_logger):
@@ -215,10 +222,9 @@ class TestAgentExecution:
 
     def test_run_once_without_default_prompt_fails(self, mock_logger, mock_saia_trait):
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.saia import SAIATrait
 
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
-        agent._traits[SAIATrait] = mock_saia_trait
+        agent._traits.register(mock_saia_trait)
 
         result = agent.run_once()
 
@@ -449,11 +455,11 @@ class TestFactorySystemPrompt:
     def test_system_prompt_with_identity_only(self, mock_logger):
         """System prompt contains identity when only identity is configured."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.directive import DirectiveTrait
+        from llm_agent.core.traits.builtin.directive import DirectiveTrait
 
         factory = self._create_factory(mock_logger)
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
-        agent.add_trait(DirectiveTrait("You are a helpful assistant."))
+        agent.add_trait(DirectiveTrait(agent, "You are a helpful assistant."))
 
         system_prompt = factory._build_system_prompt(agent)
 
@@ -462,11 +468,11 @@ class TestFactorySystemPrompt:
     def test_system_prompt_with_method_only(self, mock_logger):
         """System prompt contains method when only method is configured."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.directive import MethodTrait
+        from llm_agent.core.traits.builtin.directive import MethodTrait
 
         factory = self._create_factory(mock_logger)
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
-        agent.add_trait(MethodTrait("- Step 1\n- Step 2"))
+        agent.add_trait(MethodTrait(agent, "- Step 1\n- Step 2"))
 
         system_prompt = factory._build_system_prompt(agent)
 
@@ -475,12 +481,12 @@ class TestFactorySystemPrompt:
     def test_system_prompt_with_identity_and_method(self, mock_logger):
         """System prompt combines identity and method."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.directive import DirectiveTrait, MethodTrait
+        from llm_agent.core.traits.builtin.directive import DirectiveTrait, MethodTrait
 
         factory = self._create_factory(mock_logger)
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
-        agent.add_trait(DirectiveTrait("You are a helpful assistant."))
-        agent.add_trait(MethodTrait("- Step 1\n- Step 2"))
+        agent.add_trait(DirectiveTrait(agent, "You are a helpful assistant."))
+        agent.add_trait(MethodTrait(agent, "- Step 1\n- Step 2"))
 
         system_prompt = factory._build_system_prompt(agent)
 
@@ -499,7 +505,7 @@ class TestFactorySystemPrompt:
 
     def test_factory_create_passes_system_prompt_to_saia(self, mock_logger):
         """Factory.create() passes system prompt to SAIATrait."""
-        from llm_agent.core.traits.saia import SAIATrait
+        from llm_agent.core.traits.builtin.saia import SAIATrait
 
         factory = self._create_factory(mock_logger)
         config = {

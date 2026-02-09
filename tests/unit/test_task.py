@@ -13,6 +13,7 @@ from llm_agent import (
     ToolResult,
 )
 from llm_agent.core.tools.base import BaseTool
+from llm_agent.core.traits.builtin.tools import ToolsTrait
 
 
 pytestmark = pytest.mark.unit
@@ -132,10 +133,13 @@ class TestTaskResultModel:
 class TestToolsTrait:
     """Tests for ToolsTrait."""
 
-    def test_register_tool(self):
-        from llm_agent.core.traits.tools import ToolsTrait
+    @pytest.fixture
+    def mock_agent(self):
+        """Create a mock agent."""
+        return MagicMock()
 
-        trait = ToolsTrait()
+    def test_register_tool(self, mock_agent):
+        trait = ToolsTrait(mock_agent)
         tool = ShellTool()
 
         trait.register(tool)
@@ -143,31 +147,23 @@ class TestToolsTrait:
         assert trait.has_tools() is True
         assert trait.registry.get("shell") is tool
 
-    def test_unregister_tool(self):
-        from llm_agent.core.traits.tools import ToolsTrait
-
-        trait = ToolsTrait()
+    def test_unregister_tool(self, mock_agent):
+        trait = ToolsTrait(mock_agent)
         trait.register(ShellTool())
 
         trait.unregister("shell")
 
         assert trait.has_tools() is False
 
-    def test_trait_lifecycle(self):
-        from llm_agent.core.traits.tools import ToolsTrait
+    def test_trait_lifecycle(self, mock_agent):
+        trait = ToolsTrait(mock_agent)
 
-        trait = ToolsTrait()
-        mock_agent = MagicMock()
-
-        trait.attach(mock_agent)
         trait.on_start()
         trait.on_stop()
 
-        assert trait._agent is mock_agent
+        assert trait.agent is mock_agent
 
-    def test_empty_registry(self):
-        from llm_agent.core.traits.tools import ToolsTrait
-
-        trait = ToolsTrait()
+    def test_empty_registry(self, mock_agent):
+        trait = ToolsTrait(mock_agent)
 
         assert trait.has_tools() is False

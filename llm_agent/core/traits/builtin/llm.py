@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from appinfra.log import Logger
 from llm_infer.client import ChatResponse, LLMClient
 from llm_infer.client import Factory as LLMClientFactory
 from pydantic import BaseModel, ValidationError
 
-from llm_agent.core.llm.backend import StructuredOutputError
-from llm_agent.core.llm.types import CompletionResult, Message
+from ...llm.backend import StructuredOutputError
+from ...llm.types import CompletionResult, Message
+from ..base import BaseTrait
 
 
 if TYPE_CHECKING:
@@ -64,8 +63,7 @@ def _resolve_llm_defaults(config: LLMConfig) -> dict[str, Any]:
     }
 
 
-@dataclass
-class LLMTrait:
+class LLMTrait(BaseTrait):
     """LLM capability trait.
 
     Wraps llm_infer.client.LLMClient to provide completion capability
@@ -81,35 +79,31 @@ class LLMTrait:
             }
         }
         agent = Agent(lg, config)
-        agent.add_trait(LLMTrait(lg, llm_config))
+        agent.add_trait(LLMTrait(agent, llm_config))
 
         # Agent can now use complete()
         result = agent.complete("What is 2+2?")
 
     Lifecycle:
-        - attach(): Stores agent reference
         - on_start(): Creates LLMClient
         - on_stop(): Closes LLMClient
     """
 
-    _lg: Logger
-    config: LLMConfig = field(default_factory=dict)
-
-    _agent: Agent | None = field(default=None, repr=False, compare=False)
-    _client: LLMClient | None = field(default=None, repr=False, compare=False)
-    _defaults: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
-
-    def attach(self, agent: Agent) -> None:
-        """Attach trait to agent.
+    def __init__(self, agent: Agent, config: LLMConfig | None = None) -> None:
+        """Initialize LLM trait.
 
         Args:
-            agent: The agent this trait is attached to.
+            agent: The agent this trait belongs to.
+            config: LLM configuration dict.
         """
-        self._agent = agent
+        super().__init__(agent)
+        self.config = config or {}
+        self._client: LLMClient | None = None
+        self._defaults: dict[str, Any] = {}
 
     def on_start(self) -> None:
         """Create LLM client on agent start."""
-        self._client = LLMClientFactory(self._lg).from_config(self.config)
+        self._client = LLMClientFactory(self.agent.lg).from_config(self.config)
         self._defaults = _resolve_llm_defaults(self.config)
 
     def on_stop(self) -> None:

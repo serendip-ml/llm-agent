@@ -16,7 +16,7 @@ from appinfra.app.tools import Tool, ToolConfig
 if TYPE_CHECKING:
     from multiprocessing.queues import Queue
 
-    from llm_agent.core.traits.learn import LearnConfig, LearnTrait
+    from llm_agent.core.traits.builtin.learn import LearnConfig
     from llm_agent.runtime import AgentInfo, AgentRegistry, Core
     from llm_agent.runtime.server import AgentServerConfig
     from llm_agent.runtime.server.protocol.base import Request, Response
@@ -66,13 +66,13 @@ class ServeTool(Tool):
         self._apply_cli_overrides(config)
 
         learn_config = self._create_learn_config(config)
-        learn_trait = self._create_learn_trait(learn_config)
+        # Note: learn_trait removed - was a template not actually used in shutdown
         registry = self._create_registry()
         core = self._create_core(registry, config, learn_config)
         self._register_agents(registry, core, config)
 
         self._log_startup(config)
-        self._run_server(config, core, learn_trait)
+        self._run_server(config, core)
         return 0
 
     def _create_learn_config(self, config: AgentServerConfig) -> LearnConfig | None:
@@ -81,7 +81,7 @@ class ServeTool(Tool):
         Creates a template config with global settings (llm, db, embedder).
         Each agent will resolve its own profile_config from agent YAML.
         """
-        from llm_agent.core.traits.learn import LearnConfig
+        from llm_agent.core.traits.builtin.learn import LearnConfig
 
         if config.learn is None:
             return None
@@ -94,15 +94,6 @@ class ServeTool(Tool):
             embedder_timeout=config.learn.embedder_timeout,
             # Note: profile_config and agent_name are set per-agent in factory
         )
-
-    def _create_learn_trait(self, learn_config: LearnConfig | None) -> LearnTrait | None:
-        """Create LearnTrait from config for main process use."""
-        from llm_agent.core.traits.learn import LearnTrait
-
-        if learn_config is None:
-            return None
-
-        return LearnTrait(_lg=self.lg, config=learn_config)
 
     def _create_registry(self) -> AgentRegistry:
         """Create agent registry."""
@@ -142,20 +133,15 @@ class ServeTool(Tool):
         self,
         config: AgentServerConfig,
         core: Core,
-        learn_trait: LearnTrait | None,
     ) -> None:
-        """Run the server with signal handling.
-
-        Note: learn_trait is a template for per-agent traits and doesn't
-        need on_start() called - each agent runtime starts its own trait.
-        """
+        """Run the server with signal handling."""
 
         request_q: Queue[Any] = mp.Queue()
         response_q: Queue[Any] = mp.Queue()
         shutdown_state = {"requested": False}
 
         def do_shutdown() -> None:
-            self._do_shutdown(shutdown_state, core, learn_trait)
+            self._do_shutdown(shutdown_state, core)
 
         self._install_signal_handlers(do_shutdown)
         server = self._build_server(config, request_q, response_q)
@@ -175,13 +161,8 @@ class ServeTool(Tool):
         self,
         state: dict[str, bool],
         core: Core,
-        learn_trait: LearnTrait | None,
     ) -> None:
-        """Execute shutdown sequence (idempotent).
-
-        Note: learn_trait is a template only - each agent runtime
-        manages its own trait lifecycle.
-        """
+        """Execute shutdown sequence (idempotent)."""
         if state["requested"]:
             return
         state["requested"] = True

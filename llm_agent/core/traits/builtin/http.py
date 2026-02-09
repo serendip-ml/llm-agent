@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from queue import Empty
 from typing import TYPE_CHECKING, Any
 
-from appinfra.log import Logger
 from fastapi import APIRouter
 
-from llm_agent.runtime.server.protocol.base import Request, Response
+from ....runtime.server.protocol.base import Request, Response
+from ..base import BaseTrait
 
 
 if TYPE_CHECKING:
@@ -36,8 +36,7 @@ class HTTPConfig:
     description: str | None = None
 
 
-@dataclass
-class HTTPTrait:
+class HTTPTrait(BaseTrait):
     """HTTP server trait with request handling.
 
     Runs a FastAPI server in a subprocess and communicates via IPC queues.
@@ -60,32 +59,24 @@ class HTTPTrait:
 
         lg = quick_console_logger("agent", "info")
         agent = MyAgent(lg, config)  # Your Agent subclass
-        agent.add_trait(HTTPTrait(lg, HTTPConfig(port=8080)))
+        agent.add_trait(HTTPTrait(agent, HTTPConfig(port=8080)))
         agent.start()
 
     Lifecycle:
-        - attach(): Creates HTTPServer instance
+        - __init__(): Creates HTTPServer instance
         - on_start(): Starts server subprocess and IPC thread
         - on_stop(): Stops IPC thread and server
     """
 
-    lg: Logger
-    config: HTTPConfig = field(default_factory=HTTPConfig)
-
-    _agent: Agent | None = field(default=None, repr=False, compare=False)
-    _server: HTTPServer | None = field(default=None, repr=False, compare=False)
-    _ipc_thread: threading.Thread | None = field(default=None, repr=False, compare=False)
-    _ipc_shutdown: threading.Event = field(
-        default_factory=threading.Event, repr=False, compare=False
-    )
-
-    def attach(self, agent: Agent) -> None:
-        """Attach trait to agent and create HTTP server.
+    def __init__(self, agent: Agent, config: HTTPConfig | None = None) -> None:
+        """Initialize HTTP trait.
 
         Args:
-            agent: The agent this trait is attached to.
+            agent: The agent this trait belongs to.
+            config: HTTP configuration.
         """
-        self._agent = agent
+        super().__init__(agent)
+        self.config = config or HTTPConfig()
 
         from llm_agent.runtime.server.http import HTTPServer, HTTPServerConfig
 
@@ -99,8 +90,11 @@ class HTTPTrait:
             title=title,
             description=description,
         )
-        self._server = HTTPServer(http_config, router_factory=router_factory)
-        self.lg.info(
+        self._server: HTTPServer | None = HTTPServer(http_config, router_factory=router_factory)
+        self._ipc_thread: threading.Thread | None = None
+        self._ipc_shutdown = threading.Event()
+
+        self.agent.lg.info(
             "HTTP server configured",
             extra={"host": self.config.host, "port": self.config.port},
         )
@@ -117,18 +111,18 @@ class HTTPTrait:
     def on_start(self) -> None:
         """Start HTTP server and IPC thread."""
         if self._server is None:
-            raise RuntimeError("HTTPTrait not attached - call attach() first")
+            raise RuntimeError("HTTPServer not initialized")
 
         self._server.start()
         self._start_ipc_thread()
-        self.lg.info("HTTP server started")
+        self.agent.lg.info("HTTP server started")
 
     def on_stop(self) -> None:
         """Stop IPC thread and HTTP server."""
         self._stop_ipc_thread()
         if self._server:
             self._server.stop()
-            self.lg.info("HTTP server stopped")
+            self.agent.lg.info("HTTP server stopped")
 
     @property
     def server(self) -> HTTPServer | None:
@@ -153,15 +147,14 @@ class HTTPTrait:
 
     def _start_ipc_thread(self) -> None:
         """Start background thread for IPC processing."""
-        assert self._agent is not None
         self._ipc_shutdown.clear()
         self._ipc_thread = threading.Thread(
             target=self._ipc_loop,
             daemon=True,
-            name=f"{self._agent.name}-http-ipc",
+            name=f"{self.agent.name}-http-ipc",
         )
         self._ipc_thread.start()
-        self.lg.debug("IPC processing thread started")
+        self.agent.lg.debug("IPC processing thread started")
 
     def _stop_ipc_thread(self) -> None:
         """Stop IPC processing thread."""
@@ -170,9 +163,9 @@ class HTTPTrait:
         self._ipc_shutdown.set()
         self._ipc_thread.join(timeout=2.0)
         if self._ipc_thread.is_alive():
-            self.lg.warning("IPC thread did not stop within timeout, may be orphaned")
+            self.agent.lg.warning("IPC thread did not stop within timeout, may be orphaned")
         self._ipc_thread = None
-        self.lg.debug("IPC processing thread stopped")
+        self.agent.lg.debug("IPC processing thread stopped")
 
     def _ipc_loop(self, poll_timeout: float = 0.1) -> None:
         """Background loop processing IPC requests."""
@@ -188,7 +181,7 @@ class HTTPTrait:
             except Empty:
                 pass
             except Exception:
-                self.lg.exception("IPC processing error")
+                self.agent.lg.exception("IPC processing error")
                 if request is not None:
                     error_resp = Response(
                         id=getattr(request, "id", "unknown"),
@@ -244,15 +237,13 @@ class HTTPTrait:
         """Handle health check request."""
         from llm_agent.runtime.server.protocol.v1 import HealthResponse
 
-        assert self._agent is not None
-        return HealthResponse(id=request.id, status="ok", agent_name=self._agent.name)
+        return HealthResponse(id=request.id, status="ok", agent_name=self.agent.name)
 
     def _handle_complete(self, request: Request) -> Response:
         """Handle completion request."""
         from llm_agent.runtime.server.protocol.v1 import CompleteRequest, CompleteResponse
 
-        assert self._agent is not None
-        complete_fn: Callable[..., Any] | None = getattr(self._agent, "complete", None)
+        complete_fn: Callable[..., Any] | None = getattr(self.agent, "complete", None)
         if complete_fn is None:
             return self._complete_error(request.id, "Agent does not support complete()")
 
@@ -271,7 +262,7 @@ class HTTPTrait:
                 tokens_used=result.tokens_used,
             )
         except Exception as e:
-            self.lg.warning("complete request failed", extra={"exception": e})
+            self.agent.lg.warning("complete request failed", extra={"exception": e})
             return self._complete_error(req.id, str(e))
 
     def _complete_error(self, request_id: str, error: str) -> Response:
@@ -292,8 +283,7 @@ class HTTPTrait:
         """Handle remember request."""
         from llm_agent.runtime.server.protocol.v1 import RememberRequest, RememberResponse
 
-        assert self._agent is not None
-        remember_fn: Callable[..., int] | None = getattr(self._agent, "remember", None)
+        remember_fn: Callable[..., int] | None = getattr(self.agent, "remember", None)
         if remember_fn is None:
             return RememberResponse(
                 id=request.id, success=False, error="Agent does not support remember()", fact_id=-1
@@ -308,15 +298,14 @@ class HTTPTrait:
             fact_id = remember_fn(fact=req.fact, category=req.category)
             return RememberResponse(id=req.id, fact_id=fact_id)
         except Exception as e:
-            self.lg.warning("remember request failed", extra={"exception": e})
+            self.agent.lg.warning("remember request failed", extra={"exception": e})
             return RememberResponse(id=req.id, success=False, error=str(e), fact_id=-1)
 
     def _handle_forget(self, request: Request) -> Response:
         """Handle forget request."""
         from llm_agent.runtime.server.protocol.v1 import ForgetRequest, ForgetResponse
 
-        assert self._agent is not None
-        forget_fn: Callable[..., None] | None = getattr(self._agent, "forget", None)
+        forget_fn: Callable[..., None] | None = getattr(self.agent, "forget", None)
         if forget_fn is None:
             return ForgetResponse(
                 id=request.id, success=False, error="Agent does not support forget()"
@@ -329,15 +318,14 @@ class HTTPTrait:
             forget_fn(fact_id=req.fact_id)
             return ForgetResponse(id=req.id)
         except Exception as e:
-            self.lg.warning("forget request failed", extra={"exception": e})
+            self.agent.lg.warning("forget request failed", extra={"exception": e})
             return ForgetResponse(id=req.id, success=False, error=str(e))
 
     def _handle_recall(self, request: Request) -> Response:
         """Handle recall request."""
         from llm_agent.runtime.server.protocol.v1 import RecallRequest, RecallResponse
 
-        assert self._agent is not None
-        recall_fn: Callable[..., Any] | None = getattr(self._agent, "recall", None)
+        recall_fn: Callable[..., Any] | None = getattr(self.agent, "recall", None)
         if recall_fn is None:
             return RecallResponse(
                 id=request.id, success=False, error="Agent does not support recall()"
@@ -355,7 +343,7 @@ class HTTPTrait:
             )
             return RecallResponse(id=req.id, facts=self._serialize_facts(scored_facts))
         except Exception as e:
-            self.lg.warning("recall request failed", extra={"exception": e})
+            self.agent.lg.warning("recall request failed", extra={"exception": e})
             return RecallResponse(id=req.id, success=False, error=str(e))
 
     def _serialize_facts(self, scored_facts: Any) -> list[dict[str, Any]]:
@@ -374,8 +362,7 @@ class HTTPTrait:
         """Handle feedback request."""
         from llm_agent.runtime.server.protocol.v1 import FeedbackRequest, FeedbackResponse
 
-        assert self._agent is not None
-        feedback_fn: Callable[..., None] | None = getattr(self._agent, "feedback", None)
+        feedback_fn: Callable[..., None] | None = getattr(self.agent, "feedback", None)
         if feedback_fn is None:
             return FeedbackResponse(
                 id=request.id, success=False, error="Agent does not support feedback()"
@@ -394,5 +381,5 @@ class HTTPTrait:
             )
             return FeedbackResponse(id=req.id)
         except Exception as e:
-            self.lg.warning("feedback request failed", extra={"exception": e})
+            self.agent.lg.warning("feedback request failed", extra={"exception": e})
             return FeedbackResponse(id=req.id, success=False, error=str(e))

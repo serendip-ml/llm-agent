@@ -17,5 +17,5 @@ class TraitNotFoundError(TraitError):
     """Required trait not found in registry."""
 
 
-class TraitAlreadyRegisteredError(TraitError):
-    """Trait already registered in registry."""
+class DuplicateTraitError(TraitError):
+    """Trait of this type already added to agent."""

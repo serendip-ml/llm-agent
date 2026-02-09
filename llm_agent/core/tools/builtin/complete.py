@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from llm_agent.core.tools.base import BaseTool, ToolResult
+from ..base import BaseTool, ToolResult
 
 
 class CompleteTaskTool(BaseTool):

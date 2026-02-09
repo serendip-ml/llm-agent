@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from llm_agent.core.tools.base import Tool
-    from llm_agent.core.traits.learn import LearnTrait
+    from llm_agent.core.traits.builtin.learn import LearnTrait
 
 
 class ToolFactory:

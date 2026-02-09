@@ -2,15 +2,23 @@
 
 from enum import StrEnum
 
-from llm_agent.core.traits.base import BaseTrait, Trait
-from llm_agent.core.traits.directive import Directive, DirectiveTrait, MethodTrait
-from llm_agent.core.traits.factory import Factory
-from llm_agent.core.traits.http import HTTPConfig, HTTPTrait
-from llm_agent.core.traits.learn import LearnConfig, LearnTrait
-from llm_agent.core.traits.llm import LLMConfig, LLMTrait
-from llm_agent.core.traits.registry import Registry
-from llm_agent.core.traits.saia import SAIAConfig, SAIATrait
-from llm_agent.core.traits.tools import ToolsTrait
+from .base import BaseTrait, Trait
+from .builtin import (
+    Directive,
+    DirectiveTrait,
+    HTTPConfig,
+    HTTPTrait,
+    LearnConfig,
+    LearnTrait,
+    LLMConfig,
+    LLMTrait,
+    MethodTrait,
+    SAIAConfig,
+    SAIATrait,
+    ToolsTrait,
+)
+from .factory import Factory
+from .registry import Registry
 
 
 class TraitName(StrEnum):

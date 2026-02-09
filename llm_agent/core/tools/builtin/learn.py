@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from llm_agent.core.tools.base import BaseTool, ToolResult
+from ..base import BaseTool, ToolResult
 
 
 if TYPE_CHECKING:
-    from llm_agent.core.traits.learn import LearnTrait
+    from llm_agent.core.traits.builtin.learn import LearnTrait
 
 
 class RememberTool(BaseTool):
@@ -21,10 +21,10 @@ class RememberTool(BaseTool):
     Facts are stored with optional category for organization.
 
     Example:
-        from llm_agent.core.traits.learn import LearnTrait, LearnConfig
+        from llm_agent.core.traits.builtin.learn import LearnTrait, LearnConfig
         from llm_agent.core.tools.builtin.learn import RememberTool
 
-        learn_trait = LearnTrait(lg, LearnConfig(...))
+        learn_trait = LearnTrait(agent, LearnConfig(...))
         tool = RememberTool(learn_trait)
         result = tool.execute(fact="User prefers Python", category="preferences")
     """
@@ -82,10 +82,10 @@ class RecallTool(BaseTool):
     when embedder is configured, otherwise returns recent facts.
 
     Example:
-        from llm_agent.core.traits.learn import LearnTrait, LearnConfig
+        from llm_agent.core.traits.builtin.learn import LearnTrait, LearnConfig
         from llm_agent.core.tools.builtin.learn import RecallTool
 
-        learn_trait = LearnTrait(lg, LearnConfig(...))
+        learn_trait = LearnTrait(agent, LearnConfig(...))
         tool = RecallTool(learn_trait)
         result = tool.execute(query="user preferences", limit=5)
     """

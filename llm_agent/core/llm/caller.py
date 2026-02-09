@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from llm_agent.core.llm.types import Message
+from .types import Message
 
 
 if TYPE_CHECKING:

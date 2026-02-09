@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 
 from pydantic import Field
 
-from llm_agent.runtime.server.protocol.base import Request, Response
+from .base import Request, Response
 
 
 # =============================================================================

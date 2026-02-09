@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from llm_agent.agents.default.agent import Agent
-from llm_agent.core.agent import Factory as BaseFactory
-from llm_agent.core.traits.saia import SAIAConfig, SAIATrait
+from ...core.agent import Factory as BaseFactory
+from ...core.traits.builtin.saia import SAIAConfig, SAIATrait
+from .agent import Agent
 
 
 if TYPE_CHECKING:
@@ -78,6 +78,7 @@ class Factory(BaseFactory):
         Returns:
             Configured Agent ready to start.
         """
+        # Absolute import to avoid circular dependency
         from llm_agent.core.agent import _substitute_in_dict
 
         # Apply variable substitutions
@@ -112,11 +113,12 @@ class Factory(BaseFactory):
             timeout_secs=config.get("timeout_secs", 0),
             system_prompt=system_prompt,
         )
-        agent.add_trait(SAIATrait(_lg=self._lg, backend=self._get_backend(), config=saia_config))
+        agent.add_trait(SAIATrait(agent, self._get_backend(), saia_config))
 
     def _build_system_prompt(self, agent: Agent) -> str | None:
         """Build system prompt from identity and method traits."""
-        from llm_agent.core.traits.directive import DirectiveTrait, MethodTrait
+        # Absolute import to avoid circular dependency
+        from llm_agent.core.traits.builtin.directive import DirectiveTrait, MethodTrait
 
         parts: list[str] = []
 
@@ -224,6 +226,7 @@ class Factory(BaseFactory):
         recall_limit: int,
     ) -> str:
         """Recall past solutions and format as context string."""
+        # Absolute import to avoid circular dependency
         from llm_agent.core.memory import (
             format_solutions_context,
             recall_chronological,

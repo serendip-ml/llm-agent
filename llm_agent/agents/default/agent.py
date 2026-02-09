@@ -14,18 +14,44 @@ from typing import TYPE_CHECKING, Any
 from appinfra.log import Logger
 from appinfra.time import time
 
-from llm_agent.core.agent import Agent as BaseAgent
-from llm_agent.core.dispatcher import Dispatcher
-from llm_agent.core.memory import (
+from ...core.agent import Agent as BaseAgent
+from ...core.dispatcher import Dispatcher
+from ...core.memory import (
     format_solutions_context,
     recall_chronological,
     recall_semantic,
 )
-from llm_agent.core.runnable import ExecutionResult
+from ...core.runnable import ExecutionResult
 
 
 if TYPE_CHECKING:
     from llm_agent.core.agent import Identity
+
+
+# Lazy import helpers to avoid circular dependencies
+# These functions delay imports until runtime, preventing import cycles
+def _get_learn_trait_class() -> type:
+    from ...core.traits.builtin.learn import LearnTrait
+
+    return LearnTrait
+
+
+def _get_saia_trait_class() -> type:
+    from ...core.traits.builtin.saia import SAIATrait
+
+    return SAIATrait
+
+
+def _get_llm_trait_class() -> type:
+    from ...core.traits.builtin.llm import LLMTrait
+
+    return LLMTrait
+
+
+def _get_tools_trait_class() -> type:
+    from ...core.traits.builtin.tools import ToolsTrait
+
+    return ToolsTrait
 
 
 @dataclass
@@ -50,8 +76,8 @@ class Agent(BaseAgent):
 
         identity = Identity.from_name("explorer")
         agent = Agent(lg, identity=identity, default_prompt="Analyze the codebase")
-        agent.add_trait(SAIATrait(lg=lg, backend=backend))
-        agent.add_trait(ToolsTrait())
+        agent.add_trait(SAIATrait(agent, backend=backend))
+        agent.add_trait(ToolsTrait(agent))
         agent.start()
 
         result = agent.run_once()
@@ -253,8 +279,8 @@ class Agent(BaseAgent):
 
     async def _run_with_dispatcher(self) -> ExecutionResult:
         """Run execution using event orchestrator."""
-        from llm_agent.core.traits.learn import LearnTrait
-        from llm_agent.core.traits.saia import SAIATrait
+        LearnTrait = _get_learn_trait_class()
+        SAIATrait = _get_saia_trait_class()
 
         saia_trait = self.get_trait(SAIATrait)
         learn_trait = self.get_trait(LearnTrait)
@@ -318,8 +344,8 @@ class Agent(BaseAgent):
 
     async def _ask_async(self, question: str) -> ExecutionResult:
         """Async implementation of ask() using event orchestration."""
-        from llm_agent.core.traits.learn import LearnTrait
-        from llm_agent.core.traits.saia import SAIATrait
+        LearnTrait = _get_learn_trait_class()
+        SAIATrait = _get_saia_trait_class()
 
         saia_trait = self.get_trait(SAIATrait)
         learn_trait = self.get_trait(LearnTrait)
@@ -358,7 +384,7 @@ class Agent(BaseAgent):
 
     async def _execute_async(self, prompt: str) -> ExecutionResult:
         """Execute a prompt using SAIA."""
-        from llm_agent.core.traits.saia import SAIATrait
+        SAIATrait = _get_saia_trait_class()
 
         saia_trait = self.get_trait(SAIATrait)
         if saia_trait is None:
@@ -431,7 +457,7 @@ class Agent(BaseAgent):
         Returns:
             List of past solution facts.
         """
-        from llm_agent.core.traits.learn import LearnTrait
+        LearnTrait = _get_learn_trait_class()
 
         learn_trait = self.get_trait(LearnTrait)
         if learn_trait is None:
@@ -463,7 +489,7 @@ class Agent(BaseAgent):
 
     def _build_problem_context(self, result: ExecutionResult) -> dict[str, Any]:
         """Build problem context dict including iterations, trace ID, and tools."""
-        from llm_agent.core.traits.tools import ToolsTrait
+        ToolsTrait = _get_tools_trait_class()
 
         context: dict[str, Any] = {
             "iterations": result.iterations,
@@ -513,8 +539,8 @@ class Agent(BaseAgent):
 
     async def _persist_conclusion(self, result: ExecutionResult) -> None:
         """Persist a complete solution record from a successful run."""
-        from llm_agent.core.traits.learn import LearnTrait
-        from llm_agent.core.traits.saia import SAIATrait
+        LearnTrait = _get_learn_trait_class()
+        SAIATrait = _get_saia_trait_class()
 
         learn_trait = self.get_trait(LearnTrait)
         saia_trait = self.get_trait(SAIATrait)
@@ -564,7 +590,8 @@ class Agent(BaseAgent):
             RuntimeError: If LLMTrait is not attached.
         """
         from llm_agent.core.llm.types import Message
-        from llm_agent.core.traits.llm import LLMTrait
+
+        LLMTrait = _get_llm_trait_class()
 
         llm_trait = self.get_trait(LLMTrait)
         if llm_trait is None:
@@ -598,7 +625,7 @@ class Agent(BaseAgent):
         Raises:
             RuntimeError: If LearnTrait is not attached.
         """
-        from llm_agent.core.traits.learn import LearnTrait
+        LearnTrait = _get_learn_trait_class()
 
         learn_trait = self.get_trait(LearnTrait)
         if learn_trait is None:
@@ -615,7 +642,7 @@ class Agent(BaseAgent):
         Raises:
             RuntimeError: If LearnTrait is not attached.
         """
-        from llm_agent.core.traits.learn import LearnTrait
+        LearnTrait = _get_learn_trait_class()
 
         learn_trait = self.get_trait(LearnTrait)
         if learn_trait is None:
@@ -643,7 +670,7 @@ class Agent(BaseAgent):
         Raises:
             RuntimeError: If LearnTrait is not attached.
         """
-        from llm_agent.core.traits.learn import LearnTrait
+        LearnTrait = _get_learn_trait_class()
 
         learn_trait = self.get_trait(LearnTrait)
         if learn_trait is None:
@@ -672,7 +699,7 @@ class Agent(BaseAgent):
 
         from typing import Literal, cast
 
-        from llm_agent.core.traits.learn import LearnTrait
+        LearnTrait = _get_learn_trait_class()
 
         learn_trait = self.get_trait(LearnTrait)
         if learn_trait is None:

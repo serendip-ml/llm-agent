@@ -1,6 +1,6 @@
 """Protocol v1 messages for learning agent API."""
 
-from llm_agent.runtime.server.protocol.v1.messages import (
+from .messages import (
     MESSAGE_REGISTRY,
     CompleteRequest,
     CompleteResponse,

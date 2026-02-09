@@ -209,9 +209,29 @@ class Factory:
         """
         return self._platform.trait_factory.create(
             trait_name=trait_name,  # Pass enum directly
+            agent=agent,  # Pass agent to factory
             agent_config=config,
             identity=agent.identity,  # type: ignore[attr-defined]  # For LearnTrait
         )
+
+    def _build_trait_class_map(self) -> dict[TraitName, type]:
+        """Build mapping from trait names to trait classes for validation."""
+        from ..traits.builtin.directive import DirectiveTrait, MethodTrait
+        from ..traits.builtin.http import HTTPTrait
+        from ..traits.builtin.learn import LearnTrait
+        from ..traits.builtin.llm import LLMTrait
+        from ..traits.builtin.saia import SAIATrait
+        from ..traits.builtin.tools import ToolsTrait
+
+        return {
+            TraitName.DIRECTIVE: DirectiveTrait,
+            TraitName.LLM: LLMTrait,
+            TraitName.LEARN: LearnTrait,
+            TraitName.METHOD: MethodTrait,
+            TraitName.HTTP: HTTPTrait,
+            TraitName.SAIA: SAIATrait,
+            TraitName.TOOLS: ToolsTrait,
+        }
 
     def _validate_trait_requirements(
         self, agent: Agent, config: dict[str, Any], required: list[TraitName]
@@ -229,17 +249,7 @@ class Factory:
         if not required:
             return
 
-        # Map trait names to classes for validation
-        from ..traits.directive import DirectiveTrait, MethodTrait
-        from ..traits.learn import LearnTrait
-        from ..traits.llm import LLMTrait
-
-        trait_class_map = {
-            TraitName.DIRECTIVE: DirectiveTrait,
-            TraitName.LLM: LLMTrait,
-            TraitName.LEARN: LearnTrait,
-            TraitName.METHOD: MethodTrait,
-        }
+        trait_class_map = self._build_trait_class_map()
 
         # Validate each required trait is attached
         missing: list[str] = []
@@ -266,8 +276,8 @@ class Factory:
             agent: Agent instance.
             config: Full config dict from manifest.
         """
-        from ..traits.learn import LearnTrait
-        from ..traits.tools import ToolsTrait
+        from ..traits.builtin.learn import LearnTrait
+        from ..traits.builtin.tools import ToolsTrait
 
         # Determine which tools to configure
         tools_config = config.get("tools", self.default_tools)
@@ -280,12 +290,17 @@ class Factory:
             self._platform.tool_factory.set_learn_trait(learn_trait)
 
         try:
-            # Create ToolsTrait and populate with configured tools
-            tools_trait = ToolsTrait()
+            # Get or create ToolsTrait and populate with configured tools
+            tools_trait = agent.get_trait(ToolsTrait)
+            is_new = tools_trait is None
+            if is_new:
+                tools_trait = ToolsTrait(agent)
+
+            assert tools_trait is not None  # Either retrieved or just created
             self._create_and_register_tools(agent, tools_config, tools_trait)
 
-            # Attach ToolsTrait if any tools were created
-            if tools_trait.has_tools():
+            # Attach ToolsTrait if any tools were created (only if newly created)
+            if is_new and tools_trait.has_tools():
                 agent.add_trait(tools_trait)
         finally:
             # Clear learn_trait to avoid leaking state between agents

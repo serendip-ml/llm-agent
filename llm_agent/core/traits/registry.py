@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 from appinfra.log import Logger
 
-from ..errors import TraitAlreadyRegisteredError, TraitNotFoundError
+from ..errors import DuplicateTraitError, TraitNotFoundError
 from .base import BaseTrait
 
 
@@ -28,22 +28,21 @@ class Registry:
     Provides type-safe access and trait discovery.
 
     Example:
-        # Platform creates registry with configured traits
-        registry = Registry(lg)
-        registry.register(LLMTrait(lg, llm_config))
-        registry.register(LearnTrait(lg, learn_config))
+        # Agent uses registry internally to manage its traits
+        agent = MyAgent(lg, config)
 
-        # Factory accesses traits by type
-        llm_trait = registry.get(LLMTrait)
-        if registry.has(LearnTrait):
-            learn_trait = registry.get(LearnTrait)
+        # Traits are registered via agent.add_trait()
+        agent.add_trait(LLMTrait(agent, llm_config))
+        agent.add_trait(LearnTrait(agent, learn_config))
 
-        # Or by name (if trait declares trait_name)
-        llm_trait = registry.get_by_name(TraitName.LLM)
+        # Access traits by type through agent
+        llm_trait = agent.get_trait(LLMTrait)
+        if llm_trait:
+            # Use the trait
+            pass
 
-        # Attach all available traits to agent
-        for trait in registry.all():
-            agent.add_trait(trait)
+        # Or require it (raises if missing)
+        learn_trait = agent.require_trait(LearnTrait)
     """
 
     def __init__(self, lg: Logger) -> None:
@@ -65,11 +64,11 @@ class Registry:
             trait: Trait instance to register.
 
         Raises:
-            TraitAlreadyRegisteredError: If a trait of this type is already registered.
+            DuplicateTraitError: If a trait of this type is already registered.
         """
         trait_type = type(trait)
         if trait_type in self._traits:
-            raise TraitAlreadyRegisteredError(
+            raise DuplicateTraitError(
                 f"Trait {trait_type.__name__} is already registered. "
                 "Use replace() to update an existing trait."
             )
@@ -79,7 +78,7 @@ class Registry:
             name = trait.trait_name
             existing = self._by_name.get(name)
             if existing is not None and type(existing) is not trait_type:
-                raise TraitAlreadyRegisteredError(
+                raise DuplicateTraitError(
                     f"Trait name '{name}' is already registered for {type(existing).__name__}."
                 )
 
@@ -213,6 +212,29 @@ class Registry:
             Count of registered traits.
         """
         return len(self._traits)
+
+    def unregister(self, trait_type: type[BaseTrait]) -> None:
+        """Unregister a trait by type.
+
+        Args:
+            trait_type: The trait class to unregister.
+
+        Raises:
+            TraitNotFoundError: If trait is not registered.
+        """
+        if trait_type not in self._traits:
+            raise TraitNotFoundError(
+                f"Trait {trait_type.__name__} is not registered and cannot be unregistered."
+            )
+
+        trait = self._traits[trait_type]
+        del self._traits[trait_type]
+
+        # Remove name mapping if it exists
+        if hasattr(trait, "trait_name"):
+            self._by_name.pop(trait.trait_name, None)
+
+        self._lg.debug("trait unregistered", extra={"trait": trait_type.__name__})
 
     def clear(self) -> None:
         """Remove all traits from registry."""
