@@ -11,7 +11,7 @@ from llm_agent.core.tools.base import BaseTool, ToolResult
 
 
 if TYPE_CHECKING:
-    from llm_agent.core.traits.learn import LearnTrait
+    from llm_agent.core.traits.builtin.learn import LearnTrait
 
 
 class RememberTool(BaseTool):
@@ -21,7 +21,7 @@ class RememberTool(BaseTool):
     Facts are stored with optional category for organization.
 
     Example:
-        from llm_agent.core.traits.learn import LearnTrait, LearnConfig
+        from llm_agent.core.traits.builtin.learn import LearnTrait, LearnConfig
         from llm_agent.core.tools.builtin.learn import RememberTool
 
         learn_trait = LearnTrait(lg, LearnConfig(...))
@@ -82,7 +82,7 @@ class RecallTool(BaseTool):
     when embedder is configured, otherwise returns recent facts.
 
     Example:
-        from llm_agent.core.traits.learn import LearnTrait, LearnConfig
+        from llm_agent.core.traits.builtin.learn import LearnTrait, LearnConfig
         from llm_agent.core.tools.builtin.learn import RecallTool
 
         learn_trait = LearnTrait(lg, LearnConfig(...))

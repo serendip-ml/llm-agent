@@ -17,7 +17,7 @@ from llm_agent.core.task import Task, TaskResult
 if TYPE_CHECKING:
     from llm_saia import SAIA
 
-    from llm_agent.core.traits.llm import LLMTrait
+    from llm_agent.core.traits.builtin.llm import LLMTrait
 
 
 # Type alias for identity prompt builder

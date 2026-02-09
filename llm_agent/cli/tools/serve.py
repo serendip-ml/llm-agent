@@ -16,7 +16,7 @@ from appinfra.app.tools import Tool, ToolConfig
 if TYPE_CHECKING:
     from multiprocessing.queues import Queue
 
-    from llm_agent.core.traits.learn import LearnConfig, LearnTrait
+    from llm_agent.core.traits.builtin.learn import LearnConfig, LearnTrait
     from llm_agent.runtime import AgentInfo, AgentRegistry, Core
     from llm_agent.runtime.server import AgentServerConfig
     from llm_agent.runtime.server.protocol.base import Request, Response
@@ -81,7 +81,7 @@ class ServeTool(Tool):
         Creates a template config with global settings (llm, db, embedder).
         Each agent will resolve its own profile_config from agent YAML.
         """
-        from llm_agent.core.traits.learn import LearnConfig
+        from llm_agent.core.traits.builtin.learn import LearnConfig
 
         if config.learn is None:
             return None
@@ -97,7 +97,7 @@ class ServeTool(Tool):
 
     def _create_learn_trait(self, learn_config: LearnConfig | None) -> LearnTrait | None:
         """Create LearnTrait from config for main process use."""
-        from llm_agent.core.traits.learn import LearnTrait
+        from llm_agent.core.traits.builtin.learn import LearnTrait
 
         if learn_config is None:
             return None

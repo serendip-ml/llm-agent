@@ -210,7 +210,7 @@ class TestHTTPTraitHandleRequest:
     @pytest.fixture
     def mock_llm_trait(self):
         """Create mock LLMTrait."""
-        from llm_agent.core.traits.llm import LLMTrait
+        from llm_agent.core.traits.builtin.llm import LLMTrait
 
         trait = MagicMock(spec=LLMTrait)
         trait.complete.return_value = CompletionResult(
@@ -225,7 +225,7 @@ class TestHTTPTraitHandleRequest:
     @pytest.fixture
     def mock_learn_trait(self):
         """Create mock LearnTrait."""
-        from llm_agent.core.traits.learn import LearnTrait
+        from llm_agent.core.traits.builtin.learn import LearnTrait
 
         trait = MagicMock(spec=LearnTrait)
         trait.remember.return_value = 42
@@ -236,8 +236,8 @@ class TestHTTPTraitHandleRequest:
     def agent(self, mock_logger, mock_llm_trait, mock_learn_trait):
         """Create a test agent with mocked traits."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.learn import LearnTrait
-        from llm_agent.core.traits.llm import LLMTrait
+        from llm_agent.core.traits.builtin.learn import LearnTrait
+        from llm_agent.core.traits.builtin.llm import LLMTrait
 
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
         agent._traits[LLMTrait] = mock_llm_trait
@@ -368,8 +368,8 @@ class TestHTTPTraitHandleRequest:
     def test_handle_recall_request_success(self, mock_logger):
         """Verify successful recall returns facts serialized correctly."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.learn import LearnTrait
-        from llm_agent.core.traits.llm import LLMTrait
+        from llm_agent.core.traits.builtin.learn import LearnTrait
+        from llm_agent.core.traits.builtin.llm import LLMTrait
         from llm_agent.runtime.server.protocol.v1 import RecallResponse
 
         # Setup mock scored facts

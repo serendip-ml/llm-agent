@@ -133,7 +133,7 @@ class TestToolsTrait:
     """Tests for ToolsTrait."""
 
     def test_register_tool(self):
-        from llm_agent.core.traits.tools import ToolsTrait
+        from llm_agent.core.traits.builtin.tools import ToolsTrait
 
         trait = ToolsTrait()
         tool = ShellTool()
@@ -144,7 +144,7 @@ class TestToolsTrait:
         assert trait.registry.get("shell") is tool
 
     def test_unregister_tool(self):
-        from llm_agent.core.traits.tools import ToolsTrait
+        from llm_agent.core.traits.builtin.tools import ToolsTrait
 
         trait = ToolsTrait()
         trait.register(ShellTool())
@@ -154,7 +154,7 @@ class TestToolsTrait:
         assert trait.has_tools() is False
 
     def test_trait_lifecycle(self):
-        from llm_agent.core.traits.tools import ToolsTrait
+        from llm_agent.core.traits.builtin.tools import ToolsTrait
 
         trait = ToolsTrait()
         mock_agent = MagicMock()
@@ -166,7 +166,7 @@ class TestToolsTrait:
         assert trait._agent is mock_agent
 
     def test_empty_registry(self):
-        from llm_agent.core.traits.tools import ToolsTrait
+        from llm_agent.core.traits.builtin.tools import ToolsTrait
 
         trait = ToolsTrait()
 

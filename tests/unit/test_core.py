@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from llm_agent.core.traits.llm import LLMConfig
+from llm_agent.core.traits.builtin.llm import LLMConfig
 from llm_agent.runtime import AgentRegistry, AgentState, Core
 from llm_agent.runtime.transport import MessageType, Response
 

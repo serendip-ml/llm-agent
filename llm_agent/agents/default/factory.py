@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from llm_agent.agents.default.agent import Agent
 from llm_agent.core.agent import Factory as BaseFactory
-from llm_agent.core.traits.saia import SAIAConfig, SAIATrait
+from llm_agent.core.traits.builtin.saia import SAIAConfig, SAIATrait
 
 
 if TYPE_CHECKING:
@@ -116,7 +116,7 @@ class Factory(BaseFactory):
 
     def _build_system_prompt(self, agent: Agent) -> str | None:
         """Build system prompt from identity and method traits."""
-        from llm_agent.core.traits.directive import DirectiveTrait, MethodTrait
+        from llm_agent.core.traits.builtin.directive import DirectiveTrait, MethodTrait
 
         parts: list[str] = []
 

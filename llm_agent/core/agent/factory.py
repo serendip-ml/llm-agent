@@ -230,9 +230,9 @@ class Factory:
             return
 
         # Map trait names to classes for validation
-        from ..traits.directive import DirectiveTrait, MethodTrait
-        from ..traits.learn import LearnTrait
-        from ..traits.llm import LLMTrait
+        from ..traits.builtin.directive import DirectiveTrait, MethodTrait
+        from ..traits.builtin.learn import LearnTrait
+        from ..traits.builtin.llm import LLMTrait
 
         trait_class_map = {
             TraitName.DIRECTIVE: DirectiveTrait,
@@ -266,8 +266,8 @@ class Factory:
             agent: Agent instance.
             config: Full config dict from manifest.
         """
-        from ..traits.learn import LearnTrait
-        from ..traits.tools import ToolsTrait
+        from ..traits.builtin.learn import LearnTrait
+        from ..traits.builtin.tools import ToolsTrait
 
         # Determine which tools to configure
         tools_config = config.get("tools", self.default_tools)

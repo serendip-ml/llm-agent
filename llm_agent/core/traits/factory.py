@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from llm_agent.core.platform import PlatformContext
     from llm_agent.core.traits import TraitName
-    from llm_agent.core.traits.directive import DirectiveTrait, MethodTrait
-    from llm_agent.core.traits.learn import LearnTrait
-    from llm_agent.core.traits.llm import LLMConfig, LLMTrait
+    from llm_agent.core.traits.builtin.directive import DirectiveTrait, MethodTrait
+    from llm_agent.core.traits.builtin.learn import LearnTrait
+    from llm_agent.core.traits.builtin.llm import LLMConfig, LLMTrait
 
 from .base import Trait
 
@@ -105,7 +105,7 @@ class Factory:
         Raises:
             ConfigError: If llm_config is None or invalid.
         """
-        from llm_agent.core.traits.llm import LLMTrait
+        from llm_agent.core.traits.builtin.llm import LLMTrait
 
         from ..errors import ConfigError
 
@@ -126,7 +126,7 @@ class Factory:
         Raises:
             ConfigError: If config is None or invalid.
         """
-        from llm_agent.core.traits.directive import Directive, DirectiveTrait
+        from llm_agent.core.traits.builtin.directive import Directive, DirectiveTrait
 
         from ..errors import ConfigError
 
@@ -159,7 +159,7 @@ class Factory:
         Raises:
             ConfigError: If learn_config is None or missing required fields.
         """
-        from llm_agent.core.traits.learn import LearnConfig, LearnTrait
+        from llm_agent.core.traits.builtin.learn import LearnConfig, LearnTrait
 
         from ..errors import ConfigError
 
@@ -191,7 +191,7 @@ class Factory:
         Raises:
             ConfigError: If method is None or empty.
         """
-        from llm_agent.core.traits.directive import MethodTrait
+        from llm_agent.core.traits.builtin.directive import MethodTrait
 
         from ..errors import ConfigError
 

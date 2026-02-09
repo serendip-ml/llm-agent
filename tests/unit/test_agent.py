@@ -132,7 +132,7 @@ class TestAgentTraits:
         assert agent.has_trait(type(mock_trait))
 
     def test_add_duplicate_trait_raises(self, agent, mock_logger):
-        from llm_agent.core.traits.llm import LLMTrait
+        from llm_agent.core.traits.builtin.llm import LLMTrait
 
         trait1 = LLMTrait(mock_logger, {})
         agent.add_trait(trait1)
@@ -180,7 +180,7 @@ class TestAgentExecution:
         """Create mock SAIATrait with mock SAIA."""
         from llm_saia import TaskResult
 
-        from llm_agent.core.traits.saia import SAIATrait
+        from llm_agent.core.traits.builtin.saia import SAIATrait
 
         trait = MagicMock(spec=SAIATrait)
         trait.saia = MagicMock()
@@ -193,7 +193,7 @@ class TestAgentExecution:
     def agent_with_saia(self, mock_logger, mock_saia_trait):
         """Create agent with SAIATrait attached."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.saia import SAIATrait
+        from llm_agent.core.traits.builtin.saia import SAIATrait
 
         agent = DefaultAgent(
             lg=mock_logger, identity=Identity.from_name("test"), default_prompt="Test task"
@@ -215,7 +215,7 @@ class TestAgentExecution:
 
     def test_run_once_without_default_prompt_fails(self, mock_logger, mock_saia_trait):
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.saia import SAIATrait
+        from llm_agent.core.traits.builtin.saia import SAIATrait
 
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
         agent._traits[SAIATrait] = mock_saia_trait
@@ -449,7 +449,7 @@ class TestFactorySystemPrompt:
     def test_system_prompt_with_identity_only(self, mock_logger):
         """System prompt contains identity when only identity is configured."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.directive import DirectiveTrait
+        from llm_agent.core.traits.builtin.directive import DirectiveTrait
 
         factory = self._create_factory(mock_logger)
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
@@ -462,7 +462,7 @@ class TestFactorySystemPrompt:
     def test_system_prompt_with_method_only(self, mock_logger):
         """System prompt contains method when only method is configured."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.directive import MethodTrait
+        from llm_agent.core.traits.builtin.directive import MethodTrait
 
         factory = self._create_factory(mock_logger)
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
@@ -475,7 +475,7 @@ class TestFactorySystemPrompt:
     def test_system_prompt_with_identity_and_method(self, mock_logger):
         """System prompt combines identity and method."""
         from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.directive import DirectiveTrait, MethodTrait
+        from llm_agent.core.traits.builtin.directive import DirectiveTrait, MethodTrait
 
         factory = self._create_factory(mock_logger)
         agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
@@ -499,7 +499,7 @@ class TestFactorySystemPrompt:
 
     def test_factory_create_passes_system_prompt_to_saia(self, mock_logger):
         """Factory.create() passes system prompt to SAIATrait."""
-        from llm_agent.core.traits.saia import SAIATrait
+        from llm_agent.core.traits.builtin.saia import SAIATrait
 
         factory = self._create_factory(mock_logger)
         config = {

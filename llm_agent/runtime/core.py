@@ -23,8 +23,8 @@ from llm_agent.runtime.transport import Message, MessageType, Request, create_ch
 if TYPE_CHECKING:
     from appinfra.log import Logger
 
-    from llm_agent.core.traits.learn import LearnConfig
-    from llm_agent.core.traits.llm import LLMConfig
+    from llm_agent.core.traits.builtin.learn import LearnConfig
+    from llm_agent.core.traits.builtin.llm import LLMConfig
     from llm_agent.runtime.registry import AgentRegistry
 
 

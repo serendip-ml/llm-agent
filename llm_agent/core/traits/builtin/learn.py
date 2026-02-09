@@ -16,7 +16,7 @@ from llm_learn.inference import ContextBuilder, Embedder
 from llm_learn.memory.atomic import Fact
 
 from llm_agent.core.llm.types import CompletionResult
-from llm_agent.core.traits.llm import LLMConfig, _resolve_llm_defaults
+from llm_agent.core.traits.builtin.llm import LLMConfig, _resolve_llm_defaults
 
 
 if TYPE_CHECKING:

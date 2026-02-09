@@ -13,7 +13,7 @@ from llm_agent import (
     StructuredOutputError,
 )
 from llm_agent.core.llm.types import Message
-from llm_agent.core.traits.llm import LLMTrait
+from llm_agent.core.traits.builtin.llm import LLMTrait
 
 
 pytestmark = pytest.mark.unit
