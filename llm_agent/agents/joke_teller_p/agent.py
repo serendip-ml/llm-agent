@@ -93,6 +93,19 @@ class JokeTellerAgent(Agent):
     def start(self) -> None:
         """Start agent and traits."""
         self._start_traits()
+
+        # Verify embedder is available (required for novelty checking)
+        learn_trait = self.require_trait(LearnTrait)
+        if not learn_trait.has_embedder:
+            self._lg.error(
+                "embedder not configured - required for novelty checking",
+                extra={"agent": self.name},
+            )
+            raise RuntimeError(
+                "JokeTellerAgent requires embedder for guaranteed novelty checking. "
+                "Configure embedder_url in learn section."
+            )
+
         self._started = True
         self._lg.info("agent started", extra={"agent": self.name})
 
@@ -339,16 +352,24 @@ Return your joke in JSON format with 'text' and 'style' fields."""
             )
 
     def _save_joke(self, learn_trait: LearnTrait, joke: Joke) -> None:
-        """Save joke to memory with embedding for future novelty checking.
+        """Save joke as a solution to the task of telling a joke.
+
+        Stores joke as type=solution with task context and metadata.
+        Embeddings are created automatically by solutions.record().
 
         Raises:
             Exception: If joke save fails (caller should handle to mark run as failed).
         """
-        # remember() automatically creates embeddings if embedder available
-        fact_id = learn_trait.remember(
-            fact=joke.text,
+        # Record joke as solution - auto-creates embedding from answer_text
+        fact_id = learn_trait.learn.solutions.record(
+            agent_name=self.name,
+            problem="Tell one short, original joke",
+            problem_context={"style_preference": "varied"},
+            answer={"text": joke.text, "style": joke.style},
+            answer_text=joke.text,
+            tokens_used=0,  # Not tracked at joke level
+            latency_ms=0,  # Not tracked at joke level
             category="joke",
-            source="system",
-            confidence=1.0,
+            source="agent",
         )
-        self._lg.debug("joke saved", extra={"fact_id": fact_id, "style": joke.style})
+        self._lg.debug("joke saved as solution", extra={"fact_id": fact_id, "style": joke.style})

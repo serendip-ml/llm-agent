@@ -142,25 +142,44 @@ class LearnTrait(BaseTrait):
         self._client: LLMClient | None = None
         self._llm_defaults: dict[str, Any] = {}
 
-    def _create_learn_client(self, database: Database) -> LearnClient:
-        """Create learn client from config using identity or legacy path."""
+    def _create_learn_client(
+        self, database: Database, embedder: Embedder | None, llm_client: LLMClient | None
+    ) -> LearnClient:
+        """Create learn client from config using identity or legacy path.
+
+        Args:
+            database: Database instance.
+            embedder: Embedder instance (None if not configured).
+            llm_client: LLM client instance (None if not configured).
+        """
+        from llm_learn.memory.isolation import IsolationContext
+
         identity = self._resolve_identity()
 
+        # Create IsolationContext from identity or profile_id
         if identity is not None:
-            return LearnClient.from_identity(
-                lg=self.agent.lg, identity=identity, database=database, ensure_schema=True
-            )
+            # Use identity's context_key for isolation
+            context_key = identity.context_key
+            schema_name = "public"  # Default schema
         elif self.config.profile_id is not None:
-            return LearnClient(
-                lg=self.agent.lg,
-                profile_id=self.config.profile_id,
-                database=database,
-                ensure_schema=True,
-            )
+            # Legacy: use profile_id directly as context_key
+            context_key = self.config.profile_id
+            schema_name = "public"
         else:
             raise ValueError(
                 "LearnConfig must have either identity, profile_config/agent_name, or profile_id"
             )
+
+        context = IsolationContext(context_key=context_key, schema_name=schema_name)
+
+        return LearnClient(
+            lg=self.agent.lg,
+            database=database,
+            context=context,
+            embedder=embedder,
+            llm_client=llm_client,
+            ensure_schema=True,
+        )
 
     def _resolve_identity(self) -> Identity | None:
         """Resolve Identity from config."""
@@ -168,17 +187,13 @@ class LearnTrait(BaseTrait):
             return self.config.identity
 
         if self.config.profile_config is not None or self.config.agent_name is not None:
-            from dataclasses import asdict
-
-            from llm_learn.core import IdentityResolver
-
+            # Build Identity from profile_config using IdentityResolver
             from ...agent import Identity
 
-            resolved = IdentityResolver.resolve(
+            return Identity.from_config(
                 config=self.config.profile_config,
                 defaults={"name": self.config.agent_name or "default"},
             )
-            return Identity(**asdict(resolved))
 
         return None
 
@@ -192,22 +207,24 @@ class LearnTrait(BaseTrait):
         pg = PG(self.agent.lg, self.config.db)
         self._database = Database(self.agent.lg, pg)
 
-        # Create learn client and context builder
-        self._learn = self._create_learn_client(self._database)
-        self._context = ContextBuilder(self._learn.facts)
-
-        # Create LLM client for completions
+        # Create LLM client for completions (before LearnClient)
         llm_config = self.config.llm or {}
         self._client = LLMClientFactory(self.agent.lg).from_config(llm_config)
         self._llm_defaults = _resolve_llm_defaults(llm_config)
 
-        # Create embedder if URL provided
+        # Create embedder if URL provided (before LearnClient)
         if self.config.embedder_url:
             self._embedder = Embedder(
                 base_url=self.config.embedder_url,
                 model=self.config.embedder_model,
                 timeout=self.config.embedder_timeout,
             )
+        else:
+            self._embedder = None
+
+        # Create learn client with embedder and llm_client already available
+        self._learn = self._create_learn_client(self._database, self._embedder, self._client)
+        self._context = ContextBuilder(self._learn.facts)
 
     def on_stop(self) -> None:
         """Close LLM client and embedder on agent stop."""
