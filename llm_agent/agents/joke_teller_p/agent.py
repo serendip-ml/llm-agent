@@ -14,9 +14,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from appinfra.log import Logger
-from pydantic import BaseModel
-
 from llm_infer.client.exceptions import BackendUnavailableError
+from pydantic import BaseModel
 
 from ...core.agent import Agent, ExecutionResult, Identity
 from ...core.llm.backend import StructuredOutputError
@@ -144,16 +143,23 @@ class JokeTellerAgent(Agent):
 
             return self._complete_cycle(learn_trait, joke, attempts)
 
-        except StructuredOutputError as e:
-            self._lg.warning("joke generation failed", extra={"error": str(e)})
-            return ExecutionResult(success=False, content=f"Error: {e}", iterations=1)
-        except BackendUnavailableError as e:
+        except (StructuredOutputError, BackendUnavailableError, Exception) as e:
+            return self._handle_generation_error(e)
+
+    def _handle_generation_error(self, error: Exception) -> ExecutionResult:
+        """Handle errors during joke generation with appropriate logging."""
+        if isinstance(error, StructuredOutputError):
+            self._lg.warning("joke generation failed", extra={"error": str(error)})
+            return ExecutionResult(success=False, content=f"Error: {error}", iterations=1)
+        elif isinstance(error, BackendUnavailableError):
             # LLM service unavailable - log without trace
-            self._lg.warning("llm service unavailable - will retry next cycle", extra={"error": str(e)})
+            self._lg.warning(
+                "llm service unavailable - will retry next cycle", extra={"error": str(error)}
+            )
             return ExecutionResult(success=False, content="LLM service unavailable", iterations=1)
-        except Exception as e:
-            self._lg.warning("joke generation failed", extra={"exception": e})
-            return ExecutionResult(success=False, content=f"Error: {e}", iterations=1)
+        else:
+            self._lg.warning("joke generation failed", extra={"exception": error})
+            return ExecutionResult(success=False, content=f"Error: {error}", iterations=1)
 
     def _complete_cycle(
         self, learn_trait: LearnTrait, joke: Joke, attempts: int

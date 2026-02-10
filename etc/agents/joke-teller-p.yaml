@@ -36,7 +36,7 @@ task:
     through prompt-based instructions alone.
 
 schedule:
-  interval: 60
+  interval: 60  # Every 60 seconds - intentional for continuous joke generation (free LLM)
 
 # No tools needed - programmatic agent uses LearnTrait/LLMTrait directly
 # No conversation config - not using conversation runner

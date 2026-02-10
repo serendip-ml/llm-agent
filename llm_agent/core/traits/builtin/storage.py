@@ -19,7 +19,11 @@ class StorageTrait(BaseTrait):
     """Provides AgentStorage for custom relational schemas.
 
     Wraps LearnClient to provide direct SQLAlchemy access for agent tables
-    with automatic isolation. Requires LearnTrait to be attached.
+    with automatic isolation.
+
+    **IMPORTANT:** StorageTrait depends on LearnTrait. LearnTrait must be attached
+    to the agent BEFORE StorageTrait, as StorageTrait.on_start() requires LearnTrait
+    to be available. Ensure correct ordering in factory required_traits or YAML config.
 
     Philosophy:
         - Use SQLAlchemy directly (no abstraction layer)
@@ -52,12 +56,8 @@ class StorageTrait(BaseTrait):
         # Register table
         storage.register_table(JokeTable)
 
-        # Simple queries (SQLAlchemy with auto-isolation)
-        unrated = storage.query(JokeTable)\\
-            .filter(JokeTable.rated == False)\\
-            .order_by(JokeTable.created_at.desc())\\
-            .limit(10)\\
-            .all()
+        # Simple queries (auto-isolated, returns results immediately)
+        unrated = storage.select(JokeTable, rated=False)
 
         # Complex queries (raw SQLAlchemy)
         stmt = select(

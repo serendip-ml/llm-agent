@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
-from sqlalchemy.orm import Session
 
 from .schema import AgentTable, validate_agent_table
 
@@ -34,7 +33,7 @@ class AgentStorage:
     - Escape hatch for power users
 
     Example:
-        from sqlalchemy import String, Boolean, Float
+        from sqlalchemy import String, Boolean, Float, select, func
         from sqlalchemy.orm import Mapped, mapped_column
         from llm_agent.storage import AgentTable
 
@@ -50,12 +49,8 @@ class AgentStorage:
         # Register and use
         agent.storage.register_table(JokeTable)
 
-        # Simple queries (auto-isolated)
-        unrated = agent.storage.query(JokeTable)\\
-            .filter(JokeTable.rated == False)\\
-            .order_by(JokeTable.created_at.desc())\\
-            .limit(10)\\
-            .all()
+        # Simple queries (auto-isolated, returns results immediately)
+        unrated = agent.storage.select(JokeTable, rated=False)
 
         # Insert (auto-adds context_key)
         joke_id = agent.storage.insert(JokeTable,
@@ -65,7 +60,6 @@ class AgentStorage:
         )
 
         # Complex queries (raw SQLAlchemy with manual isolation)
-        from sqlalchemy import func
         stmt = select(
             JokeTable.style,
             func.avg(JokeTable.rating).label('avg_rating')
@@ -83,15 +77,29 @@ class AgentStorage:
         Args:
             lg: Logger instance.
             learn_client: LearnClient instance (provides database + isolation context).
+
+        Raises:
+            ValueError: If learn_client's isolation context has no context_key.
         """
         self._lg = lg
         self._learn = learn_client
         self._registered_tables: dict[str, type[AgentTable]] = {}
 
+        # Validate that context_key is set (required for isolation)
+        if self._learn.context.context_key is None:
+            raise ValueError(
+                "AgentStorage requires isolation context with context_key set. "
+                "Ensure LearnClient was created with valid IsolationContext."
+            )
+
     @property
-    def context_key(self) -> str | None:
-        """Get isolation context key."""
-        return self._learn.context.context_key
+    def context_key(self) -> str:
+        """Get isolation context key.
+
+        Returns:
+            The context key for data isolation (guaranteed to be set).
+        """
+        return self._learn.context.context_key  # type: ignore[return-value]
 
     @property
     def schema_name(self) -> str | None:
@@ -114,9 +122,10 @@ class AgentStorage:
 
         table_name = model_class.__tablename__
 
-        # Set schema if specified in isolation context
-        if self.schema_name:
-            model_class.__table__.schema = self.schema_name
+        # Schema support note: We don't set model_class.__table__.schema here because
+        # it would mutate the class globally (breaking multi-schema isolation).
+        # Isolation is enforced via context_key column filtering.
+        # TODO: Implement proper schema support via schema-qualified table names at query time.
 
         # Create table if it doesn't exist
         engine = self._learn.database.engine
@@ -134,41 +143,55 @@ class AgentStorage:
             },
         )
 
-    def query(self, model_class: type[AgentTable]) -> Any:
-        """Start a query with automatic isolation.
+    def select(self, model_class: type[AgentTable], **filters: Any) -> list[AgentTable]:
+        """Query rows from an agent table with automatic isolation.
 
-        Returns a SQLAlchemy Query object with context_key filter pre-applied.
-        Agents can chain any SQLAlchemy operations.
+        Returns rows immediately (not a lazy query object). For complex queries,
+        use execute() with SQLAlchemy select() statements.
 
         Args:
             model_class: The model class to query.
+            **filters: Column filters (e.g., rated=False, style="pun").
 
         Returns:
-            SQLAlchemy Query object (isolated by context_key).
+            List of matching rows.
 
         Raises:
-            ValueError: If table not registered.
+            ValueError: If table not registered or context_key not set.
 
         Example:
-            jokes = agent.storage.query(JokeTable)\\
-                .filter(JokeTable.rated == False)\\
-                .order_by(JokeTable.created_at.desc())\\
-                .limit(10)\\
-                .all()
+            # Simple select with filters
+            unrated_jokes = agent.storage.select(JokeTable, rated=False)
+
+            # Select all
+            all_jokes = agent.storage.select(JokeTable)
+
+            # For complex queries, use execute() instead
+            from sqlalchemy import select
+            stmt = select(JokeTable).where(
+                JokeTable.context_key == agent.storage.context_key,
+                JokeTable.rated == False
+            ).order_by(JokeTable.created_at.desc()).limit(10)
+            results = agent.storage.execute(stmt).scalars().all()
         """
         table_name = model_class.__tablename__
         if table_name not in self._registered_tables:
             raise ValueError(f"Table not registered: {table_name}")
 
-        # Get session and build query with automatic isolation
-        session = self._get_session()
+        if self.context_key is None:
+            raise ValueError("context_key not set - cannot perform isolated select")
 
-        # Auto-apply context_key filter if context_key is set
-        query = session.query(model_class)
-        if self.context_key is not None:
-            query = query.filter(model_class.context_key == self.context_key)
+        # Build select statement with automatic isolation
+        from sqlalchemy import select
 
-        return query
+        stmt = select(model_class).where(model_class.context_key == self.context_key)
+
+        # Apply additional filters
+        for key, value in filters.items():
+            stmt = stmt.where(getattr(model_class, key) == value)
+
+        with self._learn.database.session() as session:
+            return list(session.execute(stmt).scalars().all())
 
     def insert(self, model_class: type[AgentTable], **values: Any) -> int:
         """Insert a row into an agent table.
@@ -183,7 +206,7 @@ class AgentStorage:
             Inserted row ID.
 
         Raises:
-            ValueError: If table not registered.
+            ValueError: If table not registered or context_key not set.
 
         Example:
             joke_id = agent.storage.insert(JokeTable,
@@ -196,9 +219,11 @@ class AgentStorage:
         if table_name not in self._registered_tables:
             raise ValueError(f"Table not registered: {table_name}")
 
+        if self.context_key is None:
+            raise ValueError("context_key not set - cannot perform isolated insert")
+
         # Add context_key automatically
-        if self.context_key is not None:
-            values["context_key"] = self.context_key
+        values["context_key"] = self.context_key
 
         with self._learn.database.session() as session:
             record = model_class(**values)
@@ -236,21 +261,6 @@ class AgentStorage:
         with self._learn.database.session() as session:
             return session.execute(stmt)
 
-    def _get_session(self) -> Session:
-        """Get a database session.
-
-        This returns a session that stays open - caller is responsible for cleanup.
-        Used internally by query() which returns a Query object.
-
-        For most use cases, use query(), insert(), or execute() instead.
-        """
-        # Create a new session
-        # Note: The session from _learn.database.session() is a context manager
-        # For query(), we need a session that persists beyond this call
-        # SQLAlchemy Query objects need the session to stay alive
-        session_factory = self._learn.database.session
-        return session_factory()  # type: ignore[return-value]
-
     def update(self, model_class: type[AgentTable], row_id: int, **values: Any) -> None:
         """Update a row by ID.
 
@@ -260,7 +270,7 @@ class AgentStorage:
             **values: Column values to update.
 
         Raises:
-            ValueError: If table not registered or row not found.
+            ValueError: If table not registered, context_key not set, or row not found.
 
         Example:
             agent.storage.update(JokeTable, joke_id, rated=True, rating=5)
@@ -269,13 +279,18 @@ class AgentStorage:
         if table_name not in self._registered_tables:
             raise ValueError(f"Table not registered: {table_name}")
 
-        with self._learn.database.session() as session:
-            # Query with isolation
-            query = session.query(model_class).filter(model_class.id == row_id)
-            if self.context_key is not None:
-                query = query.filter(model_class.context_key == self.context_key)
+        if self.context_key is None:
+            raise ValueError("context_key not set - cannot perform isolated update")
 
-            record = query.first()
+        from sqlalchemy import select
+
+        with self._learn.database.session() as session:
+            # Query with isolation (context_key required)
+            stmt = select(model_class).where(
+                model_class.id == row_id, model_class.context_key == self.context_key
+            )
+            record = session.execute(stmt).scalar_one_or_none()
+
             if record is None:
                 raise ValueError(f"Row not found: {row_id}")
 
@@ -293,7 +308,7 @@ class AgentStorage:
             row_id: ID of the row to delete.
 
         Raises:
-            ValueError: If table not registered or row not found.
+            ValueError: If table not registered, context_key not set, or row not found.
 
         Example:
             agent.storage.delete(JokeTable, joke_id)
@@ -302,13 +317,18 @@ class AgentStorage:
         if table_name not in self._registered_tables:
             raise ValueError(f"Table not registered: {table_name}")
 
-        with self._learn.database.session() as session:
-            # Query with isolation
-            query = session.query(model_class).filter(model_class.id == row_id)
-            if self.context_key is not None:
-                query = query.filter(model_class.context_key == self.context_key)
+        if self.context_key is None:
+            raise ValueError("context_key not set - cannot perform isolated delete")
 
-            record = query.first()
+        from sqlalchemy import select
+
+        with self._learn.database.session() as session:
+            # Query with isolation (context_key required)
+            stmt = select(model_class).where(
+                model_class.id == row_id, model_class.context_key == self.context_key
+            )
+            record = session.execute(stmt).scalar_one_or_none()
+
             if record is None:
                 raise ValueError(f"Row not found: {row_id}")
 
