@@ -102,6 +102,8 @@ class JokeTellerAgent(Agent):
                 "embedder not configured - required for novelty checking",
                 extra={"agent": self.name},
             )
+            # Clean up started traits before raising
+            self._stop_traits()
             raise RuntimeError(
                 "JokeTellerAgent requires embedder for guaranteed novelty checking. "
                 "Configure embedder_url in learn section."

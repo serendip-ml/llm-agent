@@ -33,7 +33,7 @@ class StorageTrait(BaseTrait):
     Example:
         from llm_agent.core.traits import StorageTrait, LearnTrait
         from llm_agent.storage import AgentTable
-        from sqlalchemy import String, Boolean, func, select
+        from sqlalchemy import String, Boolean, Float, func, select
         from sqlalchemy.orm import Mapped, mapped_column
 
         # Define schema

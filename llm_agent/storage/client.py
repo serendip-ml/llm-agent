@@ -227,7 +227,7 @@ class AgentStorage:
             session.commit()
             return row_id
 
-    def execute(self, stmt: Any) -> Any:
+    def execute(self, stmt: Any) -> list[Any]:
         """Execute a raw SQLAlchemy statement.
 
         For complex queries that need full SQL power.
@@ -237,7 +237,7 @@ class AgentStorage:
             stmt: SQLAlchemy statement (select, update, delete, etc.).
 
         Returns:
-            Result object from SQLAlchemy execution.
+            Materialized list of results (not a live Result object).
 
         Example:
             from sqlalchemy import select, func
@@ -250,10 +250,11 @@ class AgentStorage:
                 JokeTable.rated == True
             ).group_by(JokeTable.style)
 
-            results = agent.storage.execute(stmt).all()
+            results = agent.storage.execute(stmt)  # Returns list directly
         """
         with self._learn.database.session() as session:
-            return session.execute(stmt)
+            result = session.execute(stmt)
+            return list(result.all())
 
     def update(self, model_class: type[AgentTable], row_id: int, **values: Any) -> None:
         """Update a row by ID.

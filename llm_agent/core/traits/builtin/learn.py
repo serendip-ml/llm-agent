@@ -29,26 +29,15 @@ class LearnConfig:
     """Configuration for Learn trait.
 
     Attributes:
-        identity: Resolved Identity (preferred).
+        identity: Resolved Identity (required).
         llm: LLM configuration for learned completions.
         db: Database configuration dict (with url, extensions, etc.).
         embedder_url: URL for embedding service (None = no RAG).
         embedder_model: Model name for embeddings.
         embedder_timeout: Embedder timeout in seconds.
-
-    Legacy:
-        profile_config: Profile configuration dict from agent YAML (deprecated).
-        agent_name: Agent name (deprecated).
-        profile_id: Legacy profile ID (deprecated).
     """
 
-    # New: resolved identity
     identity: Identity | None = None
-
-    # Legacy: hierarchical profile configuration (deprecated)
-    profile_config: dict[str, Any] | None = None
-    agent_name: str | None = None
-    profile_id: str | None = None
 
     llm: LLMConfig | None = None
     db: dict[str, Any] | None = None
@@ -79,9 +68,6 @@ class LearnConfig:
 
         return {
             "identity": identity_dict,
-            "profile_config": _to_plain_dict(self.profile_config),
-            "agent_name": self.agent_name,
-            "profile_id": self.profile_id,  # Legacy
             "llm": _to_plain_dict(self.llm),
             "db": _to_plain_dict(self.db),
             "embedder_url": self.embedder_url,
@@ -105,10 +91,11 @@ class LearnTrait(BaseTrait):
 
     Example:
         from llm_agent.core.traits import LearnTrait, LearnConfig, LLMConfig
+        from llm_agent.core.agent import Identity
 
         agent = Agent(lg, config)
         learn_trait = LearnTrait(agent, LearnConfig(
-            profile_id="123",
+            identity=Identity.from_name("my-agent"),
             llm=LLMConfig(base_url="http://localhost:8000/v1"),
             embedder_url="http://localhost:8001/v1",
         ))
@@ -156,19 +143,12 @@ class LearnTrait(BaseTrait):
 
         identity = self._resolve_identity()
 
-        # Create IsolationContext from identity or profile_id
-        if identity is not None:
-            # Use identity's context_key for isolation
-            context_key = identity.context_key
-            schema_name = "public"  # Default schema
-        elif self.config.profile_id is not None:
-            # Legacy: use profile_id directly as context_key
-            context_key = self.config.profile_id
-            schema_name = "public"
-        else:
-            raise ValueError(
-                "LearnConfig must have either identity, profile_config/agent_name, or profile_id"
-            )
+        # Create IsolationContext from identity
+        if identity is None:
+            raise ValueError("LearnConfig must have identity set")
+
+        context_key = identity.context_key
+        schema_name = "public"  # Default schema
 
         context = IsolationContext(context_key=context_key, schema_name=schema_name)
 
@@ -183,19 +163,7 @@ class LearnTrait(BaseTrait):
 
     def _resolve_identity(self) -> Identity | None:
         """Resolve Identity from config."""
-        if self.config.identity is not None:
-            return self.config.identity
-
-        if self.config.profile_config is not None or self.config.agent_name is not None:
-            # Build Identity from profile_config using IdentityResolver
-            from ...agent import Identity
-
-            return Identity.from_config(
-                config=self.config.profile_config,
-                defaults={"name": self.config.agent_name or "default"},
-            )
-
-        return None
+        return self.config.identity
 
     def on_start(self) -> None:
         """Create learn client, LLM client, and embedder on agent start."""

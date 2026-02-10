@@ -513,6 +513,7 @@ class ServeTool(Tool):
             config_dict["config"] = agent_config.config
         else:
             # Prompt agents use conversation and events
+            config_dict["identity"] = agent_config.identity
             config_dict["conversation"] = agent_config.conversation
             if agent_config.events:
                 config_dict["events"] = {

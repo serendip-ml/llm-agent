@@ -71,6 +71,6 @@ class Identity:
         name = cfg.get("name") or defs.get("name", "default")
 
         # Get context_key (defaults to name if not specified)
-        context_key = cfg.get("context_key", name)
+        context_key = cfg.get("context_key") or defs.get("context_key", name)
 
         return cls(name=name, context_key=context_key)

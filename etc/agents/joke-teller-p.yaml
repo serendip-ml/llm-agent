@@ -36,7 +36,7 @@ task:
     through prompt-based instructions alone.
 
 schedule:
-  interval: 60  # Every 60 seconds - intentional for continuous joke generation (free LLM)
+  interval: 43200  # Every 12 hours (override: INFRA_AGENTS_JOKE_TELLER_P_SCHEDULE_INTERVAL=60)
 
 # No tools needed - programmatic agent uses LearnTrait/LLMTrait directly
 # No conversation config - not using conversation runner
