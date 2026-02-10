@@ -519,7 +519,7 @@ class TestFactorySystemPrompt:
 
         factory = self._create_factory(mock_logger)
         config = {
-            "profile": {"name": "test-agent"},
+            "identity": {"name": "test-agent"},
             "directive": "You are a code analyst.",
             "method": "- Analyze carefully",
             "task": {"description": "Analyze the code."},

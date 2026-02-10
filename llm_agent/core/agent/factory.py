@@ -20,7 +20,7 @@ class Factory:
     """Base factory for agents with standard initialization.
 
     This factory handles common patterns:
-    - Parses profile + identity → constructs Identity
+    - Parses identity → constructs Identity
     - Extracts config params → passes to agent __init__
     - Creates and attaches traits based on requirements
     - Configures tools from YAML or factory defaults
@@ -95,7 +95,7 @@ class Factory:
         if variables:
             config = _substitute_in_dict(config, variables)
 
-        # Parse profile → construct Identity (required)
+        # Parse identity → construct Identity (required)
         identity = self._build_identity(config)
 
         # Extract agent-specific config
@@ -114,7 +114,7 @@ class Factory:
         return agent
 
     def _build_identity(self, config: dict[str, Any]) -> Identity:
-        """Build Identity from profile fields.
+        """Build Identity from identity fields.
 
         Args:
             config: Full config dict from manifest.
@@ -125,15 +125,15 @@ class Factory:
         Raises:
             ConfigError: If required fields missing.
         """
-        # Extract profile
-        profile = config.get("profile", {})
-        name = profile.get("name")
+        # Extract identity
+        identity = config.get("identity", {})
+        name = identity.get("name")
 
         if not name:
-            raise ConfigError("profile.name is required")
+            raise ConfigError("identity.name is required")
 
         # Use Identity.from_config to properly resolve IDs
-        return Identity.from_config(profile, defaults={"name": name})
+        return Identity.from_config(identity, defaults={"name": name})
 
     def _attach_traits(self, agent: Agent, config: dict[str, Any]) -> None:
         """Create and attach traits for the agent.

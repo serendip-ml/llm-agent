@@ -17,13 +17,13 @@ class LearnBackendConfig(BaseModel):
     """Learn trait backend configuration.
 
     Note: profile_id is deprecated. Each agent now specifies its own
-    profile configuration in agent YAML (domain/workspace/name).
+    identity configuration in agent YAML (name and optional context_key).
     """
 
     db: dict[str, Any]
     """Database configuration dict (url, extensions, etc.)."""
     profile_id: str | None = None
-    """Legacy profile ID (deprecated, use per-agent profile config instead)."""
+    """Legacy profile ID (deprecated, use per-agent identity config instead)."""
     embedder_url: str | None = None
     embedder_model: str = "default"
     embedder_timeout: float = 30.0
@@ -95,8 +95,8 @@ class AgentConfigYAML(BaseModel):
     factory: str = "Factory"
     """Factory class name for programmatic agents (default: 'Factory')."""
 
-    profile: dict[str, Any] = {}
-    """Profile configuration for agent identity (domain/workspace/name)."""
+    identity: dict[str, Any] = {}
+    """Identity configuration for agent (name and optional context_key)."""
 
     config: dict[str, Any] = {}
     """Agent-specific configuration passed to __init__."""
@@ -138,7 +138,6 @@ class AgentServerConfig(BaseModel):
         llm: !include './llm.yaml'
 
         learn:
-          profile_id: "1"
           db: !include './infra.yaml#dbs.main'
 
         agents:

@@ -1,58 +1,46 @@
-"""Agent identity - wraps llm-learn ProfileIdentity with convenient constructors."""
+"""Agent identity - name and context_key for isolation.
+
+Identity wraps agent name and context_key (for data isolation).
+"""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
-
-from llm_learn.core.identity import IdentityResolver, ProfileIdentity
 
 
 @dataclass(frozen=True)
-class Identity(ProfileIdentity):
-    """Agent identity with convenient constructors.
+class Identity:
+    """Agent identity.
 
-    Wraps ProfileIdentity with agent-friendly API and room for future
-    agent-specific enrichments (version, capabilities, etc.).
+    Attributes:
+        name: Agent name.
+        context_key: Data isolation key (defaults to name if not specified).
 
     Examples:
-        # Simple name
-        identity = Identity.from_name("joke-teller")
+        # Simple (context_key defaults to name)
+        identity = Identity.from_config({"name": "jokester"})
+        # → name = "jokester", context_key = "jokester"
 
-        # With workspace
-        identity = Identity.from_name("joke-teller", workspace="production")
-
-        # From YAML config
-        config = {"domain": "acme", "workspace": "prod", "name": "reviewer"}
-        identity = Identity.from_config(config)
-
-        # With defaults (for factory)
-        identity = Identity.from_config(profile_config, defaults={"name": agent_name})
+        # Renaming (preserve data by explicit context_key)
+        identity = Identity.from_config({"name": "joke-master", "context_key": "jokester"})
+        # → name = "joke-master", context_key = "jokester"
     """
 
+    name: str
+    context_key: str
+
     @classmethod
-    def from_name(
-        cls, name: str, workspace: str = "default", domain: str | None = None
-    ) -> Identity:
-        """Create identity from simple name.
+    def from_name(cls, name: str) -> Identity:
+        """Create identity from name (context_key = name).
 
         Args:
-            name: Agent name (unique within workspace).
-            workspace: Workspace name (default: "default").
-            domain: Optional domain name.
+            name: Agent name.
 
         Returns:
-            Identity instance with resolved IDs.
-
-        Example:
-            identity = Identity.from_name("joke-teller")
+            Identity with context_key = name.
         """
-        config = {"name": name, "workspace": workspace}
-        if domain is not None:
-            config["domain"] = domain
-
-        identity = IdentityResolver.resolve(config)
-        return cls(**asdict(identity))
+        return cls(name=name, context_key=name)
 
     @classmethod
     def from_config(
@@ -61,15 +49,35 @@ class Identity(ProfileIdentity):
         """Create identity from configuration dict.
 
         Args:
-            config: Configuration dict with name/workspace/domain/IDs.
+            config: Configuration dict with name and optional context_key.
             defaults: Default values if not in config.
 
         Returns:
-            Identity instance with resolved IDs.
+            Identity.
 
-        Example:
-            config = {"name": "reviewer", "workspace": "production"}
-            identity = Identity.from_config(config)
+        Examples:
+            # Simple (context_key defaults to name)
+            Identity.from_config({"name": "jokester"})
+            # → name = "jokester", context_key = "jokester"
+
+            # Explicit context_key (for renaming without losing data)
+            Identity.from_config({"name": "joke-master", "context_key": "jokester"})
+            # → name = "joke-master", context_key = "jokester"
         """
-        identity = IdentityResolver.resolve(config, defaults)
-        return cls(**asdict(identity))
+        cfg = config or {}
+        defs = defaults or {}
+
+        # Get name (falsy values like "" fall through to defaults)
+        name = cfg.get("name") or defs.get("name", "default")
+
+        # Get context_key (defaults to name if not specified)
+        context_key = cfg.get("context_key") or defs.get("context_key", name)
+
+        # Validate that name and context_key are not empty
+        if not name or not context_key:
+            raise ValueError(
+                "Identity name and context_key cannot be empty. "
+                f"Got name={name!r}, context_key={context_key!r}"
+            )
+
+        return cls(name=name, context_key=context_key)

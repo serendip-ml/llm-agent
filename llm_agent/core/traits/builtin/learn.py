@@ -29,26 +29,15 @@ class LearnConfig:
     """Configuration for Learn trait.
 
     Attributes:
-        identity: Resolved Identity (preferred).
+        identity: Resolved Identity (required).
         llm: LLM configuration for learned completions.
         db: Database configuration dict (with url, extensions, etc.).
         embedder_url: URL for embedding service (None = no RAG).
         embedder_model: Model name for embeddings.
         embedder_timeout: Embedder timeout in seconds.
-
-    Legacy:
-        profile_config: Profile configuration dict from agent YAML (deprecated).
-        agent_name: Agent name (deprecated).
-        profile_id: Legacy profile ID (deprecated).
     """
 
-    # New: resolved identity
     identity: Identity | None = None
-
-    # Legacy: hierarchical profile configuration (deprecated)
-    profile_config: dict[str, Any] | None = None
-    agent_name: str | None = None
-    profile_id: str | None = None
 
     llm: LLMConfig | None = None
     db: dict[str, Any] | None = None
@@ -79,9 +68,6 @@ class LearnConfig:
 
         return {
             "identity": identity_dict,
-            "profile_config": _to_plain_dict(self.profile_config),
-            "agent_name": self.agent_name,
-            "profile_id": self.profile_id,  # Legacy
             "llm": _to_plain_dict(self.llm),
             "db": _to_plain_dict(self.db),
             "embedder_url": self.embedder_url,
@@ -105,10 +91,11 @@ class LearnTrait(BaseTrait):
 
     Example:
         from llm_agent.core.traits import LearnTrait, LearnConfig, LLMConfig
+        from llm_agent.core.agent import Identity
 
         agent = Agent(lg, config)
         learn_trait = LearnTrait(agent, LearnConfig(
-            profile_id="123",
+            identity=Identity.from_name("my-agent"),
             llm=LLMConfig(base_url="http://localhost:8000/v1"),
             embedder_url="http://localhost:8001/v1",
         ))
@@ -142,45 +129,41 @@ class LearnTrait(BaseTrait):
         self._client: LLMClient | None = None
         self._llm_defaults: dict[str, Any] = {}
 
-    def _create_learn_client(self, database: Database) -> LearnClient:
-        """Create learn client from config using identity or legacy path."""
+    def _create_learn_client(
+        self, database: Database, embedder: Embedder | None, llm_client: LLMClient | None
+    ) -> LearnClient:
+        """Create learn client from config using identity or legacy path.
+
+        Args:
+            database: Database instance.
+            embedder: Embedder instance (None if not configured).
+            llm_client: LLM client instance (None if not configured).
+        """
+        from llm_learn.memory.isolation import IsolationContext
+
         identity = self._resolve_identity()
 
-        if identity is not None:
-            return LearnClient.from_identity(
-                lg=self.agent.lg, identity=identity, database=database, ensure_schema=True
-            )
-        elif self.config.profile_id is not None:
-            return LearnClient(
-                lg=self.agent.lg,
-                profile_id=self.config.profile_id,
-                database=database,
-                ensure_schema=True,
-            )
-        else:
-            raise ValueError(
-                "LearnConfig must have either identity, profile_config/agent_name, or profile_id"
-            )
+        # Create IsolationContext from identity
+        if identity is None:
+            raise ValueError("LearnConfig must have identity set")
+
+        context_key = identity.context_key
+        schema_name = "public"  # Default schema
+
+        context = IsolationContext(context_key=context_key, schema_name=schema_name)
+
+        return LearnClient(
+            lg=self.agent.lg,
+            database=database,
+            context=context,
+            embedder=embedder,
+            llm_client=llm_client,
+            ensure_schema=True,
+        )
 
     def _resolve_identity(self) -> Identity | None:
         """Resolve Identity from config."""
-        if self.config.identity is not None:
-            return self.config.identity
-
-        if self.config.profile_config is not None or self.config.agent_name is not None:
-            from dataclasses import asdict
-
-            from llm_learn.core import IdentityResolver
-
-            from ...agent import Identity
-
-            resolved = IdentityResolver.resolve(
-                config=self.config.profile_config,
-                defaults={"name": self.config.agent_name or "default"},
-            )
-            return Identity(**asdict(resolved))
-
-        return None
+        return self.config.identity
 
     def on_start(self) -> None:
         """Create learn client, LLM client, and embedder on agent start."""
@@ -192,22 +175,24 @@ class LearnTrait(BaseTrait):
         pg = PG(self.agent.lg, self.config.db)
         self._database = Database(self.agent.lg, pg)
 
-        # Create learn client and context builder
-        self._learn = self._create_learn_client(self._database)
-        self._context = ContextBuilder(self._learn.facts)
-
-        # Create LLM client for completions
+        # Create LLM client for completions (before LearnClient)
         llm_config = self.config.llm or {}
         self._client = LLMClientFactory(self.agent.lg).from_config(llm_config)
         self._llm_defaults = _resolve_llm_defaults(llm_config)
 
-        # Create embedder if URL provided
+        # Create embedder if URL provided (before LearnClient)
         if self.config.embedder_url:
             self._embedder = Embedder(
                 base_url=self.config.embedder_url,
                 model=self.config.embedder_model,
                 timeout=self.config.embedder_timeout,
             )
+        else:
+            self._embedder = None
+
+        # Create learn client with embedder and llm_client already available
+        self._learn = self._create_learn_client(self._database, self._embedder, self._client)
+        self._context = ContextBuilder(self._learn.facts)
 
     def on_stop(self) -> None:
         """Close LLM client and embedder on agent stop."""
