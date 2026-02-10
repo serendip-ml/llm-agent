@@ -157,7 +157,7 @@ class AgentStorage:
             List of matching rows.
 
         Raises:
-            ValueError: If table not registered or context_key not set.
+            ValueError: If table not registered.
 
         Example:
             # Simple select with filters
@@ -177,9 +177,6 @@ class AgentStorage:
         table_name = model_class.__tablename__
         if table_name not in self._registered_tables:
             raise ValueError(f"Table not registered: {table_name}")
-
-        if self.context_key is None:
-            raise ValueError("context_key not set - cannot perform isolated select")
 
         # Build select statement with automatic isolation
         from sqlalchemy import select
@@ -206,7 +203,7 @@ class AgentStorage:
             Inserted row ID.
 
         Raises:
-            ValueError: If table not registered or context_key not set.
+            ValueError: If table not registered.
 
         Example:
             joke_id = agent.storage.insert(JokeTable,
@@ -218,9 +215,6 @@ class AgentStorage:
         table_name = model_class.__tablename__
         if table_name not in self._registered_tables:
             raise ValueError(f"Table not registered: {table_name}")
-
-        if self.context_key is None:
-            raise ValueError("context_key not set - cannot perform isolated insert")
 
         # Add context_key automatically
         values["context_key"] = self.context_key
@@ -270,7 +264,7 @@ class AgentStorage:
             **values: Column values to update.
 
         Raises:
-            ValueError: If table not registered, context_key not set, or row not found.
+            ValueError: If table not registered or row not found.
 
         Example:
             agent.storage.update(JokeTable, joke_id, rated=True, rating=5)
@@ -278,9 +272,6 @@ class AgentStorage:
         table_name = model_class.__tablename__
         if table_name not in self._registered_tables:
             raise ValueError(f"Table not registered: {table_name}")
-
-        if self.context_key is None:
-            raise ValueError("context_key not set - cannot perform isolated update")
 
         from sqlalchemy import select
 
@@ -308,7 +299,7 @@ class AgentStorage:
             row_id: ID of the row to delete.
 
         Raises:
-            ValueError: If table not registered, context_key not set, or row not found.
+            ValueError: If table not registered or row not found.
 
         Example:
             agent.storage.delete(JokeTable, joke_id)
@@ -316,9 +307,6 @@ class AgentStorage:
         table_name = model_class.__tablename__
         if table_name not in self._registered_tables:
             raise ValueError(f"Table not registered: {table_name}")
-
-        if self.context_key is None:
-            raise ValueError("context_key not set - cannot perform isolated delete")
 
         from sqlalchemy import select
 
