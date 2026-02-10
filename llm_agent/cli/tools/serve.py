@@ -79,7 +79,7 @@ class ServeTool(Tool):
         """Create LearnConfig from server configuration.
 
         Creates a template config with global settings (llm, db, embedder).
-        Each agent will resolve its own profile_config from agent YAML.
+        Each agent will resolve its own identity from agent YAML.
         """
         from llm_agent.core.traits.builtin.learn import LearnConfig
 
@@ -92,7 +92,7 @@ class ServeTool(Tool):
             embedder_url=config.learn.embedder_url,
             embedder_model=config.learn.embedder_model,
             embedder_timeout=config.learn.embedder_timeout,
-            # Note: profile_config and agent_name are set per-agent in factory
+            # Note: identity is set per-agent in factory
         )
 
     def _create_registry(self) -> AgentRegistry:
@@ -487,7 +487,7 @@ class ServeTool(Tool):
     def _build_agent_config_dict(self, name: str, agent_config: Any) -> dict[str, Any]:
         """Build config dict for agent registration.
 
-        For programmatic agents, includes module, factory, profile, config.
+        For programmatic agents, includes module, factory, identity, config.
         For prompt agents, includes task, tools, conversation, events.
         """
         config_dict: dict[str, Any] = {
@@ -509,7 +509,7 @@ class ServeTool(Tool):
         if agent_config.type_ == "programmatic":
             config_dict["module"] = agent_config.module
             config_dict["factory"] = agent_config.factory
-            config_dict["profile"] = agent_config.profile
+            config_dict["identity"] = agent_config.identity
             config_dict["config"] = agent_config.config
         else:
             # Prompt agents use conversation and events

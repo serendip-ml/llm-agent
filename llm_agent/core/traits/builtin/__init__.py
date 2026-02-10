@@ -6,6 +6,7 @@ from .http import HTTPConfig, HTTPTrait
 from .learn import LearnConfig, LearnTrait
 from .llm import LLMConfig, LLMTrait
 from .saia import SAIAConfig, SAIATrait
+from .storage import StorageTrait
 from .tools import ToolsTrait
 
 
@@ -29,6 +30,8 @@ __all__ = [
     # SAIA
     "SAIAConfig",
     "SAIATrait",
+    # Storage
+    "StorageTrait",
     # Tools
     "ToolsTrait",
 ]

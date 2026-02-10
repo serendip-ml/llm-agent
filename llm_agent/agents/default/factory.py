@@ -27,7 +27,7 @@ class Factory(BaseFactory):
         factory = Factory(platform)
 
         config = {
-            "profile": {"name": "explorer"},
+            "identity": {"name": "explorer"},
             "directive": "You are a codebase exploration agent.",
             "method": "Think step by step...",
             "tools": {"shell": {}, "read_file": {}},

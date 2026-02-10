@@ -114,7 +114,7 @@ class TestAgentConfigYAML:
     def test_default_class(self):
         """AgentConfigYAML defaults to 'prompt' class."""
         config = AgentConfigYAML(
-            identity="Test prompt",
+            identity={"name": "test"},
             task=TaskConfigYAML(description="Test"),
         )
         assert config.type_ == "prompt"
@@ -123,7 +123,7 @@ class TestAgentConfigYAML:
         """AgentConfigYAML accepts 'programmatic' type."""
         raw = {
             "type": "programmatic",
-            "identity": "Test prompt",
+            "identity": {"name": "test"},
             "task": {"description": "Test"},
         }
         config = AgentConfigYAML(**raw)
@@ -132,7 +132,7 @@ class TestAgentConfigYAML:
     def test_tools_default_empty(self):
         """AgentConfigYAML defaults tools to empty dict."""
         config = AgentConfigYAML(
-            identity="Test prompt",
+            identity={"name": "test"},
             task=TaskConfigYAML(description="Test"),
         )
         assert config.tools == {}
@@ -140,7 +140,7 @@ class TestAgentConfigYAML:
     def test_schedule_optional(self):
         """AgentConfigYAML schedule is optional."""
         config = AgentConfigYAML(
-            identity="Test prompt",
+            identity={"name": "test"},
             task=TaskConfigYAML(description="Test"),
         )
         assert config.schedule is None

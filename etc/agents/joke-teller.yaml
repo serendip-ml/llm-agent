@@ -1,10 +1,7 @@
 type: prompt
 
 # Learning profile - where this agent's memory is stored
-profile:
-  # Hierarchical identity (generates deterministic IDs)
-  domain: null              # null = no domain (simpler setup)
-  workspace: "default"      # defaults to "default"
+identity:
   name: "joke-teller"       # defaults to agent name
 
   # Optional: Explicit IDs for migrations/renaming

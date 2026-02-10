@@ -1,0 +1,316 @@
+"""Agent storage client for custom relational schemas.
+
+Provides AgentStorage for registering and querying agent-defined tables.
+Uses SQLAlchemy directly for maximum flexibility while ensuring automatic isolation.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from appinfra.log import Logger
+from sqlalchemy.orm import Session
+
+from .schema import AgentTable, validate_agent_table
+
+
+if TYPE_CHECKING:
+    from llm_learn import LearnClient
+
+
+class AgentStorage:
+    """
+    Storage client for agent-defined relational data.
+
+    Wraps LearnClient to provide:
+    - Table registration with automatic isolation
+    - Query helpers with automatic context_key filtering
+    - Direct SQLAlchemy access for complex queries
+
+    Philosophy:
+    - Use SQLAlchemy directly (no leaky abstractions)
+    - Provide safety helpers for common patterns
+    - Automatic isolation by default
+    - Escape hatch for power users
+
+    Example:
+        from sqlalchemy import String, Boolean, Float
+        from sqlalchemy.orm import Mapped, mapped_column
+        from llm_agent.storage import AgentTable
+
+        # Define schema
+        class JokeTable(AgentTable):
+            __tablename__ = "agent_jokester_jokes"
+
+            text: Mapped[str] = mapped_column(String, nullable=False)
+            style: Mapped[str] = mapped_column(String(50), nullable=False)
+            rated: Mapped[bool] = mapped_column(Boolean, default=False)
+            rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+        # Register and use
+        agent.storage.register_table(JokeTable)
+
+        # Simple queries (auto-isolated)
+        unrated = agent.storage.query(JokeTable)\\
+            .filter(JokeTable.rated == False)\\
+            .order_by(JokeTable.created_at.desc())\\
+            .limit(10)\\
+            .all()
+
+        # Insert (auto-adds context_key)
+        joke_id = agent.storage.insert(JokeTable,
+            text="Why did the AI cross the road?",
+            style="observational",
+            rated=False
+        )
+
+        # Complex queries (raw SQLAlchemy with manual isolation)
+        from sqlalchemy import func
+        stmt = select(
+            JokeTable.style,
+            func.avg(JokeTable.rating).label('avg_rating')
+        ).where(
+            JokeTable.context_key == agent.storage.context_key,
+            JokeTable.rated == True
+        ).group_by(JokeTable.style)
+
+        results = agent.storage.execute(stmt).all()
+    """
+
+    def __init__(self, lg: Logger, learn_client: LearnClient) -> None:
+        """Initialize agent storage.
+
+        Args:
+            lg: Logger instance.
+            learn_client: LearnClient instance (provides database + isolation context).
+        """
+        self._lg = lg
+        self._learn = learn_client
+        self._registered_tables: dict[str, type[AgentTable]] = {}
+
+    @property
+    def context_key(self) -> str | None:
+        """Get isolation context key."""
+        return self._learn.context.context_key
+
+    @property
+    def schema_name(self) -> str | None:
+        """Get schema name from isolation context."""
+        return self._learn.context.schema_name
+
+    def register_table(self, model_class: type[AgentTable]) -> None:
+        """Register an agent-defined table schema.
+
+        Validates the model and creates the table if it doesn't exist.
+
+        Args:
+            model_class: SQLAlchemy model inheriting from AgentTable.
+
+        Raises:
+            ValueError: If model_class doesn't meet requirements.
+        """
+        # Validate schema
+        validate_agent_table(model_class)
+
+        table_name = model_class.__tablename__
+
+        # Set schema if specified in isolation context
+        if self.schema_name:
+            model_class.__table__.schema = self.schema_name
+
+        # Create table if it doesn't exist
+        engine = self._learn.database.engine
+        model_class.__table__.create(engine, checkfirst=True)  # type: ignore[attr-defined]
+
+        # Store registration
+        self._registered_tables[table_name] = model_class
+
+        self._lg.debug(
+            "agent table registered",
+            extra={
+                "table": table_name,
+                "schema": self.schema_name or "public",
+                "context_key": self.context_key,
+            },
+        )
+
+    def query(self, model_class: type[AgentTable]) -> Any:
+        """Start a query with automatic isolation.
+
+        Returns a SQLAlchemy Query object with context_key filter pre-applied.
+        Agents can chain any SQLAlchemy operations.
+
+        Args:
+            model_class: The model class to query.
+
+        Returns:
+            SQLAlchemy Query object (isolated by context_key).
+
+        Raises:
+            ValueError: If table not registered.
+
+        Example:
+            jokes = agent.storage.query(JokeTable)\\
+                .filter(JokeTable.rated == False)\\
+                .order_by(JokeTable.created_at.desc())\\
+                .limit(10)\\
+                .all()
+        """
+        table_name = model_class.__tablename__
+        if table_name not in self._registered_tables:
+            raise ValueError(f"Table not registered: {table_name}")
+
+        # Get session and build query with automatic isolation
+        session = self._get_session()
+
+        # Auto-apply context_key filter if context_key is set
+        query = session.query(model_class)
+        if self.context_key is not None:
+            query = query.filter(model_class.context_key == self.context_key)
+
+        return query
+
+    def insert(self, model_class: type[AgentTable], **values: Any) -> int:
+        """Insert a row into an agent table.
+
+        Automatically adds context_key from isolation context.
+
+        Args:
+            model_class: The model class to insert into.
+            **values: Column values.
+
+        Returns:
+            Inserted row ID.
+
+        Raises:
+            ValueError: If table not registered.
+
+        Example:
+            joke_id = agent.storage.insert(JokeTable,
+                text="Why did the chicken cross the road?",
+                style="classic",
+                rated=False
+            )
+        """
+        table_name = model_class.__tablename__
+        if table_name not in self._registered_tables:
+            raise ValueError(f"Table not registered: {table_name}")
+
+        # Add context_key automatically
+        if self.context_key is not None:
+            values["context_key"] = self.context_key
+
+        with self._learn.database.session() as session:
+            record = model_class(**values)
+            session.add(record)
+            session.flush()
+            row_id = record.id
+            session.commit()
+            return row_id
+
+    def execute(self, stmt: Any) -> Any:
+        """Execute a raw SQLAlchemy statement.
+
+        For complex queries that need full SQL power.
+        Does NOT auto-apply isolation - caller must include context_key filter.
+
+        Args:
+            stmt: SQLAlchemy statement (select, update, delete, etc.).
+
+        Returns:
+            Result object from SQLAlchemy execution.
+
+        Example:
+            from sqlalchemy import select, func
+
+            stmt = select(
+                JokeTable.style,
+                func.avg(JokeTable.rating).label('avg_rating')
+            ).where(
+                JokeTable.context_key == agent.storage.context_key,  # Manual filtering
+                JokeTable.rated == True
+            ).group_by(JokeTable.style)
+
+            results = agent.storage.execute(stmt).all()
+        """
+        with self._learn.database.session() as session:
+            return session.execute(stmt)
+
+    def _get_session(self) -> Session:
+        """Get a database session.
+
+        This returns a session that stays open - caller is responsible for cleanup.
+        Used internally by query() which returns a Query object.
+
+        For most use cases, use query(), insert(), or execute() instead.
+        """
+        # Create a new session
+        # Note: The session from _learn.database.session() is a context manager
+        # For query(), we need a session that persists beyond this call
+        # SQLAlchemy Query objects need the session to stay alive
+        session_factory = self._learn.database.session
+        return session_factory()  # type: ignore[return-value]
+
+    def update(self, model_class: type[AgentTable], row_id: int, **values: Any) -> None:
+        """Update a row by ID.
+
+        Args:
+            model_class: The model class.
+            row_id: ID of the row to update.
+            **values: Column values to update.
+
+        Raises:
+            ValueError: If table not registered or row not found.
+
+        Example:
+            agent.storage.update(JokeTable, joke_id, rated=True, rating=5)
+        """
+        table_name = model_class.__tablename__
+        if table_name not in self._registered_tables:
+            raise ValueError(f"Table not registered: {table_name}")
+
+        with self._learn.database.session() as session:
+            # Query with isolation
+            query = session.query(model_class).filter(model_class.id == row_id)
+            if self.context_key is not None:
+                query = query.filter(model_class.context_key == self.context_key)
+
+            record = query.first()
+            if record is None:
+                raise ValueError(f"Row not found: {row_id}")
+
+            # Update fields
+            for key, value in values.items():
+                setattr(record, key, value)
+
+            session.commit()
+
+    def delete(self, model_class: type[AgentTable], row_id: int) -> None:
+        """Delete a row by ID.
+
+        Args:
+            model_class: The model class.
+            row_id: ID of the row to delete.
+
+        Raises:
+            ValueError: If table not registered or row not found.
+
+        Example:
+            agent.storage.delete(JokeTable, joke_id)
+        """
+        table_name = model_class.__tablename__
+        if table_name not in self._registered_tables:
+            raise ValueError(f"Table not registered: {table_name}")
+
+        with self._learn.database.session() as session:
+            # Query with isolation
+            query = session.query(model_class).filter(model_class.id == row_id)
+            if self.context_key is not None:
+                query = query.filter(model_class.context_key == self.context_key)
+
+            record = query.first()
+            if record is None:
+                raise ValueError(f"Row not found: {row_id}")
+
+            session.delete(record)
+            session.commit()
