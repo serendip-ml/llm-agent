@@ -16,6 +16,8 @@ from typing import Any
 from appinfra.log import Logger
 from pydantic import BaseModel
 
+from llm_infer.client.exceptions import BackendUnavailableError
+
 from ...core.agent import Agent, ExecutionResult, Identity
 from ...core.llm.backend import StructuredOutputError
 from ...core.traits.builtin.directive import DirectiveTrait
@@ -145,6 +147,10 @@ class JokeTellerAgent(Agent):
         except StructuredOutputError as e:
             self._lg.warning("joke generation failed", extra={"error": str(e)})
             return ExecutionResult(success=False, content=f"Error: {e}", iterations=1)
+        except BackendUnavailableError as e:
+            # LLM service unavailable - log without trace
+            self._lg.warning("llm service unavailable - will retry next cycle", extra={"error": str(e)})
+            return ExecutionResult(success=False, content="LLM service unavailable", iterations=1)
         except Exception as e:
             self._lg.warning("joke generation failed", extra={"exception": e})
             return ExecutionResult(success=False, content=f"Error: {e}", iterations=1)
