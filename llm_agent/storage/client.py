@@ -172,7 +172,7 @@ class AgentStorage:
                 JokeTable.context_key == agent.storage.context_key,
                 JokeTable.rated == False
             ).order_by(JokeTable.created_at.desc()).limit(10)
-            results = agent.storage.execute(stmt).scalars().all()
+            results = agent.storage.execute(stmt)  # Returns list directly
         """
         table_name = model_class.__tablename__
         if table_name not in self._registered_tables:
@@ -185,6 +185,11 @@ class AgentStorage:
 
         # Apply additional filters
         for key, value in filters.items():
+            if not hasattr(model_class, key):
+                raise ValueError(
+                    f"Invalid column name '{key}' for table {table_name}. "
+                    f"Column does not exist on model."
+                )
             stmt = stmt.where(getattr(model_class, key) == value)
 
         with self._learn.database.session() as session:
@@ -265,7 +270,7 @@ class AgentStorage:
             **values: Column values to update.
 
         Raises:
-            ValueError: If table not registered or row not found.
+            ValueError: If table not registered, row not found, or attempting to update context_key.
 
         Example:
             agent.storage.update(JokeTable, joke_id, rated=True, rating=5)
@@ -273,6 +278,13 @@ class AgentStorage:
         table_name = model_class.__tablename__
         if table_name not in self._registered_tables:
             raise ValueError(f"Table not registered: {table_name}")
+
+        # Prevent overwriting isolation field
+        if "context_key" in values:
+            raise ValueError(
+                "Cannot update isolation field 'context_key'. "
+                "This would bypass data isolation and is not allowed."
+            )
 
         from sqlalchemy import select
 

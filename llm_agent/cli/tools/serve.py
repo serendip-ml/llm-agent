@@ -506,14 +506,15 @@ class ServeTool(Tool):
 
     def _add_type_specific_fields(self, config_dict: dict[str, Any], agent_config: Any) -> None:
         """Add type-specific fields to config dict."""
+        # Identity is common to all agent types
+        config_dict["identity"] = agent_config.identity
+
         if agent_config.type_ == "programmatic":
             config_dict["module"] = agent_config.module
             config_dict["factory"] = agent_config.factory
-            config_dict["identity"] = agent_config.identity
             config_dict["config"] = agent_config.config
         else:
             # Prompt agents use conversation and events
-            config_dict["identity"] = agent_config.identity
             config_dict["conversation"] = agent_config.conversation
             if agent_config.events:
                 config_dict["events"] = {

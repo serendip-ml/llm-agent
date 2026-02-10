@@ -67,10 +67,17 @@ class Identity:
         cfg = config or {}
         defs = defaults or {}
 
-        # Get name
+        # Get name (falsy values like "" fall through to defaults)
         name = cfg.get("name") or defs.get("name", "default")
 
         # Get context_key (defaults to name if not specified)
         context_key = cfg.get("context_key") or defs.get("context_key", name)
+
+        # Validate that name and context_key are not empty
+        if not name or not context_key:
+            raise ValueError(
+                "Identity name and context_key cannot be empty. "
+                f"Got name={name!r}, context_key={context_key!r}"
+            )
 
         return cls(name=name, context_key=context_key)
