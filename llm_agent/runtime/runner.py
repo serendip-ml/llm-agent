@@ -137,8 +137,8 @@ class AgentRunner:
             float: Timeout in seconds for channel.recv()
         """
         if self._ticker is not None:
-            # Scheduled mode - use Ticker's timing
-            return self._ticker.time_until_next_tick()
+            # Scheduled mode - use Ticker's timing (clamped to non-negative)
+            return max(0.0, self._ticker.time_until_next_tick())
         elif self._schedule_interval == 0:
             # Continuous mode - non-blocking
             return 0.0
