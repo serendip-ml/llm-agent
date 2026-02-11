@@ -2,15 +2,16 @@
 
 The AgentRunner is the entry point for agent subprocesses. It:
 - Runs a sync main loop processing messages from the channel
-- Handles scheduled execution if configured
+- Handles scheduled execution using appinfra.time.Ticker
 - Responds to shutdown messages cleanly
 """
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+from appinfra.time import Ticker, TickerMode
 
 from .transport import Message, MessageType, Response
 
@@ -53,14 +54,26 @@ class AgentRunner:
             agent: The agent to run (must be started by caller).
             channel: Communication channel to Core.
             schedule_interval: Optional interval in seconds for scheduled execution.
+                              None = no scheduling (message-only mode)
+                              0 = continuous execution (tight loop)
+                              >0 = scheduled with interval
         """
         self._lg = lg
         self._agent = agent
         self._channel = channel
         self._running = False
-        self._schedule_interval = (
-            schedule_interval if schedule_interval and schedule_interval > 0 else None
-        )
+        self._schedule_interval = schedule_interval
+
+        # Create Ticker for scheduled execution (not for continuous/none)
+        if schedule_interval is not None and schedule_interval > 0:
+            self._ticker: Ticker | None = Ticker(
+                lg,
+                secs=schedule_interval,
+                mode=TickerMode.LAZY,  # Fixed delay after completion
+                initial=True,  # Run immediately on first cycle
+            )
+        else:
+            self._ticker = None
 
     def run(self) -> None:
         """Main loop (blocking, sync). Called in subprocess.
@@ -92,40 +105,59 @@ class AgentRunner:
 
     def _run_loop(self) -> None:
         """Main message processing loop."""
-        # Start at 0 to trigger immediate first run for scheduled agents
-        last_cycle = 0.0
         self._lg.trace(
             "entering run loop",
-            extra={"agent": self._agent.name, "schedule_interval": self._schedule_interval},
+            extra={
+                "agent": self._agent.name,
+                "schedule_interval": self._schedule_interval,
+                "mode": "continuous"
+                if self._schedule_interval == 0
+                else "scheduled"
+                if self._ticker
+                else "message-only",
+            },
         )
 
         while self._running:
-            # Calculate timeout based on schedule
-            timeout = self._calculate_timeout(last_cycle)
+            # Calculate timeout based on mode
+            timeout = self._calculate_timeout()
             msg = self._channel.recv(timeout=timeout)
 
             if msg is None:
-                # Timeout - check if we should run scheduled cycle
-                if self._should_run_cycle(last_cycle):
+                # Timeout - check if we should run cycle
+                if self._should_run_cycle():
                     self._run_cycle()
-                    last_cycle = time.time()
             else:
                 self._handle_message(msg)
 
-    def _calculate_timeout(self, last_cycle: float) -> float:
-        """Calculate recv timeout based on schedule."""
-        if self._schedule_interval is None:
-            return 60.0  # Default poll interval
+    def _calculate_timeout(self) -> float:
+        """Calculate recv timeout based on execution mode.
 
-        elapsed = time.time() - last_cycle
-        remaining = max(0.1, self._schedule_interval - elapsed)
-        return min(remaining, 60.0)
+        Returns:
+            float: Timeout in seconds for channel.recv()
+        """
+        if self._ticker is not None:
+            # Scheduled mode - use Ticker's timing
+            return self._ticker.time_until_next_tick()
+        elif self._schedule_interval == 0:
+            # Continuous mode - non-blocking
+            return 0.0
+        else:
+            # Message-only mode (no scheduling) - poll periodically
+            return 60.0
 
-    def _should_run_cycle(self, last_cycle: float) -> bool:
-        """Check if scheduled cycle should run."""
-        if self._schedule_interval is None:
-            return False
-        return time.time() - last_cycle >= self._schedule_interval
+    def _should_run_cycle(self) -> bool:
+        """Check if cycle should run now.
+
+        Returns:
+            bool: True if it's time to run a cycle
+        """
+        if self._ticker is not None:
+            # Scheduled mode - let Ticker decide
+            return self._ticker.try_tick()
+        else:
+            # Continuous mode (interval=0) or message-only (interval=None)
+            return self._schedule_interval == 0
 
     def _run_cycle(self) -> None:
         """Run one scheduled execution cycle."""

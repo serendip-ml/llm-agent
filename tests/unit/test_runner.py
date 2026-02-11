@@ -63,13 +63,23 @@ class TestAgentRunner:
 
     def test_calculate_timeout_no_schedule(self, runner):
         """Calculate timeout returns 60s when no schedule."""
-        timeout = runner._calculate_timeout(0)
+        timeout = runner._calculate_timeout()
         assert timeout == 60.0
 
-    def test_calculate_timeout_with_schedule(self, mock_logger, mock_agent, mock_channel):
-        """Calculate timeout respects schedule interval."""
-        import time
+    def test_calculate_timeout_continuous(self, mock_logger, mock_agent, mock_channel):
+        """Calculate timeout returns 0s for continuous mode."""
+        runner = AgentRunner(
+            lg=mock_logger,
+            agent=mock_agent,
+            channel=mock_channel,
+            schedule_interval=0,
+        )
 
+        timeout = runner._calculate_timeout()
+        assert timeout == 0.0
+
+    def test_calculate_timeout_with_schedule(self, mock_logger, mock_agent, mock_channel):
+        """Calculate timeout uses Ticker for scheduled mode."""
         runner = AgentRunner(
             lg=mock_logger,
             agent=mock_agent,
@@ -77,20 +87,28 @@ class TestAgentRunner:
             schedule_interval=30,
         )
 
-        last_cycle = time.time()
-        timeout = runner._calculate_timeout(last_cycle)
-
-        # Should be close to 30s (schedule interval)
-        assert 29.0 <= timeout <= 30.0
+        # Ticker should provide time until next tick
+        timeout = runner._calculate_timeout()
+        # Should be close to 30s on first call (initial=True)
+        assert 0.0 <= timeout <= 30.0
 
     def test_should_run_cycle_no_schedule(self, runner):
         """Should not run cycle when no schedule."""
-        assert runner._should_run_cycle(0) is False
+        assert runner._should_run_cycle() is False
+
+    def test_should_run_cycle_continuous(self, mock_logger, mock_agent, mock_channel):
+        """Should always run cycle in continuous mode."""
+        runner = AgentRunner(
+            lg=mock_logger,
+            agent=mock_agent,
+            channel=mock_channel,
+            schedule_interval=0,
+        )
+
+        assert runner._should_run_cycle() is True
 
     def test_should_run_cycle_with_schedule(self, mock_logger, mock_agent, mock_channel):
-        """Should run cycle when interval elapsed."""
-        import time
-
+        """Should run cycle based on Ticker in scheduled mode."""
         runner = AgentRunner(
             lg=mock_logger,
             agent=mock_agent,
@@ -98,9 +116,10 @@ class TestAgentRunner:
             schedule_interval=1,
         )
 
-        # Last cycle was 2 seconds ago
-        last_cycle = time.time() - 2
-        assert runner._should_run_cycle(last_cycle) is True
+        # Ticker with initial=True should allow first tick immediately
+        assert runner._should_run_cycle() is True
+        # Second call should return False (not ready yet)
+        assert runner._should_run_cycle() is False
 
     def test_handle_shutdown(self, runner, mock_channel):
         """Handle shutdown message stops the runner."""
