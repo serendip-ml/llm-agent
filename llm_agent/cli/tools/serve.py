@@ -109,12 +109,14 @@ class ServeTool(Tool):
         learn_config: LearnConfig | None,
     ) -> Core:
         """Create runtime core."""
+        from appinfra import DotDict
+
         from llm_agent.runtime import Core
 
         return Core(
             lg=self.lg,
             registry=registry,
-            llm_config=config.llm,
+            llm_config=DotDict(config.llm),
             learn_config=learn_config,
             variables=self._parse_env_vars(),
         )

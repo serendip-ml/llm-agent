@@ -5,13 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from appinfra import DotDict
+
 
 if TYPE_CHECKING:
     from llm_agent.core.agent import Agent, Identity
     from llm_agent.core.platform import PlatformContext
     from llm_agent.core.traits import TraitName
     from llm_agent.core.traits.builtin.directive import Directive, DirectiveTrait, MethodTrait
-    from llm_agent.core.traits.builtin.learn import LearnTrait
+    from llm_agent.core.traits.builtin.learn import LearnConfig, LearnTrait
     from llm_agent.core.traits.builtin.llm import LLMConfig, LLMTrait
 
 from .base import Trait
@@ -55,7 +57,7 @@ class Factory:
         self,
         trait_name: TraitName,  # Use enum, not string
         agent: Agent,
-        agent_config: dict[str, Any],
+        agent_config: DotDict,
         **kwargs: Any,
     ) -> Trait:
         """Create a trait by name - uses mapping to route to specific creators.
@@ -81,24 +83,23 @@ class Factory:
         return creator(agent, agent_config, **kwargs)
 
     def _create_directive(
-        self, agent: Agent, agent_config: dict[str, Any], **kwargs: Any
+        self, agent: Agent, agent_config: DotDict, **kwargs: Any
     ) -> DirectiveTrait:
         """Route to create_directive_trait."""
         return self.create_directive_trait(agent, agent_config.get("directive"))
 
-    def _create_llm(self, agent: Agent, agent_config: dict[str, Any], **kwargs: Any) -> LLMTrait:
+    def _create_llm(self, agent: Agent, agent_config: DotDict, **kwargs: Any) -> LLMTrait:
         """Route to create_llm_trait."""
-        return self.create_llm_trait(agent, self._platform.llm_config())
+        llm_config: DotDict = DotDict(self._platform.llm_config())
+        return self.create_llm_trait(agent, llm_config)
 
-    def _create_learn(
-        self, agent: Agent, agent_config: dict[str, Any], **kwargs: Any
-    ) -> LearnTrait:
+    def _create_learn(self, agent: Agent, agent_config: DotDict, **kwargs: Any) -> LearnTrait:
         """Route to create_learn_trait."""
-        return self.create_learn_trait(agent, kwargs.get("identity"), self._platform.learn_config())
+        learn_config_raw = self._platform.learn_config()
+        learn_config: DotDict | None = DotDict(learn_config_raw) if learn_config_raw else None
+        return self.create_learn_trait(agent, kwargs.get("identity"), learn_config)
 
-    def _create_method(
-        self, agent: Agent, agent_config: dict[str, Any], **kwargs: Any
-    ) -> MethodTrait:
+    def _create_method(self, agent: Agent, agent_config: DotDict, **kwargs: Any) -> MethodTrait:
         """Route to create_method_trait."""
         return self.create_method_trait(agent, agent_config.get("method"))
 
@@ -158,7 +159,7 @@ class Factory:
         return DirectiveTrait(agent, directive)
 
     def create_learn_trait(
-        self, agent: Agent, identity: Identity | None, learn_config: dict[str, Any] | None
+        self, agent: Agent, identity: Identity | None, learn_config: LearnConfig | None
     ) -> LearnTrait:
         """Create LearnTrait with agent-specific identity.
 

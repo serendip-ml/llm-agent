@@ -18,9 +18,12 @@ if TYPE_CHECKING:
     from llm_agent.core.agent import Agent
 
 
-# Type alias for LLM configuration dict
-LLMConfig = dict[str, Any]
-"""LLM configuration dictionary.
+from appinfra import DotDict
+
+
+# Type alias for LLM configuration
+LLMConfig = DotDict
+"""LLM configuration as DotDict.
 
 Supports multi-backend format (see llm-infer LLMClient.from_config):
 
@@ -97,7 +100,7 @@ class LLMTrait(BaseTrait):
             config: LLM configuration dict.
         """
         super().__init__(agent)
-        self.config = config or {}
+        self.config: LLMConfig = config or DotDict()
         self._client: LLMClient | None = None
         self._defaults: dict[str, Any] = {}
 

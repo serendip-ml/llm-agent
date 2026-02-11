@@ -46,7 +46,7 @@ class Core:
         lg: Logger,
         registry: AgentRegistry,
         llm_config: LLMConfig,
-        learn_config: LearnConfig | None = None,
+        learn_config: DotDict | None = None,
         variables: dict[str, str] | None = None,
         factory_module: str = "llm_agent.agents.default",
     ) -> None:
@@ -56,7 +56,7 @@ class Core:
             lg: Logger instance.
             registry: Agent registry for handle lookup.
             llm_config: LLM configuration for agents.
-            learn_config: Optional LearnConfig for memory capabilities.
+            learn_config: Optional learn configuration (DotDict/LearnConfig).
             variables: Variable substitutions for agent configs.
             factory_module: Module containing the agent Factory class.
         """
@@ -311,7 +311,7 @@ class Core:
         handle.channel = main_channel
 
         # LearnConfig can be passed directly - DotDict pickles fine
-        learn_config_dict = self._learn_config if self._learn_config else None
+        learn_config = self._learn_config if self._learn_config else None
 
         # Determine factory module (per-agent for programmatic, default for prompt)
         factory_module = handle.config.get("module", self._factory_module)
@@ -322,8 +322,8 @@ class Core:
                 handle.name,
                 self._build_runner_config(handle),
                 subprocess_channel,
-                self._llm_config,  # Already a dict, no need for asdict()
-                learn_config_dict,
+                self._llm_config,
+                learn_config,
                 self._variables,
                 self._log_config,
                 factory_module,  # Per-agent module for programmatic agents
@@ -375,8 +375,8 @@ def _subprocess_entry(
     name: str,
     config: DotDict,
     channel: Any,
-    llm_config: dict[str, Any],
-    learn_config_dict: DotDict | None,
+    llm_config: LLMConfig,
+    learn_config: LearnConfig | None,
     variables: dict[str, str],
     log_config: dict[str, Any],
     factory_module: str,
@@ -399,7 +399,7 @@ def _subprocess_entry(
         platform = PlatformContext.from_config(
             lg=lg,
             llm_config=llm_config,
-            learn_config=learn_config_dict,
+            learn_config=learn_config,
         )
 
         # Load and create agent using new factory architecture
