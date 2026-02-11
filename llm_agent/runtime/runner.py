@@ -69,7 +69,7 @@ class AgentRunner:
             self._ticker: Ticker | None = Ticker(
                 lg,
                 secs=schedule_interval,
-                mode=TickerMode.LAZY,  # Fixed delay after completion
+                mode=TickerMode.FLEX,  # Fixed-rate timing with no catch-up
                 initial=True,  # Run immediately on first cycle
             )
         else:
