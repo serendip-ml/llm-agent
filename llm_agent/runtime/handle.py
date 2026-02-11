@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from appinfra import DotDict
+
 from .state import AgentState
 
 
@@ -30,8 +32,8 @@ class AgentHandle:
     name: str
     """Agent name (unique identifier)."""
 
-    config: dict[str, Any]
-    """Agent configuration dictionary."""
+    config: DotDict
+    """Agent configuration (DotDict for dot notation access)."""
 
     state: AgentState = AgentState.IDLE
     """Current lifecycle state."""

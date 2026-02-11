@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from multiprocessing import Queue
 from typing import TYPE_CHECKING, Any, cast
 
+from appinfra import DotDict
 from appinfra.log.mp import LogQueueListener
 
 from .handle import AgentHandle, AgentInfo
@@ -309,8 +310,8 @@ class Core:
         main_channel, subprocess_channel = create_channel_pair(self._lg)
         handle.channel = main_channel
 
-        # Convert LearnConfig to dict for pickling (handles DotDict from appinfra)
-        learn_config_dict = self._learn_config.to_dict() if self._learn_config else None
+        # LearnConfig can be passed directly - DotDict pickles fine
+        learn_config_dict = self._learn_config if self._learn_config else None
 
         # Determine factory module (per-agent for programmatic, default for prompt)
         factory_module = handle.config.get("module", self._factory_module)
@@ -342,10 +343,10 @@ class Core:
         if msg.type == MessageType.ERROR:
             raise RuntimeError(msg.payload.get("error", "Unknown startup error"))
 
-    def _build_runner_config(self, handle: AgentHandle) -> dict[str, Any]:
-        """Build configuration dict for the runner."""
-        config = dict(handle.config)
-        config["name"] = handle.name
+    def _build_runner_config(self, handle: AgentHandle) -> DotDict:
+        """Build configuration for the runner (keeps DotDict for dot notation)."""
+        config = handle.config  # Keep as DotDict
+        config["name"] = handle.name  # DotDict supports both dict and dot notation
         return config
 
     def _terminate_process(self, handle: AgentHandle) -> None:
@@ -372,10 +373,10 @@ class Core:
 
 def _subprocess_entry(
     name: str,
-    config: dict[str, Any],
+    config: DotDict,
     channel: Any,
     llm_config: dict[str, Any],
-    learn_config_dict: dict[str, Any] | None,
+    learn_config_dict: DotDict | None,
     variables: dict[str, str],
     log_config: dict[str, Any],
     factory_module: str,

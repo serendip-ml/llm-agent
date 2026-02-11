@@ -9,6 +9,7 @@ from collections.abc import Callable
 from queue import Empty
 from typing import TYPE_CHECKING, Any
 
+from appinfra import DotDict
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.app.tools import Tool, ToolConfig
 
@@ -61,7 +62,7 @@ class ServeTool(Tool):
     def run(self, **kwargs: Any) -> int:
         from llm_agent.runtime.server import AgentServerConfig
 
-        raw_config = dict(self.app.config) if self.app.config else {}
+        raw_config = self.app.config if self.app.config else DotDict()
         config = AgentServerConfig.from_dict(raw_config)
         self._apply_cli_overrides(config)
 
@@ -484,17 +485,16 @@ class ServeTool(Tool):
             except Exception as e:
                 self.lg.error("failed to register agent", extra={"agent": name, "exception": e})
 
-    def _build_agent_config_dict(self, name: str, agent_config: Any) -> dict[str, Any]:
-        """Build config dict for agent registration.
+    def _build_agent_config_dict(self, name: str, agent_config: Any) -> DotDict:
+        """Build config DotDict for agent registration.
 
         For programmatic agents, includes module, factory, identity, config.
         For prompt agents, includes task, tools, conversation, events.
         """
-        config_dict: dict[str, Any] = {
-            "name": name,
-            "type": agent_config.type_,
-            "task": agent_config.task.model_dump(),
-        }
+        config_dict = DotDict()
+        config_dict["name"] = name
+        config_dict["type"] = agent_config.type_
+        config_dict["task"] = agent_config.task.model_dump()
 
         # Add type-specific fields
         self._add_type_specific_fields(config_dict, agent_config)
@@ -504,7 +504,7 @@ class ServeTool(Tool):
 
         return config_dict
 
-    def _add_type_specific_fields(self, config_dict: dict[str, Any], agent_config: Any) -> None:
+    def _add_type_specific_fields(self, config_dict: DotDict, agent_config: Any) -> None:
         """Add type-specific fields to config dict."""
         # Identity is common to all agent types
         config_dict["identity"] = agent_config.identity
@@ -521,7 +521,7 @@ class ServeTool(Tool):
                     name: handler.model_dump() for name, handler in agent_config.events.items()
                 }
 
-    def _add_optional_fields(self, config_dict: dict[str, Any], agent_config: Any) -> None:
+    def _add_optional_fields(self, config_dict: DotDict, agent_config: Any) -> None:
         """Add optional fields to config dict."""
         if agent_config.directive is not None:
             config_dict["directive"] = (
