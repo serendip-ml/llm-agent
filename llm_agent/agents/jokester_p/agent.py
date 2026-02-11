@@ -22,6 +22,8 @@ from ...core.llm.backend import StructuredOutputError
 from ...core.traits.builtin.directive import DirectiveTrait
 from ...core.traits.builtin.learn import LearnTrait
 from ...core.traits.builtin.llm import LLMTrait
+from ...core.traits.builtin.storage import StorageTrait
+from .schema import ModelUsage, TrainingMetadata
 
 
 class Joke(BaseModel):
@@ -109,6 +111,11 @@ class JokesterAgent(Agent):
                 "JokesterAgent requires embedder for guaranteed novelty checking. "
                 "Configure embedder_url in learn section."
             )
+
+        # Register agent-specific tables
+        storage_trait = self.require_trait(StorageTrait)
+        storage_trait.storage.register_table(ModelUsage)
+        storage_trait.storage.register_table(TrainingMetadata)
 
         self._started = True
         self._lg.info("agent started", extra={"agent": self.name})
@@ -390,9 +397,14 @@ Return your joke in JSON format with 'text' and 'style' fields."""
         Stores joke as type=solution with task context and metadata.
         Embeddings are created automatically by solutions.record().
 
+        Also records model usage and training metadata in agent-specific tables.
+
         Raises:
             Exception: If joke save fails (caller should handle to mark run as failed).
         """
+        # Get model info (for now hardcoded, extensible for multi-model later)
+        model_name = self._get_model_name()
+
         # Record joke as solution - auto-creates embedding from answer_text
         fact_id = learn_trait.learn.solutions.record(
             agent_name=self.name,
@@ -400,9 +412,118 @@ Return your joke in JSON format with 'text' and 'style' fields."""
             problem_context={"style_preference": "varied"},
             answer={"text": joke.text, "style": joke.style},
             answer_text=joke.text,
-            tokens_used=0,  # Not tracked at joke level
-            latency_ms=0,  # Not tracked at joke level
+            tokens_used=0,  # Not tracked at joke level yet
+            latency_ms=0,  # Not tracked at joke level yet
             category="joke",
-            source="agent",
+            source=model_name,  # Now uses actual model name instead of "agent"
         )
         self._lg.debug("joke saved as solution", extra={"fact_id": fact_id, "style": joke.style})
+
+        # Record model usage in agent-specific table
+        self._record_model_usage(fact_id, model_name)
+
+        # Record training metadata if using fine-tuned model
+        self._record_training_metadata(fact_id, model_name)
+
+    def _get_model_name(self) -> str:
+        """Get the model name currently being used.
+
+        For now, returns the LLM backend model. In future, this could support
+        tracking multiple models or fine-tuned adapters.
+
+        Returns:
+            Model name (e.g., 'claude-sonnet-4-5', 'llama-3.3-70b-instruct').
+        """
+        llm_trait = self.require_trait(LLMTrait)
+        # Get model from LLM trait backend
+        model_name = llm_trait.llm.model_name if hasattr(llm_trait.llm, 'model_name') else "unknown"
+        return model_name
+
+    def _record_model_usage(self, fact_id: int, model_name: str) -> None:
+        """Record model usage metadata in agent-specific table.
+
+        Args:
+            fact_id: ID of the fact in atomic_facts.
+            model_name: Name of the model used.
+        """
+        try:
+            storage = self.require_trait(StorageTrait).storage
+            storage.insert(
+                ModelUsage,
+                fact_id=fact_id,
+                model_name=model_name,
+                model_role="sole",  # Single model for now, extensible for multi-model
+                tokens_in=None,  # TODO: Track from LLM response
+                tokens_out=None,  # TODO: Track from LLM response
+                cost_usd=None,  # TODO: Calculate based on model pricing
+                latency_ms=None,  # TODO: Track from LLM response
+            )
+            self._lg.debug(
+                "model usage recorded",
+                extra={"fact_id": fact_id, "model": model_name}
+            )
+        except Exception as e:
+            self._lg.warning(
+                "failed to record model usage",
+                extra={"exception": e, "fact_id": fact_id}
+            )
+
+    def _record_training_metadata(self, fact_id: int, model_name: str) -> None:
+        """Record training metadata if using a fine-tuned model.
+
+        Args:
+            fact_id: ID of the fact in atomic_facts.
+            model_name: Name of the model used.
+        """
+        # Check if this is a fine-tuned model (contains version suffix)
+        # Example: "llama-70b-jokester-v4" -> adapter_version="v4"
+        is_finetuned = "jokester" in model_name.lower()
+
+        if not is_finetuned:
+            # Base model, record as such
+            try:
+                storage = self.require_trait(StorageTrait).storage
+                storage.insert(
+                    TrainingMetadata,
+                    fact_id=fact_id,
+                    base_model=model_name,
+                    adapter_version=None,
+                    training_iteration=None,
+                    training_date=None,
+                    training_data_size=None,
+                    is_base_model=True,
+                )
+                self._lg.debug(
+                    "training metadata recorded (base model)",
+                    extra={"fact_id": fact_id, "model": model_name}
+                )
+            except Exception as e:
+                self._lg.warning(
+                    "failed to record training metadata",
+                    extra={"exception": e, "fact_id": fact_id}
+                )
+        else:
+            # Fine-tuned model - extract version info
+            # TODO: Parse adapter version from model_name or configuration
+            # For now, this is a placeholder for future fine-tuned versions
+            try:
+                storage = self.require_trait(StorageTrait).storage
+                storage.insert(
+                    TrainingMetadata,
+                    fact_id=fact_id,
+                    base_model="llama-3.3-70b-instruct",  # TODO: Extract from config
+                    adapter_version=None,  # TODO: Parse from model_name
+                    training_iteration=None,  # TODO: Get from config
+                    training_date=None,  # TODO: Get from adapter metadata
+                    training_data_size=None,  # TODO: Get from training logs
+                    is_base_model=False,
+                )
+                self._lg.debug(
+                    "training metadata recorded (fine-tuned)",
+                    extra={"fact_id": fact_id, "model": model_name}
+                )
+            except Exception as e:
+                self._lg.warning(
+                    "failed to record training metadata",
+                    extra={"exception": e, "fact_id": fact_id}
+                )
