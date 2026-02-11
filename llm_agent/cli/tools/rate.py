@@ -57,10 +57,6 @@ class RateTool(Tool):
         agent_name = self.args.agent_name
         context_key = self._resolve_context_key(agent_name)
 
-        if context_key is None:
-            print(f"Error: Could not resolve context key for agent '{agent_name}'")
-            return 1
-
         self.lg.info(
             "starting rating session",
             extra={"agent": agent_name, "context_key": context_key},
@@ -70,15 +66,14 @@ class RateTool(Tool):
             return self._continuous_mode(context_key)
         return self._single_rating(context_key)
 
-    def _resolve_context_key(self, agent_name: str) -> str | None:
+    def _resolve_context_key(self, agent_name: str) -> str:
         """Resolve context_key from agent config.
 
         Args:
             agent_name: Agent name from command line
 
         Returns:
-            context_key: Resolved context key (from config or agent name)
-            None: If agent config not found
+            Resolved context key from config, or falls back to agent_name
         """
         config = self._load_agent_config(agent_name)
         if config is None:
@@ -89,6 +84,10 @@ class RateTool(Tool):
 
     def _load_agent_config(self, agent_name: str) -> dict[str, Any] | None:
         """Load agent config from YAML file."""
+        # Validate agent_name to prevent path traversal
+        if "/" in agent_name or "\\" in agent_name or ".." in agent_name:
+            raise ValueError(f"Invalid agent name: {agent_name}")
+
         agent_config_path = (
             Path(__file__).parent.parent.parent.parent / "etc" / "agents" / f"{agent_name}.yaml"
         )
@@ -190,7 +189,9 @@ class RateTool(Tool):
           AND af.context_key LIKE :context_pattern
         """
 
-        params: dict[str, Any] = {"context_pattern": f"{context_key}%"}
+        # Escape SQL LIKE wildcards to prevent unintended pattern matching
+        escaped = context_key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params: dict[str, Any] = {"context_pattern": f"{escaped}%"}
 
         if self.args.category:
             query += " AND af.category = :category"
@@ -315,9 +316,8 @@ class RateTool(Tool):
                 print("Stars must be 1-5")
                 return None
         except ValueError:
-            return None
-
             print("Invalid input. Use: 1-5 (stars), g/👍 (5★), b/👎 (1★), s/skip, q/quit")
+            return None
 
     def _format_stars(self, stars: int) -> str:
         """Format star rating visually.
