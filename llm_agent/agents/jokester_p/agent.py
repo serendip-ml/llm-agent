@@ -75,6 +75,7 @@ class JokesterAgent(Agent):
         self._similarity_threshold = similarity_threshold
         self._cycle_count = 0
         self._recent_results: list[ExecutionResult] = []
+        self._jokes_generated_this_session = 0  # Track jokes generated since start
 
     @property
     def name(self) -> str:
@@ -134,7 +135,9 @@ class JokesterAgent(Agent):
             recent_jokes = self._get_recent_jokes(learn_trait, limit=5)
 
             # Generate novel joke with retry loop
-            joke, attempts = self._generate_novel_joke(llm_trait, learn_trait, recent_jokes)
+            joke, attempts, max_similarity, similar_joke = self._generate_novel_joke(
+                llm_trait, learn_trait, recent_jokes
+            )
 
             if joke is None:
                 return ExecutionResult(
@@ -143,7 +146,7 @@ class JokesterAgent(Agent):
                     iterations=attempts,
                 )
 
-            return self._complete_cycle(learn_trait, joke, attempts)
+            return self._complete_cycle(learn_trait, joke, attempts, max_similarity, similar_joke)
 
         except StructuredOutputError as e:
             self._lg.warning("joke generation failed", extra={"error": str(e)})
@@ -156,7 +159,12 @@ class JokesterAgent(Agent):
             return ExecutionResult(success=False, content=f"Error: {e}", iterations=1)
 
     def _complete_cycle(
-        self, learn_trait: LearnTrait, joke: Joke, attempts: int
+        self,
+        learn_trait: LearnTrait,
+        joke: Joke,
+        attempts: int,
+        max_similarity: float,
+        similar_joke: str | None,
     ) -> ExecutionResult:
         """Complete joke generation cycle with save and logging.
 
@@ -164,11 +172,15 @@ class JokesterAgent(Agent):
             learn_trait: Learn trait for saving joke.
             joke: Generated joke.
             attempts: Number of generation attempts.
+            max_similarity: Similarity score to closest existing joke (0.0-1.0).
+            similar_joke: The closest existing joke text (if any).
 
         Returns:
             ExecutionResult with success status.
         """
         self._save_joke(learn_trait, joke)
+        self._jokes_generated_this_session += 1
+
         result = ExecutionResult(
             success=True,
             content=f"{joke.text}\n(Style: {joke.style})",
@@ -176,28 +188,39 @@ class JokesterAgent(Agent):
         )
         self._recent_results.append(result)
 
-        self._lg.info(
-            "joke generation completed",
-            extra={
-                "agent": self.name,
-                "success": result.success,
-                "attempts": attempts,
-                "style": joke.style,
-                "joke": joke.text,
+        log_extra = {
+            "agent": self.name,
+            "success": result.success,
+            "attempts": attempts,
+            "style": joke.style,
+            "joke": joke.text,
+            "session_count": self._jokes_generated_this_session,
+            "closest": {
+                "similarity": max_similarity,
+                "joke": similar_joke if similar_joke else "",
             },
-        )
+        }
+
+        self._lg.info("joke generation completed", extra=log_extra)
 
         return result
 
     def _generate_novel_joke(
         self, llm_trait: LLMTrait, learn_trait: LearnTrait, context: list[str]
-    ) -> tuple[Joke | None, int]:
+    ) -> tuple[Joke | None, int, float, str | None]:
         """Generate novel joke with retry loop.
 
+        Attempts joke generation with retries on failure.
+        max_retries=0 means 1 attempt (no retries).
+        max_retries=3 means 4 attempts (1 initial + 3 retries).
+
         Returns:
-            Tuple of (joke, attempts) where joke is None if failed.
+            Tuple of (joke, attempts, max_similarity, similar_joke) where joke is None if failed.
+            max_similarity is the similarity to closest existing joke (0.0-1.0).
+            similar_joke is the text of the closest existing joke (if any).
         """
-        for attempt in range(1, self._max_retries + 1):
+        max_attempts = self._max_retries + 1  # retries + initial attempt
+        for attempt in range(1, max_attempts + 1):
             if attempt > 1:
                 self._lg.debug(
                     "retrying joke generation...",
@@ -216,14 +239,16 @@ class JokesterAgent(Agent):
                 novelty = self._check_novelty(learn_trait, joke.text)
                 if not novelty.is_novel:
                     continue
+                return joke, attempt, novelty.max_similarity, novelty.similar_joke
 
-            return joke, attempt
+            # No embedder - assume novel with 0.0 similarity
+            return joke, attempt, 0.0, None
 
-        self._lg.warning(
-            "failed to generate novel joke after all retries",
-            extra={"max_retries": self._max_retries},
+        self._lg.debug(
+            "failed to generate novel joke after all attempts",
+            extra={"max_retries": self._max_retries, "total_attempts": max_attempts},
         )
-        return None, self._max_retries
+        return None, max_attempts, 0.0, None
 
     def ask(self, question: str) -> str:
         """Answer question (not supported)."""
@@ -328,7 +353,9 @@ Return your joke in JSON format with 'text' and 'style' fields."""
 
         # Novel, but log closest match for context
         self._log_similarity_result(joke_text, closest, is_novel=True)
-        return NoveltyCheck(is_novel=True, max_similarity=closest.score, similar_joke=None)
+        return NoveltyCheck(
+            is_novel=True, max_similarity=closest.score, similar_joke=closest.entity.content
+        )
 
     def _log_similarity_result(self, candidate: str, similar: Any, is_novel: bool) -> None:
         """Log similarity check result.
