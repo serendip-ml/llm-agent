@@ -3,7 +3,7 @@
 This example demonstrates how to use llm-agent agents in your own Python scripts
 without the multi-agent runtime infrastructure. You only need:
 - llm_agent.core (platform resources)
-- The agent you want to use (joke_teller)
+- The agent you want to use (jokester)
 
 No runtime, no HTTP server, no subprocess management - just agents.
 """
@@ -12,7 +12,7 @@ from typing import Any
 
 from appinfra.log import LogConfig, Logger, LoggerFactory
 
-from llm_agent.agents.joke_teller_p import Factory
+from llm_agent.agents.jokester_p import Factory
 from llm_agent.core import PlatformContext
 
 

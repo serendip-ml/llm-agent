@@ -40,7 +40,7 @@ class NoveltyCheck:
     similar_joke: str | None
 
 
-class JokeTellerAgent(Agent):
+class JokesterAgent(Agent):
     """Programmatic agent that tells jokes with guaranteed novelty checking.
 
     Unlike prompt-based agents that rely on LLM instructions, this agent uses
@@ -105,7 +105,7 @@ class JokeTellerAgent(Agent):
             # Clean up started traits before raising
             self._stop_traits()
             raise RuntimeError(
-                "JokeTellerAgent requires embedder for guaranteed novelty checking. "
+                "JokesterAgent requires embedder for guaranteed novelty checking. "
                 "Configure embedder_url in learn section."
             )
 
@@ -227,7 +227,7 @@ class JokeTellerAgent(Agent):
 
     def ask(self, question: str) -> str:
         """Answer question (not supported)."""
-        return "JokeTellerAgent does not support questions. Use run_once() to get a joke."
+        return "JokesterAgent does not support questions. Use run_once() to get a joke."
 
     def record_feedback(self, message: str) -> None:
         """Record feedback about a joke."""

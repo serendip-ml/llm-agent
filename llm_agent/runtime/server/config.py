@@ -90,7 +90,7 @@ class AgentConfigYAML(BaseModel):
     """Agent type: 'prompt' for YAML-only, 'programmatic' for custom Python."""
 
     module: str | None = None
-    """Module path for programmatic agents (e.g., 'llm_agent.agents.joke_teller')."""
+    """Module path for programmatic agents (e.g., 'llm_agent.agents.jokester_p')."""
 
     factory: str = "Factory"
     """Factory class name for programmatic agents (default: 'Factory')."""

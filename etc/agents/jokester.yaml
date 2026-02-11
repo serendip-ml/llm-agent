@@ -2,7 +2,7 @@ type: prompt
 
 # Learning profile - where this agent's memory is stored
 identity:
-  name: "joke-teller"       # defaults to agent name
+  name: "jokester"       # defaults to agent name
 
   # Optional: Explicit IDs for migrations/renaming
   # profile_id: "6fae98ab8d170809de4e057cf7d718da"
