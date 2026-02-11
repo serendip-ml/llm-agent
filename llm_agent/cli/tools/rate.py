@@ -105,7 +105,11 @@ class RateTool(Tool):
             with agent_config_path.open() as f:
                 config = yaml.safe_load(f)
                 return config if isinstance(config, dict) else None
-        except Exception:
+        except Exception as e:
+            self.lg.warning(
+                "failed to load agent config",
+                extra={"exception": e, "agent": agent_name},
+            )
             return None
 
     def _extract_context_key(self, config: dict[str, Any], agent_name: str) -> str | None:
