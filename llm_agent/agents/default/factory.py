@@ -94,16 +94,18 @@ class Factory(BaseFactory):
             config["config"] = {}
         config["config"]["default_prompt"] = default_prompt
 
+        # Convert to DotDict once for consistent usage
+        dotdict_config = DotDict(config)
+
         # Use base Factory.create() - handles identity, traits, tools
-        agent = super().create(DotDict(config), variables=None)
+        agent = super().create(dotdict_config, variables=None)
 
         # Add SAIA trait and event handlers (prompt-agent specific)
-        dotdict_config = DotDict(config)
         self._add_saia_trait(agent, dotdict_config)  # type: ignore[arg-type]
         self._configure_event_handlers(agent, dotdict_config)  # type: ignore[arg-type]
 
         # Add HTTP trait if configured (handled separately from base factory)
-        self._add_http_trait(agent, config)  # type: ignore[arg-type]
+        self._add_http_trait(agent, dotdict_config)  # type: ignore[arg-type]
 
         return agent  # type: ignore[return-value]
 
