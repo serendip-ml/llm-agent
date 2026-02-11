@@ -6,7 +6,9 @@ It does not manage lifecycle (start/stop) - that's handled by Core.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from appinfra import DotDict
 
 from .handle import AgentHandle, AgentInfo
 from .state import AgentState
@@ -38,14 +40,14 @@ class AgentRegistry:
         self._lg = lg
         self._agents: dict[str, AgentHandle] = {}
 
-    def register(self, name: str, config: dict[str, Any]) -> AgentHandle:
+    def register(self, name: str, config: DotDict) -> AgentHandle:
         """Register an agent configuration.
 
         The agent is registered in IDLE state.
 
         Args:
             name: Unique agent name.
-            config: Agent configuration dictionary.
+            config: Agent configuration (DotDict from appinfra config).
 
         Returns:
             AgentHandle for the registered agent.

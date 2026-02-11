@@ -6,6 +6,8 @@ import os
 import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from appinfra import DotDict
+
 from ..errors import ConfigError, TraitNotFoundError
 from ..traits import TraitName
 from .agent import Agent
@@ -73,7 +75,7 @@ class Factory:
 
     def create(
         self,
-        config: dict[str, Any],
+        config: DotDict,
         variables: dict[str, str] | None = None,
     ) -> Agent:
         """Create agent instance with standard initialization.
@@ -113,7 +115,7 @@ class Factory:
 
         return agent
 
-    def _build_identity(self, config: dict[str, Any]) -> Identity:
+    def _build_identity(self, config: DotDict) -> Identity:
         """Build Identity from identity fields.
 
         Args:
@@ -133,9 +135,9 @@ class Factory:
             raise ConfigError("identity.name is required")
 
         # Use Identity.from_config to properly resolve IDs
-        return Identity.from_config(identity, defaults={"name": name})
+        return Identity.from_config(identity, defaults=DotDict(name=name))
 
-    def _attach_traits(self, agent: Agent, config: dict[str, Any]) -> None:
+    def _attach_traits(self, agent: Agent, config: DotDict) -> None:
         """Create and attach traits for the agent.
 
         Only creates traits that are explicitly requested via:
@@ -164,7 +166,7 @@ class Factory:
         # Configure tools from YAML or factory defaults
         self._configure_tools(agent, config)
 
-    def _determine_required_traits(self, config: dict[str, Any]) -> list[TraitName]:
+    def _determine_required_traits(self, config: DotDict) -> list[TraitName]:
         """Determine which traits to create for this agent.
 
         Args:
@@ -190,7 +192,7 @@ class Factory:
             # No traits specified - create none
             return []
 
-    def _create_trait(self, trait_name: TraitName, agent: Agent, config: dict[str, Any]) -> Any:
+    def _create_trait(self, trait_name: TraitName, agent: Agent, config: DotDict) -> Any:
         """Create a trait instance using platform.trait_factory.
 
         Delegates to trait_factory.create() which handles validation and routing.
@@ -234,7 +236,7 @@ class Factory:
         }
 
     def _validate_trait_requirements(
-        self, agent: Agent, config: dict[str, Any], required: list[TraitName]
+        self, agent: Agent, config: DotDict, required: list[TraitName]
     ) -> None:
         """Validate that required traits were successfully created.
 
@@ -264,7 +266,7 @@ class Factory:
                 f"Check platform configuration (e.g., 'learn' section for LearnTrait)."
             )
 
-    def _configure_tools(self, agent: Agent, config: dict[str, Any]) -> None:
+    def _configure_tools(self, agent: Agent, config: DotDict) -> None:
         """Configure tools for the agent from YAML or factory defaults.
 
         Tool configuration priority:

@@ -6,7 +6,8 @@ Identity wraps agent name and context_key (for data isolation).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+
+from appinfra import DotDict
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ class Identity:
 
     @classmethod
     def from_config(
-        cls, config: dict[str, Any] | None = None, defaults: dict[str, Any] | None = None
+        cls, config: DotDict | None = None, defaults: DotDict | None = None
     ) -> Identity:
         """Create identity from configuration dict.
 
@@ -64,8 +65,8 @@ class Identity:
             Identity.from_config({"name": "joke-master", "context_key": "jokester"})
             # → name = "joke-master", context_key = "jokester"
         """
-        cfg = config or {}
-        defs = defaults or {}
+        cfg: DotDict = config or DotDict()
+        defs: DotDict = defaults or DotDict()
 
         # Get name (falsy values like "" fall through to defaults)
         name = cfg.get("name") or defs.get("name", "default")

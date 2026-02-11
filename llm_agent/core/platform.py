@@ -10,12 +10,17 @@ Catalogs of available traits/tools are defined in their packages (ALL_TRAITS, AL
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 
 from .tools.factory import ToolFactory
 from .traits.factory import Factory as TraitFactory
+
+
+if TYPE_CHECKING:
+    from .traits.builtin.learn import LearnConfig
+    from .traits.builtin.llm import LLMConfig
 
 
 class PlatformContext:
@@ -67,8 +72,8 @@ class PlatformContext:
     def from_config(
         cls,
         lg: Logger,
-        llm_config: dict[str, Any],
-        learn_config: dict[str, Any] | None = None,
+        llm_config: LLMConfig,
+        learn_config: LearnConfig | None = None,
     ) -> PlatformContext:
         """Create platform context from configuration.
 

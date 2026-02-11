@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from appinfra.db.pg import PG
@@ -17,63 +16,28 @@ from llm_learn.memory.atomic import Fact
 from ...llm.types import CompletionResult
 from ...runnable import ExecutionResult
 from ..base import BaseTrait
-from .llm import LLMConfig, _resolve_llm_defaults
+from .llm import _resolve_llm_defaults
 
 
 if TYPE_CHECKING:
     from llm_agent.core.agent import Agent, Identity
 
 
-@dataclass
-class LearnConfig:
-    """Configuration for Learn trait.
+from appinfra import DotDict
 
-    Attributes:
-        identity: Resolved Identity (required).
-        llm: LLM configuration for learned completions.
-        db: Database configuration dict (with url, extensions, etc.).
-        embedder_url: URL for embedding service (None = no RAG).
-        embedder_model: Model name for embeddings.
-        embedder_timeout: Embedder timeout in seconds.
-    """
 
-    identity: Identity | None = None
+# Type alias for Learn configuration
+LearnConfig = DotDict
+"""Learn configuration as DotDict.
 
-    llm: LLMConfig | None = None
-    db: dict[str, Any] | None = None
-    embedder_url: str | None = None
-    embedder_model: str = "default"
-    embedder_timeout: float = 30.0
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to plain dict for pickling across process boundaries.
-
-        Handles DotDict and other special dict types that can't be pickled directly.
-        """
-
-        def _to_plain_dict(d: dict[str, Any] | None) -> dict[str, Any]:
-            if d is None:
-                return {}
-            if hasattr(d, "to_dict"):
-                result: dict[str, Any] = d.to_dict()  # DotDict.to_dict() handles recursion
-                return result
-            return dict(d)
-
-        # Serialize identity as dict if present
-        identity_dict = None
-        if self.identity is not None:
-            from dataclasses import asdict
-
-            identity_dict = asdict(self.identity)
-
-        return {
-            "identity": identity_dict,
-            "llm": _to_plain_dict(self.llm),
-            "db": _to_plain_dict(self.db),
-            "embedder_url": self.embedder_url,
-            "embedder_model": self.embedder_model,
-            "embedder_timeout": self.embedder_timeout,
-        }
+Expected fields:
+    identity: Resolved Identity (required).
+    llm: LLM configuration for learned completions.
+    db: Database configuration dict (with url, extensions, etc.).
+    embedder_url: URL for embedding service (None = no RAG).
+    embedder_model: Model name for embeddings (default: "default").
+    embedder_timeout: Embedder timeout in seconds (default: 30.0).
+"""
 
 
 class LearnTrait(BaseTrait):
@@ -163,7 +127,8 @@ class LearnTrait(BaseTrait):
 
     def _resolve_identity(self) -> Identity | None:
         """Resolve Identity from config."""
-        return self.config.identity
+        identity: Identity | None = self.config.get("identity")
+        return identity
 
     def on_start(self) -> None:
         """Create learn client, LLM client, and embedder on agent start."""
@@ -176,7 +141,7 @@ class LearnTrait(BaseTrait):
         self._database = Database(self.agent.lg, pg)
 
         # Create LLM client for completions (before LearnClient)
-        llm_config = self.config.llm or {}
+        llm_config: DotDict = self.config.get("llm") or DotDict()
         self._client = LLMClientFactory(self.agent.lg).from_config(llm_config)
         self._llm_defaults = _resolve_llm_defaults(llm_config)
 

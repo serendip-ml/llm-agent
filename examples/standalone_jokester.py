@@ -111,10 +111,12 @@ def main() -> None:  # cq: max-lines=45
     llm_config, learn_config = _build_platform_config()
 
     # Create platform context (central resource manager)
+    from appinfra import DotDict
+
     platform = PlatformContext.from_config(
         lg=logger,
-        llm_config=llm_config,
-        learn_config=learn_config,
+        llm_config=DotDict(llm_config),
+        learn_config=DotDict(learn_config) if learn_config else None,
     )
 
     logger.info("platform context created")
@@ -123,7 +125,8 @@ def main() -> None:  # cq: max-lines=45
     try:
         # Create agent via factory
         factory = Factory(platform)
-        agent = factory.create(_build_agent_config())
+        agent_config = DotDict(_build_agent_config())
+        agent = factory.create(agent_config)
 
         logger.info("agent created", extra={"agent": agent.name})
 

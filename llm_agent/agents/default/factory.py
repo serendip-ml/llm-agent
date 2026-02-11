@@ -78,7 +78,8 @@ class Factory(BaseFactory):
         Returns:
             Configured Agent ready to start.
         """
-        # Absolute import to avoid circular dependency
+        from appinfra import DotDict
+
         from llm_agent.core.agent import _substitute_in_dict
 
         # Apply variable substitutions
@@ -93,15 +94,18 @@ class Factory(BaseFactory):
             config["config"] = {}
         config["config"]["default_prompt"] = default_prompt
 
+        # Convert to DotDict once for consistent usage
+        dotdict_config = DotDict(config)
+
         # Use base Factory.create() - handles identity, traits, tools
-        agent = super().create(config, variables=None)  # Already substituted
+        agent = super().create(dotdict_config, variables=None)
 
         # Add SAIA trait and event handlers (prompt-agent specific)
-        self._add_saia_trait(agent, config)  # type: ignore[arg-type]
-        self._configure_event_handlers(agent, config)  # type: ignore[arg-type]
+        self._add_saia_trait(agent, dotdict_config)  # type: ignore[arg-type]
+        self._configure_event_handlers(agent, dotdict_config)  # type: ignore[arg-type]
 
         # Add HTTP trait if configured (handled separately from base factory)
-        self._add_http_trait(agent, config)  # type: ignore[arg-type]
+        self._add_http_trait(agent, dotdict_config)  # type: ignore[arg-type]
 
         return agent  # type: ignore[return-value]
 

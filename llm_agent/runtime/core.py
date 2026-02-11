@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from multiprocessing import Queue
 from typing import TYPE_CHECKING, Any, cast
 
+from appinfra import DotDict
 from appinfra.log.mp import LogQueueListener
 
 from .handle import AgentHandle, AgentInfo
@@ -45,7 +46,7 @@ class Core:
         lg: Logger,
         registry: AgentRegistry,
         llm_config: LLMConfig,
-        learn_config: LearnConfig | None = None,
+        learn_config: DotDict | None = None,
         variables: dict[str, str] | None = None,
         factory_module: str = "llm_agent.agents.default",
     ) -> None:
@@ -55,7 +56,7 @@ class Core:
             lg: Logger instance.
             registry: Agent registry for handle lookup.
             llm_config: LLM configuration for agents.
-            learn_config: Optional LearnConfig for memory capabilities.
+            learn_config: Optional learn configuration (DotDict/LearnConfig).
             variables: Variable substitutions for agent configs.
             factory_module: Module containing the agent Factory class.
         """
@@ -309,8 +310,8 @@ class Core:
         main_channel, subprocess_channel = create_channel_pair(self._lg)
         handle.channel = main_channel
 
-        # Convert LearnConfig to dict for pickling (handles DotDict from appinfra)
-        learn_config_dict = self._learn_config.to_dict() if self._learn_config else None
+        # LearnConfig can be passed directly - DotDict pickles fine
+        learn_config = self._learn_config if self._learn_config else None
 
         # Determine factory module (per-agent for programmatic, default for prompt)
         factory_module = handle.config.get("module", self._factory_module)
@@ -321,8 +322,8 @@ class Core:
                 handle.name,
                 self._build_runner_config(handle),
                 subprocess_channel,
-                self._llm_config,  # Already a dict, no need for asdict()
-                learn_config_dict,
+                self._llm_config,
+                learn_config,
                 self._variables,
                 self._log_config,
                 factory_module,  # Per-agent module for programmatic agents
@@ -342,10 +343,10 @@ class Core:
         if msg.type == MessageType.ERROR:
             raise RuntimeError(msg.payload.get("error", "Unknown startup error"))
 
-    def _build_runner_config(self, handle: AgentHandle) -> dict[str, Any]:
-        """Build configuration dict for the runner."""
-        config = dict(handle.config)
-        config["name"] = handle.name
+    def _build_runner_config(self, handle: AgentHandle) -> DotDict:
+        """Build configuration for the runner (keeps DotDict for dot notation)."""
+        config = handle.config  # Keep as DotDict
+        config["name"] = handle.name  # DotDict supports both dict and dot notation
         return config
 
     def _terminate_process(self, handle: AgentHandle) -> None:
@@ -372,10 +373,10 @@ class Core:
 
 def _subprocess_entry(
     name: str,
-    config: dict[str, Any],
+    config: DotDict,
     channel: Any,
-    llm_config: dict[str, Any],
-    learn_config_dict: dict[str, Any] | None,
+    llm_config: LLMConfig,
+    learn_config: LearnConfig | None,
     variables: dict[str, str],
     log_config: dict[str, Any],
     factory_module: str,
@@ -398,7 +399,7 @@ def _subprocess_entry(
         platform = PlatformContext.from_config(
             lg=lg,
             llm_config=llm_config,
-            learn_config=learn_config_dict,
+            learn_config=learn_config,
         )
 
         # Load and create agent using new factory architecture

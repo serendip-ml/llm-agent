@@ -32,6 +32,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
           # Internal deps: use develop branch until release, then pin to versions
+          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@develop"
           python -m pip install "git+https://github.com/serendip-ml/llm-infer.git@develop"
           python -m pip install "git+https://github.com/serendip-ml/llm-learn.git@develop"
           python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@develop"
@@ -66,6 +67,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
           # Internal deps: use develop branch until release, then pin to versions
+          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@develop"
           python -m pip install "git+https://github.com/serendip-ml/llm-infer.git@develop"
           python -m pip install "git+https://github.com/serendip-ml/llm-learn.git@develop"
           python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@develop"
@@ -94,6 +96,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
           # Internal deps: use develop branch until release, then pin to versions
+          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@develop"
           python -m pip install "git+https://github.com/serendip-ml/llm-infer.git@develop"
           python -m pip install "git+https://github.com/serendip-ml/llm-learn.git@develop"
           python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@develop"
