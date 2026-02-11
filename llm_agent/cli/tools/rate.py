@@ -16,9 +16,7 @@ class RateTool(Tool):
     """Rate unrated content from agents for training."""
 
     def __init__(self, parent: Any = None) -> None:
-        config = ToolConfig(
-            name="rate", help_text="Rate unrated content from agents for training"
-        )
+        config = ToolConfig(name="rate", help_text="Rate unrated content from agents for training")
         super().__init__(parent, config)
         self._db: Database | None = None
 
@@ -82,47 +80,53 @@ class RateTool(Tool):
             context_key: Resolved context key (from config or agent name)
             None: If agent config not found
         """
-        # Try to load agent config from etc/agents/<agent_name>.yaml
-        # Look in the etc directory relative to project root
-        agent_config_path = Path(__file__).parent.parent.parent.parent / "etc" / "agents" / f"{agent_name}.yaml"
+        config = self._load_agent_config(agent_name)
+        if config is None:
+            return agent_name
+
+        context_key = self._extract_context_key(config, agent_name)
+        return context_key if context_key else agent_name
+
+    def _load_agent_config(self, agent_name: str) -> dict[str, Any] | None:
+        """Load agent config from YAML file."""
+        agent_config_path = (
+            Path(__file__).parent.parent.parent.parent / "etc" / "agents" / f"{agent_name}.yaml"
+        )
 
         if not agent_config_path.exists():
             self.lg.warning(
                 "agent config not found, using agent name as context_key",
                 extra={"agent": agent_name, "path": str(agent_config_path)},
             )
-            return agent_name
+            return None
 
         try:
             import yaml
 
             with agent_config_path.open() as f:
                 config = yaml.safe_load(f)
+                return config if isinstance(config, dict) else None
+        except Exception:
+            return None
 
-            # Check for identity.context_key
-            if config and "identity" in config:
-                identity = config["identity"]
-                if isinstance(identity, dict) and "context_key" in identity:
-                    context_key = identity["context_key"]
+    def _extract_context_key(self, config: dict[str, Any], agent_name: str) -> str | None:
+        """Extract context_key from agent config."""
+        if config and "identity" in config:
+            identity = config["identity"]
+            if isinstance(identity, dict) and "context_key" in identity:
+                context_key = identity["context_key"]
+                if isinstance(context_key, str):
                     self.lg.info(
                         "resolved context_key from agent config",
                         extra={"agent": agent_name, "context_key": context_key},
                     )
                     return context_key
 
-            # Fallback to agent name
-            self.lg.info(
-                "no context_key in agent config, using agent name",
-                extra={"agent": agent_name},
-            )
-            return agent_name
-
-        except Exception as e:
-            self.lg.warning(
-                "failed to load agent config",
-                extra={"exception": e, "agent": agent_name},
-            )
-            return agent_name
+        self.lg.info(
+            "no context_key in agent config, using agent name",
+            extra={"agent": agent_name},
+        )
+        return None
 
     def _continuous_mode(self, context_key: str) -> int:
         """Rate multiple items in continuous mode."""
@@ -146,6 +150,7 @@ class RateTool(Tool):
             if result == "skip":
                 continue
 
+            assert isinstance(result, tuple), "result should be tuple after skip check"
             signal, strength, stars = result
             stars_visual = self._format_stars(stars)
             print(f"{stars_visual} ", end="")
@@ -167,11 +172,36 @@ class RateTool(Tool):
             print("Skipped.")
             return 0
 
+        assert isinstance(result, tuple), "result should be tuple after None/skip check"
         signal, strength, stars = result
         stars_visual = self._format_stars(stars)
         print(f"{stars_visual} ✓ Saved")
         self._save_feedback(fact["id"], signal, strength)
         return 0
+
+    def _build_unrated_query(self, context_key: str) -> tuple[str, dict[str, Any]]:
+        """Build SQL query for unrated facts with filters."""
+        query = """
+        SELECT af.id, af.type, af.category, af.source, af.content,
+               af.context_key, af.created_at
+        FROM atomic_facts af
+        LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+        WHERE afd.id IS NULL
+          AND af.context_key LIKE :context_pattern
+        """
+
+        params: dict[str, Any] = {"context_pattern": f"{context_key}%"}
+
+        if self.args.category:
+            query += " AND af.category = :category"
+            params["category"] = self.args.category
+
+        if self.args.type:
+            query += " AND af.type = :type"
+            params["type"] = self.args.type
+
+        query += " ORDER BY af.created_at ASC LIMIT 1"
+        return query, params
 
     def _get_next_unrated(self, context_key: str) -> dict[str, Any] | None:
         """Get next unrated fact matching filters.
@@ -185,28 +215,7 @@ class RateTool(Tool):
         if self._db is None:
             raise RuntimeError("Database not initialized")
 
-        # Build query with filters
-        query = """
-        SELECT af.id, af.type, af.category, af.source, af.content,
-               af.context_key, af.created_at
-        FROM atomic_facts af
-        LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
-        WHERE afd.id IS NULL
-          AND af.context_key LIKE :context_pattern
-        """
-
-        params: dict[str, Any] = {"context_pattern": f"{context_key}%"}
-
-        # Add optional filters
-        if self.args.category:
-            query += " AND af.category = :category"
-            params["category"] = self.args.category
-
-        if self.args.type:
-            query += " AND af.type = :type"
-            params["type"] = self.args.type
-
-        query += " ORDER BY af.created_at ASC LIMIT 1"
+        query, params = self._build_unrated_query(context_key)
 
         with self._db.session() as session:
             result = session.execute(text(query), params)
@@ -228,7 +237,9 @@ class RateTool(Tool):
     def _display_fact(self, fact: dict[str, Any]) -> None:
         """Display fact in generic format."""
         print("\n" + "=" * 80)
-        print(f"Type: {fact['type']} | Category: {fact['category'] or 'N/A'} | Source: {fact['source']}")
+        print(
+            f"Type: {fact['type']} | Category: {fact['category'] or 'N/A'} | Source: {fact['source']}"
+        )
         print(f"Context: {fact['context_key']}")
 
         # Format datetime
@@ -271,39 +282,40 @@ class RateTool(Tool):
             if not user_input:
                 continue
 
-            # Quit
+            # Handle special commands
             if user_input in ("q", "quit"):
                 return None
-
-            # Skip (don't record anything)
             if user_input in ("s", "skip"):
                 return "skip"
-
-            # Binary shortcuts
             if user_input in ("g", "good", "👍"):
-                return ("positive", 1.0, 5)  # 5 stars
-
+                return ("positive", 1.0, 5)
             if user_input in ("b", "bad", "👎"):
-                return ("negative", 1.0, 1)  # 1 star
+                return ("negative", 1.0, 1)
 
-            # Star rating (1-5)
-            try:
-                stars = int(user_input)
-                if stars == 1:
-                    return ("negative", 1.0, 1)  # 1★ - bad
-                elif stars == 2:
-                    return ("negative", 0.5, 2)  # 2★ - not good
-                elif stars == 3:
-                    return ("dismiss", 1.0, 3)  # 3★ - neutral/meh
-                elif stars == 4:
-                    return ("positive", 0.5, 4)  # 4★ - good
-                elif stars == 5:
-                    return ("positive", 1.0, 5)  # 5★ - excellent
-                else:
-                    print("Stars must be 1-5")
-                    continue
-            except ValueError:
-                pass
+            # Try star rating
+            result = self._parse_star_rating(user_input)
+            if result:
+                return result
+
+    def _parse_star_rating(self, user_input: str) -> tuple[str, float, int] | None:
+        """Parse numeric star rating (1-5)."""
+        try:
+            stars = int(user_input)
+            if stars == 1:
+                return ("negative", 1.0, 1)
+            elif stars == 2:
+                return ("negative", 0.5, 2)
+            elif stars == 3:
+                return ("dismiss", 1.0, 3)
+            elif stars == 4:
+                return ("positive", 0.5, 4)
+            elif stars == 5:
+                return ("positive", 1.0, 5)
+            else:
+                print("Stars must be 1-5")
+                return None
+        except ValueError:
+            return None
 
             print("Invalid input. Use: 1-5 (stars), g/👍 (5★), b/👎 (1★), s/skip, q/quit")
 
