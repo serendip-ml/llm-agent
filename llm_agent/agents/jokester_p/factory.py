@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ...core.agent import Factory as BaseFactory
 from ...core.traits import TraitName as TN
-from .agent import Agent
+from .agent import JokesterAgent
 
 
 class Factory(BaseFactory):
@@ -18,7 +18,7 @@ class Factory(BaseFactory):
     No tools needed - agent uses traits directly in code.
     """
 
-    agent_class = Agent
+    agent_class = JokesterAgent
     # IMPORTANT: STORAGE must come after LEARN - StorageTrait depends on LearnTrait's database
     required_traits = [TN.DIRECTIVE, TN.LLM, TN.LEARN, TN.STORAGE]
     default_tools = {}  # This agent doesn't need tools (uses traits directly in code)

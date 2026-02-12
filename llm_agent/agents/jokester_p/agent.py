@@ -10,6 +10,7 @@ which cannot be reliably enforced through prompts alone due to context window li
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,8 +18,7 @@ from appinfra.log import Logger
 from llm_infer.client.exceptions import BackendUnavailableError
 from pydantic import BaseModel
 
-from ...core.agent import Agent as BaseAgent
-from ...core.agent import ExecutionResult, Identity
+from ...core.agent import Agent, ExecutionResult, Identity
 from ...core.llm.backend import StructuredOutputError
 from ...core.traits.builtin.directive import DirectiveTrait
 from ...core.traits.builtin.learn import LearnTrait
@@ -44,7 +44,7 @@ class NoveltyCheck:
     similar_joke: str | None
 
 
-class Agent(BaseAgent):
+class JokesterAgent(Agent):
     """Programmatic agent that tells jokes with guaranteed novelty checking.
 
     Unlike prompt-based agents that rely on LLM instructions, this agent uses
@@ -79,7 +79,9 @@ class Agent(BaseAgent):
         self._similarity_threshold = similarity_threshold
         self._cycle_count = 0
         self._jokes_generated_this_session = 0  # Track jokes generated since start
-        self._recent_results: list[ExecutionResult] = []  # For get_recent_results() API
+        self._recent_results: deque[ExecutionResult] = deque(
+            maxlen=100
+        )  # Bounded to prevent memory leak
         self._storage: Storage | None = None  # Set in start(), None before agent is started
 
     @property
@@ -132,6 +134,7 @@ class Agent(BaseAgent):
         if not self._started:
             return
         self._stop_traits()
+        self._storage = None
         self._started = False
         self._lg.info("agent stopped", extra={"agent": self.name})
 
@@ -417,9 +420,8 @@ Return your joke in JSON format with 'text' and 'style' fields."""
 
         # Record model usage and training metadata via storage helper
         # Storage is always initialized in start(), so it should never be None here
-        assert self._storage is not None, (
-            "Storage not initialized - agent.start() must be called first"
-        )
+        if self._storage is None:
+            raise RuntimeError("Storage not initialized - call agent.start() first")
         self._storage.record_joke_metadata(fact_id)
 
     def record_feedback(self, message: str) -> None:
@@ -428,7 +430,8 @@ Return your joke in JSON format with 'text' and 'style' fields."""
         Args:
             message: Feedback message from user.
         """
-        self._lg.info("feedback received", extra={"feedback": message})
+        # Log at debug level to avoid exposing PII in production logs
+        self._lg.debug("feedback received", extra={"feedback": message})
 
     def get_recent_results(self, limit: int = 10) -> list[ExecutionResult]:
         """Get recent execution results.
@@ -439,4 +442,4 @@ Return your joke in JSON format with 'text' and 'style' fields."""
         Returns:
             List of recent execution results.
         """
-        return self._recent_results[-limit:]
+        return list(self._recent_results)[-limit:]

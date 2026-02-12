@@ -148,7 +148,7 @@ class Storage:
         # e.g., "llama-70b-jokester-v4" or "llama-3.3-70b-instruct-joke-teller"
         is_finetuned = any(
             keyword in model_name.lower()
-            for keyword in ["jokester", "joke-teller", "-adapter", "-lora", "-qlora"]
+            for keyword in ["-jokester", "-joke-teller", "-adapter", "-lora", "-qlora"]
         )
 
         if is_finetuned:
