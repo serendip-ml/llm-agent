@@ -3,9 +3,9 @@
 import argparse
 import json
 from datetime import datetime
-from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from appinfra import DotDict
 from appinfra.app.tools import Tool, ToolConfig
 from appinfra.db.pg import PG
 from llm_learn.core import Database
@@ -82,37 +82,26 @@ class RateTool(Tool):
         context_key = self._extract_context_key(config, agent_name)
         return context_key if context_key else agent_name
 
-    def _load_agent_config(self, agent_name: str) -> dict[str, Any] | None:
-        """Load agent config from YAML file."""
-        # Validate agent_name to prevent path traversal
-        if "/" in agent_name or "\\" in agent_name or ".." in agent_name:
-            raise ValueError(f"Invalid agent name: {agent_name}")
+    def _load_agent_config(self, agent_name: str) -> DotDict | None:
+        """Load agent config from app config."""
+        if not hasattr(self.app.config, "agents"):
+            self.lg.warning(
+                "no agents in config, using agent name as context_key",
+                extra={"agent": agent_name},
+            )
+            return None
 
-        agent_config_path = (
-            Path(__file__).parent.parent.parent.parent / "etc" / "agents" / f"{agent_name}.yaml"
-        )
-
-        if not agent_config_path.exists():
+        agents = self.app.config.agents
+        if agent_name not in agents:
             self.lg.warning(
                 "agent config not found, using agent name as context_key",
-                extra={"agent": agent_name, "path": str(agent_config_path)},
+                extra={"agent": agent_name, "available_agents": list(agents.keys())},
             )
             return None
 
-        try:
-            import yaml
+        return cast(DotDict, agents[agent_name])
 
-            with agent_config_path.open() as f:
-                config = yaml.safe_load(f)
-                return config if isinstance(config, dict) else None
-        except Exception as e:
-            self.lg.warning(
-                "failed to load agent config",
-                extra={"exception": e, "agent": agent_name},
-            )
-            return None
-
-    def _extract_context_key(self, config: dict[str, Any], agent_name: str) -> str | None:
+    def _extract_context_key(self, config: DotDict, agent_name: str) -> str | None:
         """Extract context_key from agent config."""
         if config and "identity" in config:
             identity = config["identity"]
@@ -190,7 +179,7 @@ class RateTool(Tool):
         FROM atomic_facts af
         LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
         WHERE afd.id IS NULL
-          AND af.context_key LIKE :context_pattern
+          AND af.context_key LIKE :context_pattern ESCAPE '\\'
         """
 
         # Escape SQL LIKE wildcards to prevent unintended pattern matching
