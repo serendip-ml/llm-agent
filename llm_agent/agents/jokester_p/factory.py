@@ -19,5 +19,6 @@ class Factory(BaseFactory):
     """
 
     agent_class = Agent
+    # IMPORTANT: STORAGE must come after LEARN - StorageTrait depends on LearnTrait's database
     required_traits = [TN.DIRECTIVE, TN.LLM, TN.LEARN, TN.STORAGE]
     default_tools = {}  # This agent doesn't need tools (uses traits directly in code)

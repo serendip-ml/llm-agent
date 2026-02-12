@@ -80,7 +80,7 @@ class Agent(BaseAgent):
         self._cycle_count = 0
         self._jokes_generated_this_session = 0  # Track jokes generated since start
         self._recent_results: list[ExecutionResult] = []  # For get_recent_results() API
-        self._storage: Storage | None = None
+        self._storage: Storage | None = None  # Set in start(), None before agent is started
 
     @property
     def name(self) -> str:
@@ -416,8 +416,11 @@ Return your joke in JSON format with 'text' and 'style' fields."""
         self._lg.debug("joke saved as solution", extra={"fact_id": fact_id, "style": joke.style})
 
         # Record model usage and training metadata via storage helper
-        if self._storage:
-            self._storage.record_joke_metadata(fact_id)
+        # Storage is always initialized in start(), so it should never be None here
+        assert self._storage is not None, (
+            "Storage not initialized - agent.start() must be called first"
+        )
+        self._storage.record_joke_metadata(fact_id)
 
     def record_feedback(self, message: str) -> None:
         """Record feedback about a joke.
