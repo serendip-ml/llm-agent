@@ -6,6 +6,8 @@ This module provides utilities to clean up these common patterns.
 
 from __future__ import annotations
 
+import json
+
 
 class JSONCleaner:
     """Cleans LLM-generated JSON strings for parsing.
@@ -73,9 +75,19 @@ class JSONCleaner:
 
         Common LLM issue: incomplete JSON like {"key": "value" (missing closing brace).
         This adds missing closing characters based on the opening count.
+
+        Only applies the fix if JSON is actually invalid - prevents corrupting valid JSON
+        that contains braces/brackets within string values (e.g., {"text": "I {love} this"}).
         """
         if not content:
             return content
+
+        # First check if JSON is already valid - don't touch it if so
+        try:
+            json.loads(content)
+            return content  # Valid JSON, no fix needed
+        except (json.JSONDecodeError, ValueError):
+            pass  # JSON is invalid, proceed with auto-close attempt
 
         # Count unclosed braces and brackets
         open_braces = content.count("{") - content.count("}")
