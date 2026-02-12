@@ -89,15 +89,36 @@ class JSONCleaner:
         except (json.JSONDecodeError, ValueError):
             pass  # JSON is invalid, proceed with auto-close attempt
 
-        # Count unclosed braces and brackets
-        open_braces = content.count("{") - content.count("}")
-        open_brackets = content.count("[") - content.count("]")
+        # Scan for unclosed brackets/braces, then append closers in correct order
+        unclosed_stack = self._scan_json_structure(content)
+        return content + "".join(reversed(unclosed_stack))
 
-        # Add missing closing characters
-        result = content
-        if open_brackets > 0:
-            result += "]" * open_brackets
-        if open_braces > 0:
-            result += "}" * open_braces
+    def _scan_json_structure(self, content: str) -> list[str]:
+        """Scan JSON content and return stack of unclosed brackets/braces.
 
-        return result
+        Uses string-aware scanning to ignore braces inside string literals.
+        """
+        stack: list[str] = []
+        in_string = False
+        escape = False
+
+        for char in content:
+            if escape:
+                escape = False
+                continue
+            if char == "\\":
+                escape = True
+                continue
+            if char == '"' and not in_string:
+                in_string = True
+            elif char == '"' and in_string:
+                in_string = False
+            elif not in_string:
+                if char == "{":
+                    stack.append("}")
+                elif char == "[":
+                    stack.append("]")
+                elif char in ("}", "]") and stack and stack[-1] == char:
+                    stack.pop()
+
+        return stack

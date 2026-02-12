@@ -43,10 +43,13 @@ class Agent(BaseAgent):
     - get_recent_results(): Recent execution history
 
     Example:
-        from llm_agent.core.agent import Identity
-
-        identity = Identity.from_name("explorer")
-        agent = Agent(lg, identity=identity, default_prompt="Analyze the codebase")
+        agent = Agent(
+            lg,
+            config={
+                "identity": {"name": "explorer"},
+                "default_prompt": "Analyze the codebase",
+            },
+        )
         agent.add_trait(SAIATrait(agent, backend=backend))
         agent.add_trait(ToolsTrait(agent))
         agent.start()
