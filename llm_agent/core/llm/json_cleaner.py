@@ -106,7 +106,7 @@ class JSONCleaner:
             if escape:
                 escape = False
                 continue
-            if char == "\\":
+            if char == "\\" and in_string:
                 escape = True
                 continue
             if char == '"' and not in_string:

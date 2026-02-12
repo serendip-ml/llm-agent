@@ -43,6 +43,7 @@ class Agent(BaseAgent):
     - get_recent_results(): Recent execution history
 
     Example:
+        # Plain dicts are accepted and converted to DotDict internally
         agent = Agent(
             lg,
             config={
