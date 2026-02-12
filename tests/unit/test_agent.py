@@ -3,8 +3,10 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from appinfra import DotDict
 
-from llm_agent.core.agent import Agent, ExecutionResult, Identity, _substitute_variables
+from llm_agent.core.agent import Agent, ExecutionResult
+from llm_agent.core.agent.helpers import _substitute_variables
 from tests.helpers import create_mock_trait
 
 
@@ -37,14 +39,6 @@ class TestAgentBaseClass:
         """Complete subclass can be instantiated."""
 
         class CompleteAgent(Agent):
-            @property
-            def name(self) -> str:
-                return "test"
-
-            @property
-            def cycle_count(self) -> int:
-                return 0
-
             def start(self) -> None:
                 self._start_traits()
                 self._started = True
@@ -65,7 +59,8 @@ class TestAgentBaseClass:
             def get_recent_results(self, limit: int = 10) -> list[ExecutionResult]:
                 return []
 
-        agent = CompleteAgent(lg=mock_logger)
+        config = DotDict(identity={"name": "test"})
+        agent = CompleteAgent(lg=mock_logger, config=config)
         assert agent.name == "test"
 
 
@@ -84,8 +79,7 @@ class TestAgentLifecycle:
 
         return DefaultAgent(
             lg=mock_logger,
-            identity=Identity.from_name("test-agent"),
-            default_prompt="You are a test agent.",
+            config=DotDict(identity={"name": "test-agent"}, default_prompt="You are a test agent."),
         )
 
     def test_init(self, agent):
@@ -122,7 +116,9 @@ class TestAgentTraits:
         """Create a test agent."""
         from llm_agent.agents.default import Agent as DefaultAgent
 
-        return DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+        return DefaultAgent(
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
+        )
 
     def test_add_trait(self, agent):
         mock_trait = MagicMock()
@@ -205,7 +201,7 @@ class TestAgentExecution:
         from llm_agent.core.platform import PlatformContext
 
         agent = DefaultAgent(
-            lg=mock_logger, identity=Identity.from_name("test"), default_prompt="Test task"
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="Test task")
         )
         agent._traits.register(mock_saia_trait)
 
@@ -222,7 +218,7 @@ class TestAgentExecution:
         from llm_agent.agents.default import Agent as DefaultAgent
 
         agent = DefaultAgent(
-            lg=mock_logger, identity=Identity.from_name("test"), default_prompt="Test task"
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="Test task")
         )
 
         result = agent.run_once()
@@ -233,7 +229,9 @@ class TestAgentExecution:
     def test_run_once_without_default_prompt_fails(self, mock_logger, mock_saia_trait):
         from llm_agent.agents.default import Agent as DefaultAgent
 
-        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+        agent = DefaultAgent(
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
+        )
         agent._traits.register(mock_saia_trait)
 
         result = agent.run_once()
@@ -281,7 +279,9 @@ class TestAgentExecution:
     def test_ask_without_saia_trait_returns_error(self, mock_logger):
         from llm_agent.agents.default import Agent as DefaultAgent
 
-        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+        agent = DefaultAgent(
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
+        )
 
         result = agent.ask("Question?")
 
@@ -324,7 +324,9 @@ class TestAgentRecentResults:
         """Create a test agent."""
         from llm_agent.agents.default import Agent as DefaultAgent
 
-        return DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+        return DefaultAgent(
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
+        )
 
     def test_get_recent_results_empty(self, agent):
         assert agent.get_recent_results() == []
@@ -354,7 +356,9 @@ class TestAgentRecordFeedback:
         """Default agent's record_feedback is a no-op."""
         from llm_agent.agents.default import Agent as DefaultAgent
 
-        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+        agent = DefaultAgent(
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
+        )
 
         # Should not raise
         agent.record_feedback("Some feedback message")
@@ -468,7 +472,9 @@ class TestFactorySystemPrompt:
         from llm_agent.core.traits.builtin.directive import DirectiveTrait
 
         factory = self._create_factory(mock_logger)
-        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+        agent = DefaultAgent(
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
+        )
         agent.add_trait(DirectiveTrait(agent, "You are a helpful assistant."))
 
         system_prompt = factory._build_system_prompt(agent)
@@ -481,7 +487,9 @@ class TestFactorySystemPrompt:
         from llm_agent.core.traits.builtin.directive import MethodTrait
 
         factory = self._create_factory(mock_logger)
-        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+        agent = DefaultAgent(
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
+        )
         agent.add_trait(MethodTrait(agent, "- Step 1\n- Step 2"))
 
         system_prompt = factory._build_system_prompt(agent)
@@ -494,7 +502,9 @@ class TestFactorySystemPrompt:
         from llm_agent.core.traits.builtin.directive import DirectiveTrait, MethodTrait
 
         factory = self._create_factory(mock_logger)
-        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+        agent = DefaultAgent(
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
+        )
         agent.add_trait(DirectiveTrait(agent, "You are a helpful assistant."))
         agent.add_trait(MethodTrait(agent, "- Step 1\n- Step 2"))
 
@@ -507,7 +517,9 @@ class TestFactorySystemPrompt:
         from llm_agent.agents.default import Agent as DefaultAgent
 
         factory = self._create_factory(mock_logger)
-        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+        agent = DefaultAgent(
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
+        )
 
         system_prompt = factory._build_system_prompt(agent)
 

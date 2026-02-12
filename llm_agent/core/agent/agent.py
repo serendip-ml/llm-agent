@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from appinfra import DotDict
 from appinfra.log import Logger
@@ -14,6 +14,9 @@ from ..traits.base import BaseTrait
 from ..traits.registry import Registry as TraitRegistry
 from .types import ExecutionResult
 
+
+if TYPE_CHECKING:
+    from .identity import Identity
 
 TraitT = TypeVar("TraitT", bound=BaseTrait)
 
@@ -50,6 +53,10 @@ class Agent(Runnable):
         Args:
             lg: Logger instance.
             config: Agent configuration (converted to DotDict if dict, empty if None).
+                   Must contain identity.name if config is provided.
+
+        Raises:
+            ConfigError: If identity.name is missing from config.
         """
         self._lg = lg
         if isinstance(config, DotDict):
@@ -58,14 +65,39 @@ class Agent(Runnable):
             self._config = DotDict(**config)
         else:
             self._config = DotDict()
+
+        # Identity is required - raises ConfigError if missing
+        self._identity: Identity = self._resolve_identity()
         self._traits = TraitRegistry(lg)
         self._started = False
+        self._cycle_count = 0
 
     @property
-    @abstractmethod
     def name(self) -> str:
-        """Agent identifier."""
-        ...
+        """Agent identifier from identity.
+
+        Returns:
+            Agent name from identity.
+        """
+        return self._identity.name
+
+    @property
+    def identity(self) -> Identity:
+        """Agent identity.
+
+        Returns:
+            Agent's Identity instance.
+        """
+        return self._identity
+
+    @property
+    def cycle_count(self) -> int:
+        """Number of execution cycles completed.
+
+        Returns:
+            Count of execution cycles. Incremented by subclasses in run_once().
+        """
+        return self._cycle_count
 
     @property
     def lg(self) -> Logger:
@@ -234,3 +266,27 @@ class Agent(Runnable):
                     extra={"trait": type(trait).__name__, "exception": e},
                 )
         self._started = False
+
+    # =========================================================================
+    # Configuration Helpers
+    # =========================================================================
+
+    def _resolve_identity(self) -> Identity:
+        """Resolve Identity from self.config.
+
+        Returns:
+            Constructed Identity instance.
+
+        Raises:
+            ConfigError: If identity.name is missing.
+        """
+        from ..errors import ConfigError
+        from .identity import Identity
+
+        identity_config = self.config.get("identity", {})
+        name = identity_config.get("name")
+
+        if not name:
+            raise ConfigError("identity.name is required in config")
+
+        return Identity.from_config(identity_config, defaults=DotDict(name=name))

@@ -10,6 +10,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from appinfra import DotDict
 from appinfra.log import Logger
 from appinfra.time import time
 
@@ -21,7 +22,6 @@ from ...core.traits.builtin.saia import SAIATrait
 
 
 if TYPE_CHECKING:
-    from llm_agent.core.agent import Identity
     from llm_agent.core.traits.builtin.conv import ConversationTrait
 
 
@@ -43,10 +43,14 @@ class Agent(BaseAgent):
     - get_recent_results(): Recent execution history
 
     Example:
-        from llm_agent.core.agent import Identity
-
-        identity = Identity.from_name("explorer")
-        agent = Agent(lg, identity=identity, default_prompt="Analyze the codebase")
+        # Plain dicts are accepted and converted to DotDict internally
+        agent = Agent(
+            lg,
+            config={
+                "identity": {"name": "explorer"},
+                "default_prompt": "Analyze the codebase",
+            },
+        )
         agent.add_trait(SAIATrait(agent, backend=backend))
         agent.add_trait(ToolsTrait(agent))
         agent.start()
@@ -55,32 +59,21 @@ class Agent(BaseAgent):
         response = agent.ask("What files are in src/?")
     """
 
-    def __init__(self, lg: Logger, identity: Identity, default_prompt: str = "") -> None:
+    def __init__(self, lg: Logger, config: DotDict) -> None:
         """Initialize agent.
 
         Args:
             lg: Logger instance.
-            identity: Agent identity (domain/workspace/name).
-            default_prompt: Default prompt for run_once() execution.
+            config: Agent configuration with keys:
+                - identity.name: Agent name (required)
+                - default_prompt: Default prompt for run_once() execution (default: "")
         """
-        super().__init__(lg)
-        self.identity = identity
-        self._default_prompt = default_prompt
-        self._cycle_count = 0
+        super().__init__(lg, config)
+        self._default_prompt = config.get("default_prompt", "")
         self._recent_results: list[ExecutionResult] = []
         self._max_recent = 100
         # Event dispatcher for declarative behavior
         self._dispatcher = Dispatcher()
-
-    @property
-    def name(self) -> str:
-        """Agent name (from identity)."""
-        return str(self.identity.name)
-
-    @property
-    def cycle_count(self) -> int:
-        """Number of execution cycles completed."""
-        return self._cycle_count
 
     def start(self) -> None:
         """Start the agent and all attached traits."""

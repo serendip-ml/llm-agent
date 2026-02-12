@@ -167,11 +167,12 @@ class TestAgentTraits:
     @pytest.fixture
     def agent(self, mock_logger):
         """Create a test agent."""
-        from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.agent import Identity
+        from appinfra import DotDict
 
-        identity = Identity.from_name("test")
-        return DefaultAgent(lg=mock_logger, identity=identity, default_prompt="")
+        from llm_agent.agents.default import Agent as DefaultAgent
+
+        config = DotDict(identity={"name": "test"}, default_prompt="")
+        return DefaultAgent(lg=mock_logger, config=config)
 
     def test_add_trait(self, agent):
         identity = Directive(prompt="Test identity")
