@@ -39,14 +39,6 @@ class TestAgentBaseClass:
         """Complete subclass can be instantiated."""
 
         class CompleteAgent(Agent):
-            @property
-            def name(self) -> str:
-                return "test"
-
-            @property
-            def cycle_count(self) -> int:
-                return 0
-
             def start(self) -> None:
                 self._start_traits()
                 self._started = True
@@ -67,7 +59,8 @@ class TestAgentBaseClass:
             def get_recent_results(self, limit: int = 10) -> list[ExecutionResult]:
                 return []
 
-        agent = CompleteAgent(lg=mock_logger)
+        config = DotDict(identity={"name": "test"})
+        agent = CompleteAgent(lg=mock_logger, config=config)
         assert agent.name == "test"
 
 

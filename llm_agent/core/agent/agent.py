@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from appinfra import DotDict
 from appinfra.log import Logger
@@ -14,6 +14,9 @@ from ..traits.base import BaseTrait
 from ..traits.registry import Registry as TraitRegistry
 from .types import ExecutionResult
 
+
+if TYPE_CHECKING:
+    from .identity import Identity
 
 TraitT = TypeVar("TraitT", bound=BaseTrait)
 
@@ -63,7 +66,8 @@ class Agent(Runnable):
         else:
             self._config = DotDict()
 
-        self._identity = self._resolve_identity() if self._config else None
+        # Identity is required - raises ConfigError if missing
+        self._identity: Identity = self._resolve_identity()
         self._traits = TraitRegistry(lg)
         self._started = False
         self._cycle_count = 0
@@ -73,16 +77,16 @@ class Agent(Runnable):
         """Agent identifier from identity.
 
         Returns:
-            Agent name from identity, or empty string if no identity.
+            Agent name from identity.
         """
-        return self._identity.name if self._identity else ""
+        return self._identity.name
 
     @property
-    def identity(self) -> Any:
+    def identity(self) -> Identity:
         """Agent identity.
 
         Returns:
-            Agent's Identity instance, or None if not configured.
+            Agent's Identity instance.
         """
         return self._identity
 
@@ -267,7 +271,7 @@ class Agent(Runnable):
     # Configuration Helpers
     # =========================================================================
 
-    def _resolve_identity(self) -> Any:
+    def _resolve_identity(self) -> Identity:
         """Resolve Identity from self.config.
 
         Returns:

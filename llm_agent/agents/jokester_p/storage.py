@@ -78,7 +78,6 @@ class Storage:
                     "exception": e,
                     "fact_id": fact_id,
                     "model": model_name,
-                    "model_name": model_name,
                 },
             )
             return True
