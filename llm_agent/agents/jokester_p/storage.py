@@ -217,19 +217,36 @@ class Storage:
         )
 
     def _extract_base_model(self, model_name: str) -> str:
-        """Extract base model name by removing adapter suffixes."""
+        """Extract base model name by removing trailing adapter suffixes.
+
+        Only strips adapter keywords when they appear as trailing segments,
+        not in the middle of the model name.
+        """
         base_model = model_name
+        lower_model = model_name.lower()
         for suffix in ["-jokester", "-joke-teller", "-adapter", "-lora", "-qlora"]:
-            if suffix in base_model.lower():
-                idx = base_model.lower().find(suffix)
+            # Check if suffix appears at the end or followed by version separator
+            if lower_model.endswith(suffix) or (suffix + "-v") in lower_model:
+                # Find last occurrence of the suffix
+                idx = lower_model.rfind(suffix)
                 base_model = base_model[:idx]
                 break
         return base_model
 
     def _extract_adapter_version(self, model_name: str) -> str | None:
-        """Extract adapter version from model name (e.g., 'v4' from 'llama-jokester-v4')."""
+        """Extract adapter version from model name.
+
+        Supports both integer versions (v1, v4) and dotted versions (v1.2, v2.0.3).
+        Examples: 'llama-jokester-v4' -> 'v4', 'model-adapter-v1.2.3' -> 'v1.2.3'
+        """
         parts = model_name.split("-")
         for part in reversed(parts):
-            if part.startswith("v") and part[1:].isdigit():
-                return part
+            if part.startswith("v") and len(part) > 1:
+                # Check if it's a valid version (digits with optional dots)
+                version_part = part[1:]
+                # Valid if all characters are digits or dots, and has at least one digit
+                if all(c.isdigit() or c == "." for c in version_part) and any(
+                    c.isdigit() for c in version_part
+                ):
+                    return part
         return None

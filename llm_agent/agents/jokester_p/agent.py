@@ -103,31 +103,45 @@ class JokesterAgent(Agent):
         """Start agent and traits."""
         self._start_traits()
 
-        # Verify embedder is available (required for novelty checking)
+        try:
+            self._verify_embedder_available()
+            self._setup_storage()
+        except Exception:
+            self._stop_traits()
+            raise
+
+        self._started = True
+        self._lg.info("agent started", extra={"agent": self.name})
+
+    def _verify_embedder_available(self) -> None:
+        """Verify embedder is configured for novelty checking.
+
+        Raises:
+            RuntimeError: If embedder is not configured.
+        """
         learn_trait = self.require_trait(LearnTrait)
         if not learn_trait.has_embedder:
             self._lg.error(
                 "embedder not configured - required for novelty checking",
                 extra={"agent": self.name},
             )
-            # Clean up started traits before raising
-            self._stop_traits()
             raise RuntimeError(
                 "Jokester agent requires embedder for guaranteed novelty checking. "
                 "Configure embedder_url in learn section."
             )
 
-        # Register agent-specific tables
+    def _setup_storage(self) -> None:
+        """Register tables and initialize storage helper.
+
+        Raises:
+            Exception: If storage setup fails.
+        """
         storage_trait = self.require_trait(StorageTrait)
         storage_trait.storage.register_table(ModelUsage)
         storage_trait.storage.register_table(TrainingMetadata)
 
-        # Initialize storage helper
         llm_trait = self.require_trait(LLMTrait)
         self._storage = Storage(self._lg, storage_trait, llm_trait)
-
-        self._started = True
-        self._lg.info("agent started", extra={"agent": self.name})
 
     def stop(self) -> None:
         """Stop agent and traits."""
