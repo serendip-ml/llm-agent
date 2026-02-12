@@ -223,12 +223,14 @@ class Factory:
         from ..traits.builtin.learn import LearnTrait
         from ..traits.builtin.llm import LLMTrait
         from ..traits.builtin.saia import SAIATrait
+        from ..traits.builtin.storage import StorageTrait
         from ..traits.builtin.tools import ToolsTrait
 
         return {
             TraitName.DIRECTIVE: DirectiveTrait,
             TraitName.LLM: LLMTrait,
             TraitName.LEARN: LearnTrait,
+            TraitName.STORAGE: StorageTrait,
             TraitName.METHOD: MethodTrait,
             TraitName.HTTP: HTTPTrait,
             TraitName.SAIA: SAIATrait,

@@ -17,13 +17,15 @@ from appinfra.log import Logger
 from llm_infer.client.exceptions import BackendUnavailableError
 from pydantic import BaseModel
 
-from ...core.agent import Agent, ExecutionResult, Identity
+from ...core.agent import Agent as BaseAgent
+from ...core.agent import ExecutionResult, Identity
 from ...core.llm.backend import StructuredOutputError
 from ...core.traits.builtin.directive import DirectiveTrait
 from ...core.traits.builtin.learn import LearnTrait
 from ...core.traits.builtin.llm import LLMTrait
 from ...core.traits.builtin.storage import StorageTrait
 from .schema import ModelUsage, TrainingMetadata
+from .storage import Storage
 
 
 class Joke(BaseModel):
@@ -42,7 +44,7 @@ class NoveltyCheck:
     similar_joke: str | None
 
 
-class JokesterAgent(Agent):
+class Agent(BaseAgent):
     """Programmatic agent that tells jokes with guaranteed novelty checking.
 
     Unlike prompt-based agents that rely on LLM instructions, this agent uses
@@ -76,8 +78,9 @@ class JokesterAgent(Agent):
         self._max_retries = max_retries
         self._similarity_threshold = similarity_threshold
         self._cycle_count = 0
-        self._recent_results: list[ExecutionResult] = []
         self._jokes_generated_this_session = 0  # Track jokes generated since start
+        self._recent_results: list[ExecutionResult] = []  # For get_recent_results() API
+        self._storage: Storage | None = None
 
     @property
     def name(self) -> str:
@@ -108,7 +111,7 @@ class JokesterAgent(Agent):
             # Clean up started traits before raising
             self._stop_traits()
             raise RuntimeError(
-                "JokesterAgent requires embedder for guaranteed novelty checking. "
+                "Jokester agent requires embedder for guaranteed novelty checking. "
                 "Configure embedder_url in learn section."
             )
 
@@ -116,6 +119,10 @@ class JokesterAgent(Agent):
         storage_trait = self.require_trait(StorageTrait)
         storage_trait.storage.register_table(ModelUsage)
         storage_trait.storage.register_table(TrainingMetadata)
+
+        # Initialize storage helper
+        llm_trait = self.require_trait(LLMTrait)
+        self._storage = Storage(self._lg, storage_trait, llm_trait)
 
         self._started = True
         self._lg.info("agent started", extra={"agent": self.name})
@@ -259,15 +266,7 @@ class JokesterAgent(Agent):
 
     def ask(self, question: str) -> str:
         """Answer question (not supported)."""
-        return "JokesterAgent does not support questions. Use run_once() to get a joke."
-
-    def record_feedback(self, message: str) -> None:
-        """Record feedback about a joke."""
-        self._lg.info("feedback received", extra={"feedback": message})
-
-    def get_recent_results(self, limit: int = 10) -> list[ExecutionResult]:
-        """Get recent execution results."""
-        return self._recent_results[-limit:]
+        return "Jokester agent does not support questions. Use run_once() to get a joke."
 
     def _get_recent_jokes(self, learn_trait: LearnTrait, limit: int) -> list[str]:
         """Fetch recent jokes chronologically for style inspiration."""
@@ -402,9 +401,6 @@ Return your joke in JSON format with 'text' and 'style' fields."""
         Raises:
             Exception: If joke save fails (caller should handle to mark run as failed).
         """
-        # Get model info (for now hardcoded, extensible for multi-model later)
-        model_name = self._get_model_name()
-
         # Record joke as solution - auto-creates embedding from answer_text
         fact_id = learn_trait.learn.solutions.record(
             agent_name=self.name,
@@ -415,115 +411,29 @@ Return your joke in JSON format with 'text' and 'style' fields."""
             tokens_used=0,  # Not tracked at joke level yet
             latency_ms=0,  # Not tracked at joke level yet
             category="joke",
-            source=model_name,  # Now uses actual model name instead of "agent"
+            source="agent",  # Generic source, model tracked in metadata table
         )
         self._lg.debug("joke saved as solution", extra={"fact_id": fact_id, "style": joke.style})
 
-        # Record model usage in agent-specific table
-        self._record_model_usage(fact_id, model_name)
+        # Record model usage and training metadata via storage helper
+        if self._storage:
+            self._storage.record_joke_metadata(fact_id)
 
-        # Record training metadata if using fine-tuned model
-        self._record_training_metadata(fact_id, model_name)
+    def record_feedback(self, message: str) -> None:
+        """Record feedback about a joke.
 
-    def _get_model_name(self) -> str:
-        """Get the model name currently being used.
+        Args:
+            message: Feedback message from user.
+        """
+        self._lg.info("feedback received", extra={"feedback": message})
 
-        For now, returns the LLM backend model. In future, this could support
-        tracking multiple models or fine-tuned adapters.
+    def get_recent_results(self, limit: int = 10) -> list[ExecutionResult]:
+        """Get recent execution results.
+
+        Args:
+            limit: Maximum number of results to return.
 
         Returns:
-            Model name (e.g., 'claude-sonnet-4-5', 'llama-3.3-70b-instruct').
+            List of recent execution results.
         """
-        llm_trait = self.require_trait(LLMTrait)
-        # Get model from LLM trait backend
-        model_name = llm_trait.llm.model_name if hasattr(llm_trait.llm, 'model_name') else "unknown"
-        return model_name
-
-    def _record_model_usage(self, fact_id: int, model_name: str) -> None:
-        """Record model usage metadata in agent-specific table.
-
-        Args:
-            fact_id: ID of the fact in atomic_facts.
-            model_name: Name of the model used.
-        """
-        try:
-            storage = self.require_trait(StorageTrait).storage
-            storage.insert(
-                ModelUsage,
-                fact_id=fact_id,
-                model_name=model_name,
-                model_role="sole",  # Single model for now, extensible for multi-model
-                tokens_in=None,  # TODO: Track from LLM response
-                tokens_out=None,  # TODO: Track from LLM response
-                cost_usd=None,  # TODO: Calculate based on model pricing
-                latency_ms=None,  # TODO: Track from LLM response
-            )
-            self._lg.debug(
-                "model usage recorded",
-                extra={"fact_id": fact_id, "model": model_name}
-            )
-        except Exception as e:
-            self._lg.warning(
-                "failed to record model usage",
-                extra={"exception": e, "fact_id": fact_id}
-            )
-
-    def _record_training_metadata(self, fact_id: int, model_name: str) -> None:
-        """Record training metadata if using a fine-tuned model.
-
-        Args:
-            fact_id: ID of the fact in atomic_facts.
-            model_name: Name of the model used.
-        """
-        # Check if this is a fine-tuned model (contains version suffix)
-        # Example: "llama-70b-jokester-v4" -> adapter_version="v4"
-        is_finetuned = "jokester" in model_name.lower()
-
-        if not is_finetuned:
-            # Base model, record as such
-            try:
-                storage = self.require_trait(StorageTrait).storage
-                storage.insert(
-                    TrainingMetadata,
-                    fact_id=fact_id,
-                    base_model=model_name,
-                    adapter_version=None,
-                    training_iteration=None,
-                    training_date=None,
-                    training_data_size=None,
-                    is_base_model=True,
-                )
-                self._lg.debug(
-                    "training metadata recorded (base model)",
-                    extra={"fact_id": fact_id, "model": model_name}
-                )
-            except Exception as e:
-                self._lg.warning(
-                    "failed to record training metadata",
-                    extra={"exception": e, "fact_id": fact_id}
-                )
-        else:
-            # Fine-tuned model - extract version info
-            # TODO: Parse adapter version from model_name or configuration
-            # For now, this is a placeholder for future fine-tuned versions
-            try:
-                storage = self.require_trait(StorageTrait).storage
-                storage.insert(
-                    TrainingMetadata,
-                    fact_id=fact_id,
-                    base_model="llama-3.3-70b-instruct",  # TODO: Extract from config
-                    adapter_version=None,  # TODO: Parse from model_name
-                    training_iteration=None,  # TODO: Get from config
-                    training_date=None,  # TODO: Get from adapter metadata
-                    training_data_size=None,  # TODO: Get from training logs
-                    is_base_model=False,
-                )
-                self._lg.debug(
-                    "training metadata recorded (fine-tuned)",
-                    extra={"fact_id": fact_id, "model": model_name}
-                )
-            except Exception as e:
-                self._lg.warning(
-                    "failed to record training metadata",
-                    extra={"exception": e, "fact_id": fact_id}
-                )
+        return self._recent_results[-limit:]

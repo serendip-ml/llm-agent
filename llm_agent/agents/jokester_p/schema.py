@@ -56,9 +56,7 @@ class ModelUsage(AgentTable):
         Integer, nullable=True, comment="Output tokens generated"
     )
 
-    cost_usd: Mapped[float | None] = mapped_column(
-        Float, nullable=True, comment="Cost in USD"
-    )
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True, comment="Cost in USD")
 
     latency_ms: Mapped[int | None] = mapped_column(
         Integer, nullable=True, comment="Generation latency in milliseconds"
