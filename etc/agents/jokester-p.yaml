@@ -9,10 +9,15 @@ factory: Factory
 identity:
   name: "jokester-p"
 
-# Agent configuration (passed to __init__)
-config:
-  max_retries: 10
-  similarity_threshold: 0.85
+max_retries: 10
+similarity_threshold: 0.85
+
+denylist:
+  - hipster
+  - millennial
+  - avocado toast
+  - participation trophy
+  - selfie
 
 # Directive prompt (agent personality)
 directive: |

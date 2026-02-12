@@ -14,11 +14,12 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
+from appinfra import DotDict
 from appinfra.log import Logger
 from llm_infer.client.exceptions import BackendUnavailableError
 from pydantic import BaseModel
 
-from ...core.agent import Agent, ExecutionResult, Identity
+from ...core.agent import Agent, ExecutionResult
 from ...core.llm.backend import StructuredOutputError
 from ...core.traits.builtin.directive import DirectiveTrait
 from ...core.traits.builtin.learn import LearnTrait
@@ -61,23 +62,23 @@ class JokesterAgent(Agent):
     def __init__(
         self,
         lg: Logger,
-        identity: Identity,
-        max_retries: int = 3,
-        similarity_threshold: float = 0.85,
+        config: DotDict,
     ) -> None:
         """Initialize joke-teller agent.
 
         Args:
             lg: Logger instance.
-            identity: Agent identity.
-            max_retries: Maximum attempts to generate novel joke.
-            similarity_threshold: Minimum similarity to consider a duplicate (0.0-1.0).
+            config: Agent configuration with keys:
+                - identity.name: Agent name (required)
+                - max_retries: Maximum attempts to generate novel joke (default: 3)
+                - similarity_threshold: Min similarity for duplicate (0.0-1.0, default: 0.85)
+                - denylist: List of words/phrases to filter (case-insensitive, default: [])
         """
-        super().__init__(lg)
-        self._identity = identity
-        self._max_retries = max_retries
-        self._similarity_threshold = similarity_threshold
-        self._cycle_count = 0
+        super().__init__(lg, config)
+        self._max_retries = self.config.get("max_retries", 3)
+        self._similarity_threshold = self.config.get("similarity_threshold", 0.85)
+        denylist = self.config.get("denylist", [])
+        self._denylist = [term.lower() for term in denylist] if denylist else []
         self._jokes_generated_this_session = 0  # Track jokes generated since start
         self._cumulative_attempts = 0  # Track total attempts until successful save
         self._recent_failed_jokes: deque[str] = deque(
@@ -87,21 +88,6 @@ class JokesterAgent(Agent):
             maxlen=100
         )  # Bounded to prevent memory leak
         self._storage: Storage | None = None  # Set in start(), None before agent is started
-
-    @property
-    def name(self) -> str:
-        """Agent name from identity."""
-        return self._identity.name
-
-    @property
-    def identity(self) -> Identity:
-        """Agent identity."""
-        return self._identity
-
-    @property
-    def cycle_count(self) -> int:
-        """Number of execution cycles completed."""
-        return self._cycle_count
 
     def start(self) -> None:
         """Start agent and traits."""
@@ -302,30 +288,41 @@ class JokesterAgent(Agent):
         Returns:
             Tuple of (joke, model_name, novelty_check) if successful, None if failed.
         """
-        # Increment cumulative attempts counter (tracks across runs)
         self._cumulative_attempts += 1
-
         retry_feedback = "" if attempt == 1 else "Try a completely different style."
-        avoid_jokes = list(self._recent_failed_jokes)
-        joke, model_name = self._generate_joke(llm_trait, context, retry_feedback, avoid_jokes)
+        joke, model_name = self._generate_joke(
+            llm_trait, context, retry_feedback, list(self._recent_failed_jokes)
+        )
 
         if joke is None:
-            self._lg.warning(
-                "LLM failed to generate joke",
-                extra={"attempt": attempt, "cumulative": self._cumulative_attempts},
-            )
+            self._lg.warning("LLM failed to generate joke", extra={"attempt": attempt})
+            return None
+
+        return self._validate_joke(joke, model_name, learn_trait, attempt)
+
+    def _validate_joke(
+        self, joke: Joke, model_name: str, learn_trait: LearnTrait, attempt: int
+    ) -> tuple[Joke, str, NoveltyCheck | None] | None:
+        """Validate joke against denylist and novelty checks.
+
+        Returns:
+            Tuple of (joke, model_name, novelty_check) if valid, None if invalid.
+        """
+        # Check denylist
+        contains_denied, denied_term = self._contains_denied_content(joke.text)
+        if contains_denied:
+            self._lg.debug("joke denied", extra={"term": denied_term, "attempt": attempt})
+            self._recent_failed_jokes.append(joke.text)
             return None
 
         # Check novelty if embedder available
         if learn_trait.has_embedder:
             novelty = self._check_novelty(learn_trait, joke.text)
             if not novelty.is_novel:
-                # Store failed joke to avoid similar attempts in future runs
                 self._recent_failed_jokes.append(joke.text)
                 return None
             return joke, model_name, novelty
 
-        # No embedder - assume novel
         return joke, model_name, None
 
     def ask(self, question: str) -> str:
@@ -486,6 +483,24 @@ Return your joke in JSON format with 'text' and 'style' fields."""
                     # "candidate": candidate,
                 },
             )
+
+    def _contains_denied_content(self, joke_text: str) -> tuple[bool, str | None]:
+        """Check if joke contains denied words/phrases.
+
+        Args:
+            joke_text: The joke text to check.
+
+        Returns:
+            Tuple of (contains_denied, denied_term) where denied_term is the matched term if found.
+        """
+        if not self._denylist:
+            return False, None
+
+        joke_lower = joke_text.lower()
+        for term in self._denylist:
+            if term in joke_lower:
+                return True, term
+        return False, None
 
     def _save_joke(
         self, learn_trait: LearnTrait, joke: Joke, model_name: str, attempts: int

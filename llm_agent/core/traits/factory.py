@@ -56,18 +56,14 @@ class Factory:
 
     def create(
         self,
-        trait_name: TraitName,  # Use enum, not string
+        trait_name: TraitName,
         agent: Agent,
-        agent_config: DotDict,
-        **kwargs: Any,
     ) -> Trait:
         """Create a trait by name - uses mapping to route to specific creators.
 
         Args:
             trait_name: Trait type (TraitName enum).
-            agent: Agent instance that will own this trait.
-            agent_config: Agent's config dict (for directive, method fields).
-            **kwargs: Additional args (e.g., identity for LearnTrait).
+            agent: Agent instance that will own this trait (accesses agent.config and agent.identity).
 
         Returns:
             Created trait instance.
@@ -81,34 +77,32 @@ class Factory:
         if not creator:
             raise ConfigError(f"Unknown trait type: {trait_name}")
 
-        return creator(agent, agent_config, **kwargs)
+        return creator(agent)
 
-    def _create_directive(
-        self, agent: Agent, agent_config: DotDict, **kwargs: Any
-    ) -> DirectiveTrait:
+    def _create_directive(self, agent: Agent) -> DirectiveTrait:
         """Route to create_directive_trait."""
-        return self.create_directive_trait(agent, agent_config.get("directive"))
+        return self.create_directive_trait(agent, agent.config.get("directive"))
 
-    def _create_llm(self, agent: Agent, agent_config: DotDict, **kwargs: Any) -> LLMTrait:
+    def _create_llm(self, agent: Agent) -> LLMTrait:
         """Route to create_llm_trait."""
         llm_config: DotDict = DotDict(self._platform.llm_config())
         return self.create_llm_trait(agent, llm_config)
 
-    def _create_learn(self, agent: Agent, agent_config: DotDict, **kwargs: Any) -> LearnTrait:
+    def _create_learn(self, agent: Agent) -> LearnTrait:
         """Route to create_learn_trait."""
         learn_config_raw = self._platform.learn_config()
         learn_config: DotDict | None = DotDict(learn_config_raw) if learn_config_raw else None
-        return self.create_learn_trait(agent, kwargs.get("identity"), learn_config)
+        return self.create_learn_trait(agent, agent.identity, learn_config)
 
-    def _create_storage(self, agent: Agent, agent_config: DotDict, **kwargs: Any) -> Trait:
+    def _create_storage(self, agent: Agent) -> Trait:
         """Route to create_storage_trait."""
         from .builtin.storage import StorageTrait
 
         return StorageTrait(agent)
 
-    def _create_method(self, agent: Agent, agent_config: DotDict, **kwargs: Any) -> MethodTrait:
+    def _create_method(self, agent: Agent) -> MethodTrait:
         """Route to create_method_trait."""
-        return self.create_method_trait(agent, agent_config.get("method"))
+        return self.create_method_trait(agent, agent.config.get("method"))
 
     def create_llm_trait(self, agent: Agent, llm_config: LLMConfig | None) -> LLMTrait:
         """Create LLMTrait with LLM backend configuration.

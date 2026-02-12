@@ -80,12 +80,6 @@ class Factory(BaseFactory):
         """
         from appinfra import DotDict
 
-        from llm_agent.core.agent import _substitute_in_dict
-
-        # Apply variable substitutions
-        if variables:
-            config = _substitute_in_dict(config, variables)
-
         # Extract default_prompt and inject into config.config for base Factory
         task_config = config.get("task", {})
         default_prompt = task_config.get("description", "")
@@ -97,8 +91,8 @@ class Factory(BaseFactory):
         # Convert to DotDict once for consistent usage
         dotdict_config = DotDict(config)
 
-        # Use base Factory.create() - handles identity, traits, tools
-        agent = super().create(dotdict_config, variables=None)
+        # Use base Factory.create() - handles identity, traits, tools, and variable substitution
+        agent = super().create(dotdict_config, variables=variables)
 
         # Add SAIA trait and event handlers (prompt-agent specific)
         self._add_saia_trait(agent, dotdict_config)  # type: ignore[arg-type]

@@ -4,9 +4,9 @@ from queue import Empty
 from unittest.mock import MagicMock, patch
 
 import pytest
+from appinfra import DotDict
 
 from llm_agent import CompletionResult, HTTPConfig, HTTPTrait
-from llm_agent.core.agent import Identity
 from llm_agent.runtime.server.http import HTTPServer, HTTPServerConfig
 from llm_agent.runtime.server.protocol.v1 import (
     CompleteRequest,
@@ -253,7 +253,9 @@ class TestHTTPTraitHandleRequest:
         """Create a test agent with mocked traits."""
         from llm_agent.agents.default import Agent as DefaultAgent
 
-        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+        agent = DefaultAgent(
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
+        )
         # Use registry's register method to add mock traits
         agent._traits.register(mock_llm_trait)
         agent._traits.register(mock_learn_trait)
@@ -405,7 +407,9 @@ class TestHTTPTraitHandleRequest:
         )
 
         # Create agent with traits
-        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+        agent = DefaultAgent(
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
+        )
         agent._traits.register(mock_llm_trait)
         agent._traits.register(mock_learn_trait)
 
@@ -443,7 +447,9 @@ class TestHTTPTraitHandleRequest:
         from llm_agent.agents.default.http import HTTPHandler
 
         # Create agent without LLMTrait
-        agent = DefaultAgent(lg=mock_logger, identity=Identity.from_name("test"), default_prompt="")
+        agent = DefaultAgent(
+            lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
+        )
 
         # Create HTTPTrait with handler (handler will fail when LLMTrait is missing)
         handler = HTTPHandler(agent)

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from appinfra import DotDict
@@ -11,7 +9,7 @@ from appinfra import DotDict
 from ..errors import ConfigError, TraitNotFoundError
 from ..traits import TraitName
 from .agent import Agent
-from .identity import Identity
+from .helpers import _substitute_in_dict
 
 
 if TYPE_CHECKING:
@@ -97,45 +95,16 @@ class Factory:
         if variables:
             config = _substitute_in_dict(config, variables)
 
-        # Parse identity → construct Identity (required)
-        identity = self._build_identity(config)
-
-        # Extract agent-specific config
-        agent_config = config.get("config", {})
-
-        # Instantiate agent (only identity is required)
-        agent = self.agent_class(  # type: ignore[call-arg]
+        # Instantiate agent (agent resolves identity from config)
+        agent = self.agent_class(
             lg=self._lg,
-            identity=identity,
-            **agent_config,
+            config=config,
         )
 
         # Create and attach traits (all handled uniformly)
         self._attach_traits(agent, config)
 
         return agent
-
-    def _build_identity(self, config: DotDict) -> Identity:
-        """Build Identity from identity fields.
-
-        Args:
-            config: Full config dict from manifest.
-
-        Returns:
-            Constructed Identity for addressing.
-
-        Raises:
-            ConfigError: If required fields missing.
-        """
-        # Extract identity
-        identity = config.get("identity", {})
-        name = identity.get("name")
-
-        if not name:
-            raise ConfigError("identity.name is required")
-
-        # Use Identity.from_config to properly resolve IDs
-        return Identity.from_config(identity, defaults=DotDict(name=name))
 
     def _attach_traits(self, agent: Agent, config: DotDict) -> None:
         """Create and attach traits for the agent.
@@ -210,10 +179,8 @@ class Factory:
             ValueError: If trait type is unknown.
         """
         return self._platform.trait_factory.create(
-            trait_name=trait_name,  # Pass enum directly
-            agent=agent,  # Pass agent to factory
-            agent_config=config,
-            identity=agent.identity,  # type: ignore[attr-defined]  # For LearnTrait
+            trait_name=trait_name,
+            agent=agent,
         )
 
     def _build_trait_class_map(self) -> dict[TraitName, type]:
@@ -329,37 +296,3 @@ class Factory:
                 "created tool for agent",
                 extra={"agent": agent.name, "tool": tool_name},
             )
-
-
-# =============================================================================
-# Configuration Helper Functions
-# =============================================================================
-
-
-def _substitute_variables(text: str, variables: dict[str, str]) -> str:
-    """Substitute {{VAR}} patterns in text with variable values.
-
-    Falls back to environment variables if not in variables dict.
-    """
-    pattern = re.compile(r"\{\{([A-Z_][A-Z0-9_]*)\}\}")
-
-    def replacer(match: re.Match[str]) -> str:
-        var_name = match.group(1)
-        if var_name in variables:
-            return variables[var_name]
-        if var_name in os.environ:
-            return os.environ[var_name]
-        raise ValueError(f"Variable {{{{{var_name}}}}} not found in variables or environment")
-
-    return pattern.sub(replacer, text)
-
-
-def _substitute_in_dict(data: Any, variables: dict[str, str]) -> Any:
-    """Recursively substitute variables in a dict/list structure."""
-    if isinstance(data, str):
-        return _substitute_variables(data, variables)
-    if isinstance(data, dict):
-        return {k: _substitute_in_dict(v, variables) for k, v in data.items()}
-    if isinstance(data, list):
-        return [_substitute_in_dict(item, variables) for item in data]
-    return data
