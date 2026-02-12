@@ -13,7 +13,6 @@ from .schema import ModelUsage, TrainingMetadata
 
 
 if TYPE_CHECKING:
-    from ...core.traits.builtin.llm import LLMTrait
     from ...core.traits.builtin.storage import StorageTrait
 
 
@@ -25,28 +24,26 @@ class Storage:
     - Training metadata (training iterations, adapter versions)
     """
 
-    def __init__(self, lg: Logger, storage_trait: StorageTrait, llm_trait: LLMTrait) -> None:
+    def __init__(self, lg: Logger, storage_trait: StorageTrait) -> None:
         """Initialize storage helper.
 
         Args:
             lg: Logger instance.
             storage_trait: StorageTrait for database access.
-            llm_trait: LLMTrait for model information.
         """
         self._lg = lg
         self._storage = storage_trait.storage
-        self._llm_trait = llm_trait
 
-    def record_joke_metadata(self, fact_id: int) -> None:
+    def record_joke_metadata(self, fact_id: int, model_name: str) -> None:
         """Record model usage and training metadata for a joke.
 
         Args:
             fact_id: ID of the fact in atomic_facts.
+            model_name: Actual model used (from LLM response).
 
         Raises:
             Exception: If metadata recording fails critically (re-raises after logging).
         """
-        model_name = self._get_model_name()
         usage_failed = self._try_record_model_usage(fact_id, model_name)
         training_failed = self._try_record_training_metadata(fact_id, model_name)
         self._log_metadata_failures(fact_id, usage_failed, training_failed)
@@ -86,33 +83,6 @@ class Storage:
                     "training_failed": training_failed,
                 },
             )
-
-    def _get_model_name(self) -> str:
-        """Get the model name currently being used.
-
-        Returns:
-            Model name (e.g., 'claude-sonnet-4-5', 'llama-3.3-70b-instruct').
-        """
-        model_name = "unknown"
-
-        if hasattr(self._llm_trait, "config"):
-            config = self._llm_trait.config
-
-            # Try multi-backend format (config.backends[config.default].model)
-            if hasattr(config, "default") and hasattr(config, "backends"):
-                default_backend = config.default
-                backends = config.backends
-                if default_backend in backends:
-                    backend_config = backends[default_backend]
-                    model_name = getattr(backend_config, "model", "unknown")
-            # Try single-backend format (config.model)
-            elif hasattr(config, "model"):
-                model_name = config.model
-
-        if model_name == "unknown":
-            self._lg.warning("unable to extract model name from LLM config")
-
-        return model_name
 
     def _record_model_usage(self, fact_id: int, model_name: str) -> None:
         """Record model usage metadata in agent-specific table.
