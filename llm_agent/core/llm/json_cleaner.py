@@ -35,6 +35,9 @@ class JSONCleaner:
         # Remove markdown code fences
         cleaned = self._strip_code_fences(cleaned)
 
+        # Auto-close unclosed braces/brackets
+        cleaned = self._auto_close_json(cleaned)
+
         return cleaned
 
     def _strip_code_fences(self, content: str) -> str:
@@ -64,3 +67,25 @@ class JSONCleaner:
             lines = lines[:-1]
 
         return "\n".join(lines).strip()
+
+    def _auto_close_json(self, content: str) -> str:
+        """Auto-close unclosed braces and brackets in JSON.
+
+        Common LLM issue: incomplete JSON like {"key": "value" (missing closing brace).
+        This adds missing closing characters based on the opening count.
+        """
+        if not content:
+            return content
+
+        # Count unclosed braces and brackets
+        open_braces = content.count("{") - content.count("}")
+        open_brackets = content.count("[") - content.count("]")
+
+        # Add missing closing characters
+        result = content
+        if open_brackets > 0:
+            result += "]" * open_brackets
+        if open_braces > 0:
+            result += "}" * open_braces
+
+        return result

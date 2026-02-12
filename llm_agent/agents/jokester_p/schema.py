@@ -47,6 +47,14 @@ class ModelUsage(AgentTable):
         comment="Role in generation: 'sole', 'generator', 'validator', 'refiner'",
     )
 
+    # Generation metrics
+    attempts: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        comment="Number of generation attempts needed (for novelty checking)",
+    )
+
     # Resource usage
     tokens_in: Mapped[int | None] = mapped_column(
         Integer, nullable=True, comment="Input tokens consumed"

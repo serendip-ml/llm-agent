@@ -79,6 +79,10 @@ class JokesterAgent(Agent):
         self._similarity_threshold = similarity_threshold
         self._cycle_count = 0
         self._jokes_generated_this_session = 0  # Track jokes generated since start
+        self._cumulative_attempts = 0  # Track total attempts until successful save
+        self._recent_failed_jokes: deque[str] = deque(
+            maxlen=10
+        )  # Track recent failed attempts to avoid similar jokes
         self._recent_results: deque[ExecutionResult] = deque(
             maxlen=100
         )  # Bounded to prevent memory leak
@@ -181,26 +185,38 @@ class JokesterAgent(Agent):
         learn_trait = self.require_trait(LearnTrait)
         recent_jokes = self._get_recent_jokes(learn_trait, limit=5)
 
-        joke, attempts, max_similarity, similar_joke, model_name = self._generate_novel_joke(
-            llm_trait, learn_trait, recent_jokes
-        )
+        (
+            joke,
+            run_attempts,
+            cumulative_attempts,
+            max_similarity,
+            similar_joke,
+            model_name,
+        ) = self._generate_novel_joke(llm_trait, learn_trait, recent_jokes)
 
         if joke is None:
             return ExecutionResult(
                 success=False,
-                content=f"Failed to generate novel joke after {attempts} attempts",
-                iterations=attempts,
+                content=f"Failed to generate novel joke after {cumulative_attempts} attempts",
+                iterations=cumulative_attempts,
             )
 
         return self._complete_cycle(
-            learn_trait, joke, attempts, max_similarity, similar_joke, model_name
+            learn_trait,
+            joke,
+            run_attempts,
+            cumulative_attempts,
+            max_similarity,
+            similar_joke,
+            model_name,
         )
 
     def _complete_cycle(
         self,
         learn_trait: LearnTrait,
         joke: Joke,
-        attempts: int,
+        run_attempts: int,
+        cumulative_attempts: int,
         max_similarity: float,
         similar_joke: str | None,
         model_name: str,
@@ -210,7 +226,8 @@ class JokesterAgent(Agent):
         Args:
             learn_trait: Learn trait for saving joke.
             joke: Generated joke.
-            attempts: Number of generation attempts.
+            run_attempts: Number of attempts in this specific run.
+            cumulative_attempts: Total attempts across all runs until success.
             max_similarity: Similarity score to closest existing joke (0.0-1.0).
             similar_joke: The closest existing joke text (if any).
             model_name: Actual model used (from LLM response).
@@ -218,20 +235,23 @@ class JokesterAgent(Agent):
         Returns:
             ExecutionResult with success status.
         """
-        self._save_joke(learn_trait, joke, model_name)
+        self._save_joke(learn_trait, joke, model_name, cumulative_attempts)
         self._jokes_generated_this_session += 1
 
         result = ExecutionResult(
             success=True,
             content=f"{joke.text}\n(Style: {joke.style})",
-            iterations=attempts,
+            iterations=cumulative_attempts,
         )
         self._recent_results.append(result)
 
         log_extra = {
             "agent": self.name,
             "success": result.success,
-            "attempts": attempts,
+            "attempts": {
+                "run": run_attempts,
+                "cumulative": cumulative_attempts,
+            },
             "style": joke.style,
             "joke": joke.text,
             "session_count": self._jokes_generated_this_session,
@@ -241,69 +261,72 @@ class JokesterAgent(Agent):
             },
         }
 
-        self._lg.info("joke generation completed", extra=log_extra)
+        self._lg.info("found new joke", extra=log_extra)
 
         return result
 
     def _generate_novel_joke(
         self, llm_trait: LLMTrait, learn_trait: LearnTrait, context: list[str]
-    ) -> tuple[Joke | None, int, float, str | None, str]:
+    ) -> tuple[Joke | None, int, int, float, str | None, str]:
         """Generate novel joke with retry loop.
 
         Returns:
-            Tuple of (joke, attempts, max_similarity, similar_joke, model_name).
+            Tuple of (joke, run_attempts, cumulative_attempts, max_similarity, similar_joke, model_name).
+            run_attempts is the count for this specific run (1 to max_retries+1).
+            cumulative_attempts is the total count across all runs since last successful save.
+            model_name is the actual model used from the last attempt, even on failure.
         """
         max_attempts = self._max_retries + 1
-        model_name = "unknown"
+        last_model_name = "unknown"
 
         for attempt in range(1, max_attempts + 1):
-            result = self._attempt_joke_generation(
-                llm_trait, learn_trait, context, attempt, model_name
-            )
+            if attempt > 1:
+                self._lg.debug("retrying joke generation...", extra={"attempt": attempt})
+
+            result = self._try_single_joke_attempt(llm_trait, learn_trait, context, attempt)
             if result is not None:
-                return result
+                joke, last_model_name, novelty = result
+                self._recent_failed_jokes.clear()
+                sim = novelty.max_similarity if novelty else 0.0
+                similar = novelty.similar_joke if novelty else None
+                return joke, attempt, self._cumulative_attempts, sim, similar, last_model_name
 
-        self._lg.debug(
-            "failed to generate novel joke after all attempts",
-            extra={"max_retries": self._max_retries, "total_attempts": max_attempts},
-        )
-        return None, max_attempts, 0.0, None, model_name
+        self._lg.debug("failed to generate novel joke", extra={"attempts": max_attempts})
+        return None, max_attempts, self._cumulative_attempts, 0.0, None, last_model_name
 
-    def _attempt_joke_generation(
-        self,
-        llm_trait: LLMTrait,
-        learn_trait: LearnTrait,
-        context: list[str],
-        attempt: int,
-        model_name: str,
-    ) -> tuple[Joke, int, float, str | None, str] | None:
-        """Attempt to generate a single novel joke.
+    def _try_single_joke_attempt(
+        self, llm_trait: LLMTrait, learn_trait: LearnTrait, context: list[str], attempt: int
+    ) -> tuple[Joke, str, NoveltyCheck | None] | None:
+        """Try to generate a single novel joke.
 
         Returns:
-            Tuple of (joke, attempt, similarity, similar_joke, model) if successful, None if failed.
+            Tuple of (joke, model_name, novelty_check) if successful, None if failed.
         """
-        if attempt > 1:
-            self._lg.debug(
-                "retrying joke generation...",
-                extra={"attempt": attempt, "max_retries": self._max_retries},
-            )
+        # Increment cumulative attempts counter (tracks across runs)
+        self._cumulative_attempts += 1
 
         retry_feedback = "" if attempt == 1 else "Try a completely different style."
-        joke, model_name = self._generate_joke(llm_trait, context, retry_feedback)
+        avoid_jokes = list(self._recent_failed_jokes)
+        joke, model_name = self._generate_joke(llm_trait, context, retry_feedback, avoid_jokes)
 
         if joke is None:
-            self._lg.warning("LLM failed to generate joke", extra={"attempt": attempt})
+            self._lg.warning(
+                "LLM failed to generate joke",
+                extra={"attempt": attempt, "cumulative": self._cumulative_attempts},
+            )
             return None
 
         # Check novelty if embedder available
         if learn_trait.has_embedder:
             novelty = self._check_novelty(learn_trait, joke.text)
             if not novelty.is_novel:
+                # Store failed joke to avoid similar attempts in future runs
+                self._recent_failed_jokes.append(joke.text)
                 return None
-            return joke, attempt, novelty.max_similarity, novelty.similar_joke, model_name
+            return joke, model_name, novelty
 
-        # No embedder - assume novel with 0.0 similarity
-        return joke, attempt, 0.0, None, model_name
+        # No embedder - assume novel
+        return joke, model_name, None
 
     def ask(self, question: str) -> str:
         """Answer question (not supported)."""
@@ -321,33 +344,22 @@ class JokesterAgent(Agent):
             return []
 
     def _generate_joke(
-        self, llm_trait: LLMTrait, context: list[str], retry_feedback: str
+        self, llm_trait: LLMTrait, context: list[str], retry_feedback: str, avoid_jokes: list[str]
     ) -> tuple[Joke | None, str]:
         """Generate a joke using LLM with structured output.
+
+        Args:
+            llm_trait: LLM trait for generation.
+            context: Recent successful jokes for style inspiration.
+            retry_feedback: Feedback for retry attempts.
+            avoid_jokes: Recent failed attempts to avoid generating similar jokes.
 
         Returns:
             Tuple of (joke, model_name) where joke is None if generation failed.
         """
         from ...core.llm.types import Message
 
-        # Build prompt
-        directive_trait = self.get_trait(DirectiveTrait)
-        directive = directive_trait.directive.prompt if directive_trait else ""
-
-        context_text = ""
-        if context:
-            context_text = "Recent jokes you've told:\n" + "\n".join(f"- {j}" for j in context)
-
-        retry_text = f"\n\n{retry_feedback}" if retry_feedback else ""
-
-        prompt = f"""{directive}
-
-{context_text}
-
-Tell one short, original joke (1-4 lines max). Choose a style you haven't used recently.{retry_text}
-
-Return your joke in JSON format with 'text' and 'style' fields."""
-
+        prompt = self._build_joke_prompt(context, retry_feedback, avoid_jokes)
         messages = [Message(role="user", content=prompt)]
         result = llm_trait.complete(messages, output_schema=Joke)
 
@@ -356,6 +368,46 @@ Return your joke in JSON format with 'text' and 'style' fields."""
             return None, result.model
 
         return result.parsed, result.model
+
+    def _build_joke_prompt(
+        self, context: list[str], retry_feedback: str, avoid_jokes: list[str]
+    ) -> str:
+        """Build prompt for joke generation with context and constraints.
+
+        Args:
+            context: Recent successful jokes for style inspiration.
+            retry_feedback: Feedback for retry attempts.
+            avoid_jokes: Recent failed attempts to avoid generating similar jokes.
+
+        Returns:
+            Formatted prompt string.
+        """
+        directive_trait = self.get_trait(DirectiveTrait)
+        directive = directive_trait.directive.prompt if directive_trait else ""
+
+        context_text = ""
+        if context:
+            context_text = "Recent jokes you've told:\n" + "\n".join(f"- {j}" for j in context)
+
+        avoid_text = ""
+        if avoid_jokes:
+            recent_failures = avoid_jokes[-5:]
+            avoid_text = (
+                "\n\nDO NOT generate anything similar to these recent attempts "
+                "(too similar to existing jokes):\n" + "\n".join(f"- {j}" for j in recent_failures)
+            )
+
+        retry_text = f"\n\n{retry_feedback}" if retry_feedback else ""
+
+        return f"""{directive}
+
+{context_text}{avoid_text}
+
+Tell one short, original joke (1-4 lines max).
+
+IMPORTANT: Vary your joke structure and opening. Don't always start with the same patterns, such as "I've been trying". Mix it up - use questions, observations, one-liners, puns, different formats.{retry_text}
+
+Return your joke in JSON format with 'text' and 'style' fields."""
 
     def _check_novelty(self, learn_trait: LearnTrait, joke_text: str) -> NoveltyCheck:
         """Check if joke is novel using embedding similarity (RAG)."""
@@ -435,7 +487,9 @@ Return your joke in JSON format with 'text' and 'style' fields."""
                 },
             )
 
-    def _save_joke(self, learn_trait: LearnTrait, joke: Joke, model_name: str) -> None:
+    def _save_joke(
+        self, learn_trait: LearnTrait, joke: Joke, model_name: str, attempts: int
+    ) -> None:
         """Save joke as a solution to the task of telling a joke.
 
         Stores joke as type=solution with task context and metadata.
@@ -447,6 +501,7 @@ Return your joke in JSON format with 'text' and 'style' fields."""
             learn_trait: Learn trait for saving joke.
             joke: Generated joke.
             model_name: Actual model used (from LLM response).
+            attempts: Number of generation attempts needed.
 
         Raises:
             Exception: If joke save fails (caller should handle to mark run as failed).
@@ -469,7 +524,10 @@ Return your joke in JSON format with 'text' and 'style' fields."""
         # Storage is always initialized in start(), so it should never be None here
         if self._storage is None:
             raise RuntimeError("Storage not initialized - call agent.start() first")
-        self._storage.record_joke_metadata(fact_id, model_name)
+        self._storage.record_joke_metadata(fact_id, model_name, attempts)
+
+        # Reset cumulative attempts counter after successful save
+        self._cumulative_attempts = 0
 
     def record_feedback(self, message: str) -> None:
         """Record feedback about a joke.

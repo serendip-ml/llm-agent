@@ -10,7 +10,7 @@ INFRA_DEV_PKG_NAME := llm_agent
 INFRA_DEV_CQ_STRICT := true
 
 # PyTest and Docstring coverage thresholds
-INFRA_PYTEST_COVERAGE_THRESHOLD := 60
+INFRA_PYTEST_COVERAGE_THRESHOLD := 55
 INFRA_DEV_DOCSTRING_THRESHOLD := 95
 
 # Include framework

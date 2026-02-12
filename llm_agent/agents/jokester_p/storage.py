@@ -34,28 +34,35 @@ class Storage:
         self._lg = lg
         self._storage = storage_trait.storage
 
-    def record_joke_metadata(self, fact_id: int, model_name: str) -> None:
+    def record_joke_metadata(self, fact_id: int, model_name: str, attempts: int) -> None:
         """Record model usage and training metadata for a joke.
 
         Args:
             fact_id: ID of the fact in atomic_facts.
             model_name: Actual model used (from LLM response).
+            attempts: Number of generation attempts needed.
 
         Raises:
             Exception: If metadata recording fails critically (re-raises after logging).
         """
-        usage_failed = self._try_record_model_usage(fact_id, model_name)
+        usage_failed = self._try_record_model_usage(fact_id, model_name, attempts)
         training_failed = self._try_record_training_metadata(fact_id, model_name)
         self._log_metadata_failures(fact_id, usage_failed, training_failed)
 
-    def _try_record_model_usage(self, fact_id: int, model_name: str) -> bool:
+    def _try_record_model_usage(self, fact_id: int, model_name: str, attempts: int) -> bool:
         """Try to record model usage, return True if failed."""
         try:
-            self._record_model_usage(fact_id, model_name)
+            self._record_model_usage(fact_id, model_name, attempts)
             return False
         except Exception as e:
             self._lg.warning(
-                "model usage recording failed", extra={"exception": e, "fact_id": fact_id}
+                "model usage recording failed",
+                extra={
+                    "exception": e,
+                    "fact_id": fact_id,
+                    "model": model_name,
+                    "attempts": attempts,
+                },
             )
             return True
 
@@ -66,7 +73,13 @@ class Storage:
             return False
         except Exception as e:
             self._lg.warning(
-                "training metadata recording failed", extra={"exception": e, "fact_id": fact_id}
+                "training metadata recording failed",
+                extra={
+                    "exception": e,
+                    "fact_id": fact_id,
+                    "model": model_name,
+                    "model_name": model_name,
+                },
             )
             return True
 
@@ -84,12 +97,13 @@ class Storage:
                 },
             )
 
-    def _record_model_usage(self, fact_id: int, model_name: str) -> None:
+    def _record_model_usage(self, fact_id: int, model_name: str, attempts: int) -> None:
         """Record model usage metadata in agent-specific table.
 
         Args:
             fact_id: ID of the fact in atomic_facts.
             model_name: Name of the model used.
+            attempts: Number of generation attempts needed.
 
         Raises:
             Exception: If database insert fails.
@@ -99,12 +113,16 @@ class Storage:
             fact_id=fact_id,
             model_name=model_name,
             model_role="sole",  # Single model for now, extensible for multi-model
+            attempts=attempts,
             tokens_in=None,  # TODO: Track from LLM response
             tokens_out=None,  # TODO: Track from LLM response
             cost_usd=None,  # TODO: Calculate based on model pricing
             latency_ms=None,  # TODO: Track from LLM response
         )
-        self._lg.debug("model usage recorded", extra={"fact_id": fact_id, "model": model_name})
+        self._lg.debug(
+            "model usage recorded",
+            extra={"fact_id": fact_id, "model": model_name, "attempts": attempts},
+        )
 
     def _record_training_metadata(self, fact_id: int, model_name: str) -> None:
         """Record training metadata if using a fine-tuned model.
