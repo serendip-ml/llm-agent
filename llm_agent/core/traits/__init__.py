@@ -15,6 +15,7 @@ from .builtin import (
     MethodTrait,
     SAIAConfig,
     SAIATrait,
+    StorageTrait,
     ToolsTrait,
 )
 from .factory import Factory
@@ -33,6 +34,7 @@ class TraitName(StrEnum):
     LEARN = "learn"
     HTTP = "http"
     SAIA = "saia"
+    STORAGE = "storage"
     TOOLS = "tools"
     METHOD = "method"
 
@@ -44,6 +46,7 @@ ALL_TRAITS: list[TraitName] = [
     TraitName.LEARN,
     TraitName.HTTP,
     TraitName.SAIA,
+    TraitName.STORAGE,
     TraitName.TOOLS,
     TraitName.METHOD,
 ]
@@ -75,6 +78,8 @@ __all__ = [
     # SAIA
     "SAIAConfig",
     "SAIATrait",
+    # Storage
+    "StorageTrait",
     # Tools
     "ToolsTrait",
 ]

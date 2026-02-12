@@ -1,4 +1,4 @@
-"""Factory for creating JokesterAgent instances."""
+"""Factory for creating jokester agent instances."""
 
 from __future__ import annotations
 
@@ -8,15 +8,17 @@ from .agent import JokesterAgent
 
 
 class Factory(BaseFactory):
-    """Factory for JokesterAgent.
+    """Factory for jokester agent.
 
-    Declares DIRECTIVE, LLM, and LEARN as required traits. These can be overridden in YAML:
+    Declares DIRECTIVE, LLM, LEARN, and STORAGE as required traits. These can be overridden in YAML:
         traits:
-          required: [directive, llm, learn]
+          required: [directive, llm, learn, storage]
 
-    No tools needed - agent uses LLMTrait/LearnTrait directly in code.
+    StorageTrait provides agent-specific tables for tracking model usage and training metadata.
+    No tools needed - agent uses traits directly in code.
     """
 
     agent_class = JokesterAgent
-    required_traits = [TN.DIRECTIVE, TN.LLM, TN.LEARN]
+    # IMPORTANT: STORAGE must come after LEARN - StorageTrait depends on LearnTrait's database
+    required_traits = [TN.DIRECTIVE, TN.LLM, TN.LEARN, TN.STORAGE]
     default_tools = {}  # This agent doesn't need tools (uses traits directly in code)

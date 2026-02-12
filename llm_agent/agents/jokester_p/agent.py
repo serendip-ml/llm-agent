@@ -10,6 +10,7 @@ which cannot be reliably enforced through prompts alone due to context window li
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,6 +23,9 @@ from ...core.llm.backend import StructuredOutputError
 from ...core.traits.builtin.directive import DirectiveTrait
 from ...core.traits.builtin.learn import LearnTrait
 from ...core.traits.builtin.llm import LLMTrait
+from ...core.traits.builtin.storage import StorageTrait
+from .schema import ModelUsage, TrainingMetadata
+from .storage import Storage
 
 
 class Joke(BaseModel):
@@ -74,8 +78,11 @@ class JokesterAgent(Agent):
         self._max_retries = max_retries
         self._similarity_threshold = similarity_threshold
         self._cycle_count = 0
-        self._recent_results: list[ExecutionResult] = []
         self._jokes_generated_this_session = 0  # Track jokes generated since start
+        self._recent_results: deque[ExecutionResult] = deque(
+            maxlen=100
+        )  # Bounded to prevent memory leak
+        self._storage: Storage | None = None  # Set in start(), None before agent is started
 
     @property
     def name(self) -> str:
@@ -96,28 +103,52 @@ class JokesterAgent(Agent):
         """Start agent and traits."""
         self._start_traits()
 
-        # Verify embedder is available (required for novelty checking)
+        try:
+            self._verify_embedder_available()
+            self._setup_storage()
+        except Exception:
+            self._stop_traits()
+            raise
+
+        self._started = True
+        self._lg.info("agent started", extra={"agent": self.name})
+
+    def _verify_embedder_available(self) -> None:
+        """Verify embedder is configured for novelty checking.
+
+        Raises:
+            RuntimeError: If embedder is not configured.
+        """
         learn_trait = self.require_trait(LearnTrait)
         if not learn_trait.has_embedder:
             self._lg.error(
                 "embedder not configured - required for novelty checking",
                 extra={"agent": self.name},
             )
-            # Clean up started traits before raising
-            self._stop_traits()
             raise RuntimeError(
-                "JokesterAgent requires embedder for guaranteed novelty checking. "
+                "Jokester agent requires embedder for guaranteed novelty checking. "
                 "Configure embedder_url in learn section."
             )
 
-        self._started = True
-        self._lg.info("agent started", extra={"agent": self.name})
+    def _setup_storage(self) -> None:
+        """Register tables and initialize storage helper.
+
+        Raises:
+            Exception: If storage setup fails.
+        """
+        storage_trait = self.require_trait(StorageTrait)
+        storage_trait.storage.register_table(ModelUsage)
+        storage_trait.storage.register_table(TrainingMetadata)
+
+        llm_trait = self.require_trait(LLMTrait)
+        self._storage = Storage(self._lg, storage_trait, llm_trait)
 
     def stop(self) -> None:
         """Stop agent and traits."""
         if not self._started:
             return
         self._stop_traits()
+        self._storage = None
         self._started = False
         self._lg.info("agent stopped", extra={"agent": self.name})
 
@@ -252,15 +283,7 @@ class JokesterAgent(Agent):
 
     def ask(self, question: str) -> str:
         """Answer question (not supported)."""
-        return "JokesterAgent does not support questions. Use run_once() to get a joke."
-
-    def record_feedback(self, message: str) -> None:
-        """Record feedback about a joke."""
-        self._lg.info("feedback received", extra={"feedback": message})
-
-    def get_recent_results(self, limit: int = 10) -> list[ExecutionResult]:
-        """Get recent execution results."""
-        return self._recent_results[-limit:]
+        return "Jokester agent does not support questions. Use run_once() to get a joke."
 
     def _get_recent_jokes(self, learn_trait: LearnTrait, limit: int) -> list[str]:
         """Fetch recent jokes chronologically for style inspiration."""
@@ -390,6 +413,8 @@ Return your joke in JSON format with 'text' and 'style' fields."""
         Stores joke as type=solution with task context and metadata.
         Embeddings are created automatically by solutions.record().
 
+        Also records model usage and training metadata in agent-specific tables.
+
         Raises:
             Exception: If joke save fails (caller should handle to mark run as failed).
         """
@@ -400,9 +425,35 @@ Return your joke in JSON format with 'text' and 'style' fields."""
             problem_context={"style_preference": "varied"},
             answer={"text": joke.text, "style": joke.style},
             answer_text=joke.text,
-            tokens_used=0,  # Not tracked at joke level
-            latency_ms=0,  # Not tracked at joke level
+            tokens_used=0,  # Not tracked at joke level yet
+            latency_ms=0,  # Not tracked at joke level yet
             category="joke",
-            source="agent",
+            source="agent",  # Generic source, model tracked in metadata table
         )
         self._lg.debug("joke saved as solution", extra={"fact_id": fact_id, "style": joke.style})
+
+        # Record model usage and training metadata via storage helper
+        # Storage is always initialized in start(), so it should never be None here
+        if self._storage is None:
+            raise RuntimeError("Storage not initialized - call agent.start() first")
+        self._storage.record_joke_metadata(fact_id)
+
+    def record_feedback(self, message: str) -> None:
+        """Record feedback about a joke.
+
+        Args:
+            message: Feedback message from user.
+        """
+        # Log at debug level to avoid exposing PII in production logs
+        self._lg.debug("feedback received", extra={"feedback": message})
+
+    def get_recent_results(self, limit: int = 10) -> list[ExecutionResult]:
+        """Get recent execution results.
+
+        Args:
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of recent execution results.
+        """
+        return list(self._recent_results)[-limit:]
