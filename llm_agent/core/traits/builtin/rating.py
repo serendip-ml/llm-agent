@@ -261,8 +261,9 @@ class RatingTrait(BaseTrait):
             raise ValueError(f"No criteria configured for fact type: {fact_type}")
 
         # Use rating service to rate content
-        # Use model name as provider identifier for LLM ratings
-        provider_id = f"llm_{provider.model}"
+        # Build unique provider identifier (handles model="auto" case)
+        backend_type = provider.backend.get("type", "unknown")
+        provider_id = f"llm_{provider.model}_{backend_type}"
         request = RatingRequest(
             fact=fact_id,
             content=content,

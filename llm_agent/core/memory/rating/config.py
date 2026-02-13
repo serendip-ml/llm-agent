@@ -167,11 +167,15 @@ class ConfigParser:
         for crit_cfg in criteria_list:
             if isinstance(crit_cfg, str):
                 criteria.append(Criteria(name=crit_cfg, description=f"Evaluate {crit_cfg}"))
-            else:
+            elif isinstance(crit_cfg, dict):
+                name = crit_cfg.get("name")
+                if not name:
+                    self._lg.warning("criteria entry missing 'name' key, skipping")
+                    continue
                 criteria.append(
                     Criteria(
-                        name=crit_cfg["name"],
-                        description=crit_cfg.get("description", f"Evaluate {crit_cfg['name']}"),
+                        name=name,
+                        description=crit_cfg.get("description", f"Evaluate {name}"),
                         weight=crit_cfg.get("weight", 1.0),
                     )
                 )

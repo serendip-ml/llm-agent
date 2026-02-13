@@ -62,6 +62,7 @@ class AtomicFactsBackend:
 
         with self._db.session() as session:
             session.execute(text(query), params)
+            session.commit()
 
         self._log_rating_saved(result, fact_id)
 

@@ -149,7 +149,9 @@ Respond only with the JSON, no additional text."""
     ) -> Result:
         """Parse LLM response into Result."""
         data = self._extract_json(response, criteria)
-        stars = data.get("stars", 3)
+        # Clamp stars to valid 1-5 range
+        raw_stars = data.get("stars", 3)
+        stars = max(1, min(5, int(raw_stars)))
         signal, strength = self._stars_to_signal(stars)
 
         return Result(

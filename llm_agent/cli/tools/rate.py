@@ -324,22 +324,22 @@ class RateTool(Tool):
         result = self._load_rating_config()
         if result is None:
             return 1
-        provider, criteria_config = result
+        provider, criteria_config, fact_type = result
 
         # Determine how many facts to rate
-        to_rate = self._determine_rating_count(context_key)
+        to_rate = self._determine_rating_count(context_key, fact_type)
         if to_rate == 0:
             print("No unrated facts found.")
             return 0
 
         # Create LLM client and run rating
-        return self._run_auto_rating(provider, criteria_config, context_key, to_rate)
+        return self._run_auto_rating(provider, criteria_config, context_key, to_rate, fact_type)
 
-    def _load_rating_config(self) -> tuple[Any, Any] | None:
+    def _load_rating_config(self) -> tuple[Any, Any, str] | None:
         """Load and validate rating configuration.
 
         Returns:
-            Tuple of (provider, criteria_config) or None on error.
+            Tuple of (provider, criteria_config, fact_type) or None on error.
         """
         config = self._load_agent_config(self.args.agent_name)
         if config is None:
@@ -368,10 +368,10 @@ class RateTool(Tool):
             print(f"Error: No criteria configured for fact type: {fact_type}")
             return None
 
-        return enabled_providers[0], criteria_map[fact_type]
+        return enabled_providers[0], criteria_map[fact_type], fact_type
 
     def _run_auto_rating(
-        self, provider: Any, criteria_config: Any, context_key: str, to_rate: int
+        self, provider: Any, criteria_config: Any, context_key: str, to_rate: int, fact_type: str
     ) -> int:
         """Create LLM client and run auto rating."""
         from llm_infer.client import Factory as LLMClientFactory
@@ -382,18 +382,18 @@ class RateTool(Tool):
         try:
             service = Service(self.lg, llm_client)
             total_rated = self._rate_with_service(
-                service, provider, criteria_config, context_key, to_rate
+                service, provider, criteria_config, context_key, to_rate, fact_type
             )
             print(f"\n✓ Rated {total_rated} items using automated LLM rating")
             return 0
         finally:
             llm_client.close()
 
-    def _determine_rating_count(self, context_key: str) -> int:
+    def _determine_rating_count(self, context_key: str, fact_type: str) -> int:
         """Determine how many facts to rate based on limit and available unrated facts."""
         assert self._backend is not None
         unrated_count = self._backend.get_unrated_count(
-            context_key, fact_type=self.args.type, category=self.args.category
+            context_key, fact_type=fact_type, category=self.args.category
         )
         if unrated_count == 0:
             return 0
@@ -414,6 +414,7 @@ class RateTool(Tool):
         criteria_config: Any,
         context_key: str,
         to_rate: int,
+        fact_type: str,
     ) -> int:
         """Rate facts using Service and save with backend.
 
@@ -423,6 +424,7 @@ class RateTool(Tool):
             criteria_config: Criteria configuration for the fact type.
             context_key: Context key for filtering.
             to_rate: Number of facts to rate.
+            fact_type: Resolved fact type for filtering.
 
         Returns:
             Total number of facts rated.
@@ -437,7 +439,7 @@ class RateTool(Tool):
             facts = list(
                 self._backend.unrated_facts(
                     context_key,
-                    fact_type=self.args.type,
+                    fact_type=fact_type,
                     category=self.args.category,
                     limit=batch_limit,
                 )
@@ -455,38 +457,38 @@ class RateTool(Tool):
 
         return total_rated
 
+    def _build_rating_request(
+        self, provider: Any, criteria_config: Any, fact: dict[str, Any]
+    ) -> Request:
+        """Build rating request for a fact."""
+        backend_type = provider.backend.get("type", "unknown")
+        return Request(
+            fact=fact["id"],
+            content=fact["content"],
+            prompt_template=criteria_config.prompt,
+            criteria=criteria_config.criteria,
+            model=provider.model,
+            provider=f"llm_{provider.model}_{backend_type}",
+            temperature=0.3,
+        )
+
     def _rate_and_save_fact(
         self, service: Service, provider: Any, criteria_config: Any, fact: dict[str, Any]
     ) -> bool:
         """Rate a single fact and save. Returns True on success."""
         assert self._backend is not None
         try:
-            # Build request using Service's expected format
-            request = Request(
-                fact=fact["id"],
-                content=fact["content"],
-                prompt_template=criteria_config.prompt,
-                criteria=criteria_config.criteria,
-                model=provider.model,
-                provider=f"llm_{provider.model}",
-                temperature=0.3,
-            )
-
-            # Rate using service
+            request = self._build_rating_request(provider, criteria_config, fact)
             result = service.rate_content(request)
-
-            # Save using backend
             self._backend.save_rating(result, source="cli_rate_tool")
 
             stars_visual = self._format_stars(result.stars)
-            print(f"{stars_visual} Fact {fact['id']}: {fact['content'][:60]}...")
+            snippet = fact["content"][:60]
+            ellipsis = "..." if len(fact["content"]) > 60 else ""
+            print(f"{stars_visual} Fact {fact['id']}: {snippet}{ellipsis}")
             return True
-
         except Exception as e:
-            self.lg.warning(
-                "rating failed",
-                extra={"exception": e, "fact_id": fact["id"]},
-            )
+            self.lg.warning("rating failed", extra={"exception": e, "fact_id": fact["id"]})
             return False
 
     def _save_manual_feedback(self, fact_id: int, signal: str, strength: float, stars: int) -> None:
