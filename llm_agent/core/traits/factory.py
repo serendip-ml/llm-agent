@@ -50,6 +50,7 @@ class Factory:
             TraitName.DIRECTIVE: self._create_directive,
             TraitName.LLM: self._create_llm,
             TraitName.LEARN: self._create_learn,
+            TraitName.RATING: self._create_rating,
             TraitName.STORAGE: self._create_storage,
             TraitName.METHOD: self._create_method,
         }
@@ -93,6 +94,15 @@ class Factory:
         learn_config_raw = self._platform.learn_config()
         learn_config: DotDict | None = DotDict(learn_config_raw) if learn_config_raw else None
         return self.create_learn_trait(agent, agent.identity, learn_config)
+
+    def _create_rating(self, agent: Agent) -> Trait:
+        """Route to create_rating_trait."""
+        from .builtin.rating import RatingTrait
+
+        rating_config = agent.config.get("rating")
+        # RatingTrait needs platform LLM config to create its own LLM client
+        llm_config = DotDict(self._platform.llm_config())
+        return RatingTrait(agent, rating_config, llm_config)
 
     def _create_storage(self, agent: Agent) -> Trait:
         """Route to create_storage_trait."""

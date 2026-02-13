@@ -221,8 +221,12 @@ class JokesterAgent(Agent):
         Returns:
             ExecutionResult with success status.
         """
-        self._save_joke(learn_trait, joke, model_name, cumulative_attempts)
+        fact_id = self._save_joke(learn_trait, joke, model_name, cumulative_attempts)
         self._jokes_generated_this_session += 1
+
+        # Auto-rate if enabled (uses rating conductors, not generation LLM)
+        if self.config.get("rating", {}).get("auto", False):
+            self._perform_inline_rating(fact_id, joke.text)
 
         result = ExecutionResult(
             success=True,
@@ -231,7 +235,24 @@ class JokesterAgent(Agent):
         )
         self._recent_results.append(result)
 
-        log_extra = {
+        log_extra = self._build_joke_log_extra(
+            result, joke, run_attempts, cumulative_attempts, max_similarity, similar_joke
+        )
+        self._lg.info("found new joke", extra=log_extra)
+
+        return result
+
+    def _build_joke_log_extra(
+        self,
+        result: ExecutionResult,
+        joke: Joke,
+        run_attempts: int,
+        cumulative_attempts: int,
+        max_similarity: float,
+        similar_joke: str | None,
+    ) -> dict[str, Any]:
+        """Build log extra dict for joke generation."""
+        return {
             "agent": self.name,
             "success": result.success,
             "attempts": {
@@ -247,9 +268,42 @@ class JokesterAgent(Agent):
             },
         }
 
-        self._lg.info("found new joke", extra=log_extra)
+    def _perform_inline_rating(self, fact_id: int, joke_text: str) -> None:
+        """Perform inline rating of a joke using configured rating conductors.
 
-        return result
+        Args:
+            fact_id: ID of the saved joke fact.
+            joke_text: Text of the joke to rate.
+        """
+        from ...core.traits.builtin.rating import RatingTrait
+
+        rating_trait = self.get_trait(RatingTrait)
+        if not rating_trait:
+            return
+
+        try:
+            results = rating_trait.rate_fact_with_all_conductors(
+                fact_id=fact_id, content=joke_text, fact_type="solution"
+            )
+            # Log summary of ratings
+            for result in results:
+                stars_visual = "★" * result.stars + "☆" * (5 - result.stars)
+                reasoning_preview = (
+                    result.reasoning[:100] + "..."
+                    if len(result.reasoning) > 100
+                    else result.reasoning
+                )
+                self._lg.info(
+                    f"inline rating: {stars_visual}",
+                    extra={
+                        "fact_id": fact_id,
+                        "stars": result.stars,
+                        "model": result.model,
+                        "reasoning": reasoning_preview,
+                    },
+                )
+        except Exception as e:
+            self._lg.warning("inline rating failed", extra={"exception": e, "fact_id": fact_id})
 
     def _generate_novel_joke(
         self, llm_trait: LLMTrait, learn_trait: LearnTrait, context: list[str]
@@ -504,7 +558,7 @@ Return your joke in JSON format with 'text' and 'style' fields."""
 
     def _save_joke(
         self, learn_trait: LearnTrait, joke: Joke, model_name: str, attempts: int
-    ) -> None:
+    ) -> int:
         """Save joke as a solution to the task of telling a joke.
 
         Stores joke as type=solution with task context and metadata.
@@ -517,6 +571,9 @@ Return your joke in JSON format with 'text' and 'style' fields."""
             joke: Generated joke.
             model_name: Actual model used (from LLM response).
             attempts: Number of generation attempts needed.
+
+        Returns:
+            The fact_id of the saved joke.
 
         Raises:
             Exception: If joke save fails (caller should handle to mark run as failed).
@@ -543,6 +600,8 @@ Return your joke in JSON format with 'text' and 'style' fields."""
 
         # Reset cumulative attempts counter after successful save
         self._cumulative_attempts = 0
+
+        return fact_id
 
     def record_feedback(self, message: str) -> None:
         """Record feedback about a joke.

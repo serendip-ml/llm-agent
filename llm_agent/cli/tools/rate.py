@@ -52,6 +52,17 @@ class RateTool(Tool):
             "--type",
             help="Filter by fact type (e.g., 'solution')",
         )
+        parser.add_argument(
+            "--auto",
+            action="store_true",
+            help="Automated mode - use LLM for rating (requires RatingTrait configuration)",
+        )
+        parser.add_argument(
+            "--limit",
+            type=int,
+            default=10,
+            help="Maximum number of items to rate in auto mode (0 = unlimited, default: 10)",
+        )
 
     def run(self, **kwargs: Any) -> int:
         agent_name = self.args.agent_name
@@ -62,6 +73,8 @@ class RateTool(Tool):
             extra={"agent": agent_name, "context_key": context_key},
         )
 
+        if self.args.auto:
+            return self._auto_mode(context_key)
         if self.args.cont:
             return self._continuous_mode(context_key)
         return self._single_rating(context_key)
@@ -325,6 +338,332 @@ class RateTool(Tool):
         empty = "☆" * (5 - stars)
         return filled + empty
 
+    def _auto_mode(self, context_key: str) -> int:
+        """Automated rating mode using LLM directly.
+
+        Args:
+            context_key: Context key for filtering facts.
+
+        Returns:
+            Exit code (0 = success).
+        """
+        # Load agent config to get rating configuration
+        config = self._load_agent_config(self.args.agent_name)
+        if config is None:
+            print(f"Error: Agent config not found for '{self.args.agent_name}'")
+            return 1
+
+        if "rating" not in config:
+            print(f"Error: No rating configuration found in {self.args.agent_name} config")
+            print("Add a 'rating:' section to the agent's YAML config")
+            return 1
+
+        # Create LLM client for rating (use global LLM config)
+        from llm_infer.client import Factory as LLMClientFactory
+
+        llm_config = self.app.config.get("llm", {})
+        llm_client = LLMClientFactory(self.lg).from_config(llm_config)
+
+        try:
+            return self._run_auto_rating_direct(config, llm_client, context_key)
+        finally:
+            llm_client.close()
+
+    def _run_auto_rating_direct(self, config: Any, llm_client: Any, context_key: str) -> int:
+        """Run automated rating using database and LLM directly.
+
+        Args:
+            config: Agent configuration.
+            llm_client: LLM client for rating.
+            context_key: Context key for filtering.
+
+        Returns:
+            Exit code (0 = success).
+        """
+        rating_config = config.get("rating", {})
+
+        # Get conductor and model
+        model = self._get_conductor_model(rating_config)
+        if not model:
+            return 1
+
+        # Get criteria configuration
+        criteria_config = self._get_criteria_config(rating_config)
+        if not criteria_config:
+            return 1
+
+        # Determine how many facts to rate
+        to_rate = self._determine_rating_count(context_key)
+        if to_rate == 0:
+            print("No unrated facts found.")
+            return 0
+
+        # Rate in batches
+        total_rated = self._rate_facts_batch(
+            llm_client, model, criteria_config, context_key, to_rate
+        )
+
+        print(f"\n✓ Rated {total_rated} items using automated LLM rating")
+        return 0
+
+    def _get_conductor_model(self, rating_config: dict[str, Any]) -> str | None:
+        """Extract model from first conductor configuration."""
+        conductors = rating_config.get("conductors", [])
+        if not conductors:
+            print("Error: No rating conductors configured")
+            return None
+
+        conductor = conductors[0]  # Use first conductor
+        backend_config = conductor.get("backend", {})
+        return cast(str, backend_config.get("model", "auto"))
+
+    def _get_criteria_config(self, rating_config: dict[str, Any]) -> dict[str, Any] | None:
+        """Get type-specific criteria configuration."""
+        fact_type = self.args.type or "solution"
+        criteria_config = rating_config.get("models", {}).get("atomic", {}).get(fact_type)
+        if not criteria_config:
+            print(f"Error: No model configured for fact type: {fact_type}")
+            return None
+        return cast(dict[str, Any], criteria_config)
+
+    def _determine_rating_count(self, context_key: str) -> int:
+        """Determine how many facts to rate based on limit and available unrated facts."""
+        unrated_count = self._count_unrated(context_key)
+        if unrated_count == 0:
+            return 0
+
+        limit = self.args.limit
+        if limit == 0:
+            print(f"Found {unrated_count} unrated facts. Rating all...")
+            return unrated_count
+        else:
+            to_rate = min(limit, unrated_count)
+            print(f"Found {unrated_count} unrated facts. Rating {to_rate}...")
+            return cast(int, to_rate)
+
+    def _count_unrated(self, context_key: str) -> int:
+        """Count unrated facts."""
+        query, params = self._build_unrated_query(context_key)
+        query_count = query.replace(
+            "SELECT af.id, af.type, af.category, af.source, af.content, af.created_at",
+            "SELECT COUNT(*)",
+        ).replace("LIMIT :limit", "")
+        params_count = {k: v for k, v in params.items() if k != "limit"}
+
+        assert self._db is not None
+        with self._db.session() as session:
+            result = session.execute(text(query_count), params_count)
+            return result.scalar() or 0
+
+    def _rate_facts_batch(
+        self, llm_client: Any, model: str, criteria_config: Any, context_key: str, to_rate: int
+    ) -> int:
+        """Rate facts in batches.
+
+        Args:
+            llm_client: LLM client to use.
+            model: Model name.
+            criteria_config: Criteria configuration.
+            context_key: Context key.
+            to_rate: Number to rate.
+
+        Returns:
+            Total rated.
+        """
+        batch_size = 10
+        total_rated = 0
+        remaining = to_rate if self.args.limit > 0 else None
+
+        while remaining is None or remaining > 0:
+            batch_limit = batch_size if remaining is None else min(batch_size, remaining)
+            facts = self._get_unrated_facts_batch(context_key, batch_limit)
+            if not facts:
+                break
+
+            total_rated += self._rate_fact_list(llm_client, model, criteria_config, facts)
+
+            if remaining is not None:
+                remaining -= len(facts)
+
+            print(f"Rated {total_rated}/{to_rate if self.args.limit > 0 else '?'}...")
+
+        return total_rated
+
+    def _rate_fact_list(
+        self, llm_client: Any, model: str, criteria_config: Any, facts: list[dict[str, Any]]
+    ) -> int:
+        """Rate a list of facts and return count of successful ratings."""
+        count = 0
+        for fact in facts:
+            try:
+                rating, actual_model = self._rate_single_fact(
+                    llm_client, model, fact["content"], criteria_config
+                )
+                self._save_auto_rating(fact["id"], rating, actual_model)
+
+                stars_visual = self._format_stars(rating["stars"])
+                print(f"{stars_visual} Fact {fact['id']}: {fact['content']}")
+
+                count += 1
+            except Exception as e:
+                self.lg.warning(
+                    "rating failed",
+                    extra={"exception": e, "fact_id": fact["id"]},
+                )
+        return count
+
+    def _get_unrated_facts_batch(self, context_key: str, limit: int) -> list[dict[str, Any]]:
+        """Get batch of unrated facts."""
+        query, params = self._build_unrated_query(context_key)
+        params["limit"] = limit
+
+        assert self._db is not None
+        with self._db.session() as session:
+            result = session.execute(text(query), params)
+            rows = result.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "type": row[1],
+                    "category": row[2],
+                    "source": row[3],
+                    "content": row[4],
+                    "created_at": row[5],
+                }
+                for row in rows
+            ]
+
+    def _rate_single_fact(
+        self, llm_client: Any, model: str, content: str, criteria_config: Any
+    ) -> tuple[dict[str, Any], str]:
+        """Rate a single fact using LLM.
+
+        Returns:
+            Tuple of (rating dict, actual_model) where rating contains stars, criteria_scores, reasoning
+        """
+        criteria_list = criteria_config.get("criteria", [])
+        prompt = self._build_rating_prompt(content, criteria_config, criteria_list)
+
+        # Call LLM (use chat_full to get actual model name)
+        response = llm_client.chat_full(
+            messages=[{"role": "user", "content": prompt}],
+            model=model,
+            temperature=0.7,  # Higher temperature for more rating variance
+        )
+
+        # Parse response and return with actual model
+        rating = self._parse_rating_json(response.content, criteria_list)
+        actual_model = response.model or model
+        return rating, actual_model
+
+    def _build_rating_prompt(
+        self, content: str, criteria_config: Any, criteria_list: list[dict[str, Any]]
+    ) -> str:
+        """Build rating prompt from criteria config and content."""
+        prompt_template = criteria_config.get("prompt", "Rate the following:")
+        criteria_desc = "\n".join(
+            f"- {c['name']}: {c.get('description', '')} (weight: {c.get('weight', 1.0)})"
+            for c in criteria_list
+        )
+
+        rating_instructions = self._get_rating_instructions()
+        return f"{prompt_template}\n\nCriteria:\n{criteria_desc}\n\nContent to rate:\n{content}\n\n{rating_instructions}"
+
+    def _get_rating_instructions(self) -> str:
+        """Get standard rating instructions and JSON format."""
+        return """**Important:** Be critical and use the full rating scale (1-5). Most content should be 2-4 stars.
+Reserve 5 stars for truly exceptional content. Don't hesitate to give 1-2 stars for poor content.
+
+Rating scale:
+- 5 stars: Exceptional - truly outstanding, memorable
+- 4 stars: Good - above average, works well
+- 3 stars: Acceptable - meets basic expectations
+- 2 stars: Below expectations - significant flaws
+- 1 star: Poor - fails to meet criteria
+
+Provide your rating in JSON format:
+{
+  "stars": <1-5>,
+  "criteria_scores": {
+    "criterion_name": <0.0-1.0>,
+    ...
+  },
+  "reasoning": "<brief explanation>"
+}
+
+Respond only with the JSON, no additional text."""
+
+    def _parse_rating_json(
+        self, response: str, criteria_list: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Parse JSON rating from LLM response."""
+        try:
+            # Clean response (remove markdown code fences)
+            json_str = response.strip()
+            if json_str.startswith("```"):
+                lines = json_str.split("\n")
+                json_str = "\n".join(lines[1:-1])
+            if json_str.startswith("json"):
+                json_str = "\n".join(json_str.split("\n")[1:])
+
+            data = json.loads(json_str)
+            return {
+                "stars": data.get("stars", 3),
+                "criteria_scores": data.get("criteria_scores", {}),
+                "reasoning": data.get("reasoning", ""),
+            }
+        except json.JSONDecodeError:
+            # Fallback to neutral rating
+            return {
+                "stars": 3,
+                "criteria_scores": {c["name"]: 0.5 for c in criteria_list},
+                "reasoning": "Failed to parse rating",
+            }
+
+    def _save_auto_rating(self, fact_id: int, rating: dict[str, Any], model: str) -> None:
+        """Save automated rating to database."""
+        from datetime import datetime
+
+        stars = rating["stars"]
+        signal, strength = self._map_stars_to_signal(stars)
+
+        context = {
+            "source": "llm_rater",
+            "conductor_type": "llm",
+            "model": model,
+            "rating_type": "automated",
+            "stars": stars,
+            "criteria_scores": rating["criteria_scores"],
+            "reasoning": rating["reasoning"],
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        query = """
+        INSERT INTO atomic_feedback_details (fact_id, signal, strength, context)
+        VALUES (:fact_id, :signal, :strength, :context)
+        """
+        params = {
+            "fact_id": fact_id,
+            "signal": signal,
+            "strength": strength,
+            "context": json.dumps(context),
+        }
+
+        assert self._db is not None
+        with self._db.session() as session:
+            session.execute(text(query), params)
+
+    def _map_stars_to_signal(self, stars: int) -> tuple[str, float]:
+        """Map star rating to signal and strength."""
+        signal_map = {
+            1: ("negative", 1.0),
+            2: ("negative", 0.5),
+            3: ("dismiss", 1.0),
+            4: ("positive", 0.5),
+            5: ("positive", 1.0),
+        }
+        return signal_map.get(stars, ("dismiss", 1.0))
+
     def _save_feedback(self, fact_id: int, signal: str, strength: float) -> None:
         """Save feedback to database.
 
@@ -354,5 +693,6 @@ class RateTool(Tool):
             "context": json.dumps(context),
         }
 
+        assert self._db is not None
         with self._db.session() as session:
             session.execute(text(query), params)

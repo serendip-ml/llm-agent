@@ -189,6 +189,7 @@ class Factory:
         from ..traits.builtin.http import HTTPTrait
         from ..traits.builtin.learn import LearnTrait
         from ..traits.builtin.llm import LLMTrait
+        from ..traits.builtin.rating import RatingTrait
         from ..traits.builtin.saia import SAIATrait
         from ..traits.builtin.storage import StorageTrait
         from ..traits.builtin.tools import ToolsTrait
@@ -197,6 +198,7 @@ class Factory:
             TraitName.DIRECTIVE: DirectiveTrait,
             TraitName.LLM: LLMTrait,
             TraitName.LEARN: LearnTrait,
+            TraitName.RATING: RatingTrait,
             TraitName.STORAGE: StorageTrait,
             TraitName.METHOD: MethodTrait,
             TraitName.HTTP: HTTPTrait,

@@ -5,6 +5,7 @@ from .directive import Directive, DirectiveTrait, MethodTrait
 from .http import HTTPConfig, HTTPTrait
 from .learn import LearnConfig, LearnTrait
 from .llm import LLMConfig, LLMTrait
+from .rating import RatingConfig, RatingTrait
 from .saia import SAIAConfig, SAIATrait
 from .storage import StorageTrait
 from .tools import ToolsTrait
@@ -27,6 +28,9 @@ __all__ = [
     # LLM
     "LLMConfig",
     "LLMTrait",
+    # Rating
+    "RatingConfig",
+    "RatingTrait",
     # SAIA
     "SAIAConfig",
     "SAIATrait",
