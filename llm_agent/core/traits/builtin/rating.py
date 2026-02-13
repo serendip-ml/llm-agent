@@ -127,7 +127,7 @@ class RatingTrait(BaseTrait):
         llm_trait = self.agent.require_trait(LLMTrait)
 
         # Initialize rating service and backend
-        self._service = RatingService(self.agent.lg, llm_trait.client)
+        self._service = RatingService(self.agent.lg, llm_trait.router)
         self._backend = AtomicFactsBackend(self.agent.lg, learn_trait.learn.database)
 
         # Parse provider and criteria configurations

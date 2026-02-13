@@ -216,9 +216,9 @@ class TestLLMTraitStructuredOutput:
 
     @pytest.fixture
     def trait(self):
-        """Create LLMTrait with mocked client."""
+        """Create LLMTrait with mocked router."""
         trait = LLMTrait(MagicMock(), {})
-        trait._client = MagicMock()
+        trait._router = MagicMock()
         return trait
 
     def test_structured_output_basic(self, trait):
@@ -229,7 +229,7 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
-        trait._client.chat_full.return_value = mock_response
+        trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="What is the meaning of life?")]
         result = trait.complete(messages, output_schema=self.Answer)
@@ -246,7 +246,7 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
-        trait._client.chat_full.return_value = mock_response
+        trait._router.chat_full.return_value = mock_response
 
         messages = [
             Message(role="system", content="You are helpful."),
@@ -255,7 +255,7 @@ class TestLLMTraitStructuredOutput:
         trait.complete(messages, output_schema=self.Answer)
 
         # Check the messages passed to chat_full
-        call_args = trait._client.chat_full.call_args
+        call_args = trait._router.chat_full.call_args
         sent_messages = call_args.kwargs["messages"]
 
         # Schema prompt should be appended to system message
@@ -270,12 +270,12 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
-        trait._client.chat_full.return_value = mock_response
+        trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="Question?")]
         trait.complete(messages, output_schema=self.Answer)
 
-        call_args = trait._client.chat_full.call_args
+        call_args = trait._router.chat_full.call_args
         sent_messages = call_args.kwargs["messages"]
 
         # First message should be a system message with schema
@@ -289,12 +289,12 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
-        trait._client.chat_full.return_value = mock_response
+        trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="Question?")]
         trait.complete(messages, output_schema=self.Answer)
 
-        call_args = trait._client.chat_full.call_args
+        call_args = trait._router.chat_full.call_args
         extra_body = call_args.kwargs.get("extra_body")
 
         assert extra_body is not None
@@ -307,7 +307,7 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
-        trait._client.chat_full.return_value = mock_response
+        trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="Question?")]
 
@@ -322,7 +322,7 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
-        trait._client.chat_full.return_value = mock_response
+        trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="Question?")]
 
@@ -337,7 +337,7 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
-        trait._client.chat_full.return_value = mock_response
+        trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="Question?")]
 
@@ -351,7 +351,7 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
-        trait._client.chat_full.return_value = mock_response
+        trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="Question?")]
         result = trait.complete(messages)

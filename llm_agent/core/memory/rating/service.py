@@ -17,7 +17,7 @@ from .models import Criteria, ProviderType, Request, Result
 
 
 if TYPE_CHECKING:
-    from llm_infer.client import LLMClient
+    from llm_infer.client import LLMClient, LLMRouter
 
 
 def stars_to_signal(stars: int) -> tuple[Literal["positive", "negative", "dismiss"], float]:
@@ -67,12 +67,12 @@ class Service:
         backend.save_rating(result, source="llm_rater")
     """
 
-    def __init__(self, lg: Logger, llm_client: LLMClient) -> None:
+    def __init__(self, lg: Logger, llm_client: LLMClient | LLMRouter) -> None:
         """Initialize rating service.
 
         Args:
             lg: Logger instance.
-            llm_client: LLM client for rating.
+            llm_client: LLM client or router for rating.
         """
         self._lg = lg
         self._llm_client = llm_client
