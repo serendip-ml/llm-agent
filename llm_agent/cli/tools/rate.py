@@ -3,7 +3,7 @@
 import argparse
 import json
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from appinfra import DotDict
 from appinfra.app.tools import Tool, ToolConfig
@@ -17,10 +17,6 @@ from llm_agent.core.memory.rating import (
     Request,
     Service,
 )
-
-
-if TYPE_CHECKING:
-    pass
 
 
 class RateTool(Tool):
@@ -434,10 +430,10 @@ class RateTool(Tool):
         assert self._backend is not None
         batch_size = 10
         total_rated = 0
-        remaining = to_rate if self.args.limit > 0 else None
+        remaining = to_rate
 
-        while remaining is None or remaining > 0:
-            batch_limit = batch_size if remaining is None else min(batch_size, remaining)
+        while remaining > 0:
+            batch_limit = min(batch_size, remaining)
             facts = list(
                 self._backend.unrated_facts(
                     context_key,
@@ -453,10 +449,9 @@ class RateTool(Tool):
                 if self._rate_and_save_fact(service, provider, criteria_config, fact):
                     total_rated += 1
 
-            if remaining is not None:
-                remaining -= len(facts)
+            remaining -= len(facts)
 
-            print(f"Rated {total_rated}/{to_rate if self.args.limit > 0 else '?'}...")
+            print(f"Rated {total_rated}/{to_rate}...")
 
         return total_rated
 

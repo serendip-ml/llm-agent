@@ -220,7 +220,7 @@ class RatingTrait(BaseTrait):
         """Attempt to rate a single fact, logging failures."""
         try:
             result = self.rate_fact(fact["id"], fact["content"], fact["type"], provider)
-            self._save_rating(result, provider)
+            self._save_rating(result)
             return result
         except Exception as e:
             self.agent.lg.warning(
@@ -316,7 +316,7 @@ class RatingTrait(BaseTrait):
             result = self.rate_fact(fact_id, content, fact_type, provider)
 
             # Save rating to database
-            self._save_rating(result, provider)
+            self._save_rating(result)
 
             self.agent.lg.debug(
                 "rated fact with provider",
@@ -365,7 +365,7 @@ class RatingTrait(BaseTrait):
 
         return enabled_providers[index]
 
-    def _save_rating(self, result: RatingResult, provider: ProviderConfig) -> None:
+    def _save_rating(self, result: RatingResult) -> None:
         """Save rating using backend."""
         if not self._backend:
             raise RuntimeError("Rating backend not initialized - call on_start() first")
