@@ -58,8 +58,8 @@ class Factory(BaseFactory):
             from llm_infer.client import Factory as LLMClientFactory
             from llm_infer.client import SAIAAdapter
 
-            llm_client = LLMClientFactory(self._lg).from_config(self._platform.llm_config())
-            self._backend = SAIAAdapter(client=llm_client)
+            llm_router = LLMClientFactory(self._lg).from_config(self._platform.llm_config())
+            self._backend = SAIAAdapter(client=llm_router)  # type: ignore[arg-type]  # LLMRouter is API-compatible
         return self._backend
 
     def create(

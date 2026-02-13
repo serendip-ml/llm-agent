@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from llm_infer.client import ChatResponse, LLMClient
+from llm_infer.client import ChatResponse, LLMRouter
 from llm_infer.client import Factory as LLMClientFactory
 from pydantic import BaseModel, ValidationError
 
@@ -69,8 +69,9 @@ def _resolve_llm_defaults(config: LLMConfig) -> dict[str, Any]:
 class LLMTrait(BaseTrait):
     """LLM capability trait.
 
-    Wraps llm_infer.client.LLMClient to provide completion capability
-    to agents. Uses sync API for compatibility with current agent architecture.
+    Wraps llm_infer.client.LLMRouter to provide completion capability
+    to agents with multi-backend support. Uses sync API for compatibility
+    with current agent architecture.
 
     Example:
         from llm_agent.core.traits import LLMTrait
@@ -78,18 +79,25 @@ class LLMTrait(BaseTrait):
         llm_config = {
             "default": "local",
             "backends": {
-                "local": {"type": "openai_compatible", "base_url": "...", "model": "..."}
+                "local": {"type": "openai_compatible", "base_url": "...", "model": "..."},
+                "cloud": {"type": "anthropic", "model": "claude-sonnet-4-20250514"},
             }
         }
         agent = Agent(lg, config)
         agent.add_trait(LLMTrait(agent, llm_config))
 
-        # Agent can now use complete()
-        result = agent.complete("What is 2+2?")
+        # Use default backend
+        result = llm_trait.complete(messages)
+
+        # Route to specific backend
+        result = llm_trait.complete(messages, backend="cloud")
+
+        # Model-based routing (automatic)
+        result = llm_trait.complete(messages, model="claude-sonnet-4-20250514")
 
     Lifecycle:
-        - on_start(): Creates LLMClient
-        - on_stop(): Closes LLMClient
+        - on_start(): Creates LLMRouter
+        - on_stop(): Closes LLMRouter
     """
 
     def __init__(self, agent: Agent, config: LLMConfig | None = None) -> None:
@@ -101,30 +109,39 @@ class LLMTrait(BaseTrait):
         """
         super().__init__(agent)
         self.config: LLMConfig = config or DotDict()
-        self._client: LLMClient | None = None
+        self._router: LLMRouter | None = None
         self._defaults: dict[str, Any] = {}
 
     def on_start(self) -> None:
-        """Create LLM client on agent start."""
-        self._client = LLMClientFactory(self.agent.lg).from_config(self.config)
+        """Create LLM router on agent start."""
+        self._router = LLMClientFactory(self.agent.lg).from_config(self.config)
         self._defaults = _resolve_llm_defaults(self.config)
 
     def on_stop(self) -> None:
-        """Close LLM client on agent stop."""
-        if self._client is not None:
-            self._client.close()
-            self._client = None
+        """Close LLM router on agent stop."""
+        if self._router is not None:
+            self._router.close()
+            self._router = None
 
     @property
-    def client(self) -> LLMClient:
-        """Access the LLM client.
+    def router(self) -> LLMRouter:
+        """Access the LLM router.
 
         Raises:
             RuntimeError: If trait not started (on_start not called).
         """
-        if self._client is None:
+        if self._router is None:
             raise RuntimeError("LLMTrait not started - ensure agent.start() was called")
-        return self._client
+        return self._router
+
+    @property
+    def models(self) -> dict[str, str]:
+        """Model-to-backend routing table.
+
+        Returns:
+            Dict mapping model IDs to backend names.
+        """
+        return self.router.models
 
     def complete(
         self,
@@ -134,18 +151,21 @@ class LLMTrait(BaseTrait):
         max_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
         output_schema: type[BaseModel] | None = None,
+        backend: str | None = None,
     ) -> CompletionResult:
         """Generate a completion.
 
         Args:
             messages: Conversation messages.
-            model: Model override (uses config default if None).
+            model: Model override (uses config default if None). Also used for
+                model-based routing if model is in the routing table.
             temperature: Temperature override (uses config default if None).
             max_tokens: Max tokens override (uses config default if None).
             tools: Tool definitions for function calling.
             output_schema: Pydantic model class for structured output. When provided,
                 the LLM is instructed to return JSON matching the schema, and the
                 response is validated. Result.parsed will contain the validated object.
+            backend: Backend to route to. If None, uses model-based routing or default.
 
         Returns:
             CompletionResult with content and metadata. If output_schema was provided,
@@ -165,7 +185,7 @@ class LLMTrait(BaseTrait):
             api_messages = self._inject_schema_prompt(api_messages, output_schema)
             extra_body = {"response_format": {"type": "json_object"}}
 
-        response = self.client.chat_full(
+        response = self.router.chat_full(
             messages=api_messages,
             model=model or self._defaults.get("model"),
             temperature=temperature
@@ -173,6 +193,7 @@ class LLMTrait(BaseTrait):
             else self._defaults.get("temperature", 0.7),
             max_tokens=max_tokens if max_tokens is not None else self._defaults.get("max_tokens"),
             tools=tools,
+            backend=backend,
             extra_body=extra_body,
         )
 
