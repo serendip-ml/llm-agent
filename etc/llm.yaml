@@ -2,6 +2,7 @@ default: local  # Options: local, anthropic, openai
 
 backends:
   local:
+    enabled: true
     type: openai_compatible
     base_url: "http://localhost:8000/v1"
     model: auto
@@ -9,11 +10,13 @@ backends:
     # No API key needed for local
 
   anthropic:
+    enabled: false
     type: anthropic
     model: "claude-sonnet-4-20250514"
     # API key via ANTHROPIC_API_KEY environment variable
 
   openai:
+    enabled: false
     type: openai
     base_url: "https://api.openai.com/v1"
     model: "gpt-4o"

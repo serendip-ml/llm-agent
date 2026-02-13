@@ -45,7 +45,7 @@ schedule:
 
 # Automated rating configuration
 rating:
-  conductors:
+  providers:
     - type: llm
       backend: !include '../llm.yaml#backends.local'
       enabled: true

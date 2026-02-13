@@ -100,9 +100,8 @@ class Factory:
         from .builtin.rating import RatingTrait
 
         rating_config = agent.config.get("rating")
-        # RatingTrait needs platform LLM config to create its own LLM client
-        llm_config = DotDict(self._platform.llm_config())
-        return RatingTrait(agent, rating_config, llm_config)
+        # RatingTrait uses LLMTrait for LLM access (no separate client needed)
+        return RatingTrait(agent, rating_config)
 
     def _create_storage(self, agent: Agent) -> Trait:
         """Route to create_storage_trait."""

@@ -282,7 +282,7 @@ class JokesterAgent(Agent):
             return
 
         try:
-            results = rating_trait.rate_fact_with_all_conductors(
+            results = rating_trait.rate_fact_with_all_providers(
                 fact_id=fact_id, content=joke_text, fact_type="solution"
             )
             # Log summary of ratings

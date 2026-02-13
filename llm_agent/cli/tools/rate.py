@@ -3,13 +3,24 @@
 import argparse
 import json
 from datetime import datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from appinfra import DotDict
 from appinfra.app.tools import Tool, ToolConfig
 from appinfra.db.pg import PG
 from llm_learn.core import Database
-from sqlalchemy import text
+
+from llm_agent.core.memory.rating import (
+    AtomicFactsBackend,
+    ConfigParser,
+    ProviderType,
+    Request,
+    Service,
+)
+
+
+if TYPE_CHECKING:
+    pass
 
 
 class RateTool(Tool):
@@ -19,10 +30,10 @@ class RateTool(Tool):
         config = ToolConfig(name="rate", help_text="Rate unrated content from agents for training")
         super().__init__(parent, config)
         self._db: Database | None = None
+        self._backend: AtomicFactsBackend | None = None
 
     def configure(self) -> None:
-        """Set up database connection."""
-        # Get database config from app config (learn.db)
+        """Set up database connection and backend."""
         if not hasattr(self.app, "config"):
             raise RuntimeError("App does not have config")
 
@@ -30,9 +41,10 @@ class RateTool(Tool):
         if db_config is None:
             raise RuntimeError("Database configuration not found in learn.db")
 
-        # Create database connection
+        # Create database connection and backend
         pg = PG(self.lg, db_config)
         self._db = Database(self.lg, pg)
+        self._backend = AtomicFactsBackend(self.lg, self._db)
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
@@ -135,6 +147,7 @@ class RateTool(Tool):
 
     def _continuous_mode(self, context_key: str) -> int:
         """Rate multiple items in continuous mode."""
+        assert self._backend is not None
         count = 0
         while True:
             fact = self._get_next_unrated(context_key)
@@ -159,7 +172,7 @@ class RateTool(Tool):
             signal, strength, stars = result
             stars_visual = self._format_stars(stars)
             print(f"{stars_visual} ", end="")
-            self._save_feedback(fact["id"], signal, strength)
+            self._save_manual_feedback(fact["id"], signal, strength, stars)
             count += 1
             print(f"✓ Saved ({count} rated)")
 
@@ -181,34 +194,8 @@ class RateTool(Tool):
         signal, strength, stars = result
         stars_visual = self._format_stars(stars)
         print(f"{stars_visual} ✓ Saved")
-        self._save_feedback(fact["id"], signal, strength)
+        self._save_manual_feedback(fact["id"], signal, strength, stars)
         return 0
-
-    def _build_unrated_query(self, context_key: str) -> tuple[str, dict[str, Any]]:
-        """Build SQL query for unrated facts with filters."""
-        query = """
-        SELECT af.id, af.type, af.category, af.source, af.content,
-               af.context_key, af.created_at
-        FROM atomic_facts af
-        LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
-        WHERE afd.id IS NULL
-          AND af.context_key LIKE :context_pattern ESCAPE '\\'
-        """
-
-        # Escape SQL LIKE wildcards to prevent unintended pattern matching
-        escaped = context_key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        params: dict[str, Any] = {"context_pattern": f"{escaped}%"}
-
-        if self.args.category:
-            query += " AND af.category = :category"
-            params["category"] = self.args.category
-
-        if self.args.type:
-            query += " AND af.type = :type"
-            params["type"] = self.args.type
-
-        query += " ORDER BY af.created_at ASC LIMIT 1"
-        return query, params
 
     def _get_next_unrated(self, context_key: str) -> dict[str, Any] | None:
         """Get next unrated fact matching filters.
@@ -219,35 +206,23 @@ class RateTool(Tool):
         Returns:
             dict with fact details or None if no unrated facts
         """
-        if self._db is None:
-            raise RuntimeError("Database not initialized")
-
-        query, params = self._build_unrated_query(context_key)
-
-        with self._db.session() as session:
-            result = session.execute(text(query), params)
-            row = result.fetchone()
-
-            if row is None:
-                return None
-
-            return {
-                "id": row[0],
-                "type": row[1],
-                "category": row[2],
-                "source": row[3],
-                "content": row[4],
-                "context_key": row[5],
-                "created_at": row[6],
-            }
+        assert self._backend is not None
+        for fact in self._backend.unrated_facts(
+            context_key,
+            fact_type=self.args.type,
+            category=self.args.category,
+            limit=1,
+        ):
+            return fact
+        return None
 
     def _display_fact(self, fact: dict[str, Any]) -> None:
         """Display fact in generic format."""
         print("\n" + "=" * 80)
         print(
-            f"Type: {fact['type']} | Category: {fact['category'] or 'N/A'} | Source: {fact['source']}"
+            f"Type: {fact['type']} | Category: {fact['category'] or 'N/A'} | "
+            f"Source: {fact['source']} | ID: {fact['id']}"
         )
-        print(f"Context: {fact['context_key']}")
 
         # Format datetime
         created_at = fact["created_at"]
@@ -339,7 +314,7 @@ class RateTool(Tool):
         return filled + empty
 
     def _auto_mode(self, context_key: str) -> int:
-        """Automated rating mode using LLM directly.
+        """Automated rating mode using LLM via Service.
 
         Args:
             context_key: Context key for filtering facts.
@@ -347,50 +322,13 @@ class RateTool(Tool):
         Returns:
             Exit code (0 = success).
         """
-        # Load agent config to get rating configuration
-        config = self._load_agent_config(self.args.agent_name)
-        if config is None:
-            print(f"Error: Agent config not found for '{self.args.agent_name}'")
+        assert self._backend is not None
+
+        # Load and validate rating config
+        result = self._load_rating_config()
+        if result is None:
             return 1
-
-        if "rating" not in config:
-            print(f"Error: No rating configuration found in {self.args.agent_name} config")
-            print("Add a 'rating:' section to the agent's YAML config")
-            return 1
-
-        # Create LLM client for rating (use global LLM config)
-        from llm_infer.client import Factory as LLMClientFactory
-
-        llm_config = self.app.config.get("llm", {})
-        llm_client = LLMClientFactory(self.lg).from_config(llm_config)
-
-        try:
-            return self._run_auto_rating_direct(config, llm_client, context_key)
-        finally:
-            llm_client.close()
-
-    def _run_auto_rating_direct(self, config: Any, llm_client: Any, context_key: str) -> int:
-        """Run automated rating using database and LLM directly.
-
-        Args:
-            config: Agent configuration.
-            llm_client: LLM client for rating.
-            context_key: Context key for filtering.
-
-        Returns:
-            Exit code (0 = success).
-        """
-        rating_config = config.get("rating", {})
-
-        # Get conductor and model
-        model = self._get_conductor_model(rating_config)
-        if not model:
-            return 1
-
-        # Get criteria configuration
-        criteria_config = self._get_criteria_config(rating_config)
-        if not criteria_config:
-            return 1
+        provider, criteria_config = result
 
         # Determine how many facts to rate
         to_rate = self._determine_rating_count(context_key)
@@ -398,89 +336,122 @@ class RateTool(Tool):
             print("No unrated facts found.")
             return 0
 
-        # Rate in batches
-        total_rated = self._rate_facts_batch(
-            llm_client, model, criteria_config, context_key, to_rate
-        )
+        # Create LLM client and run rating
+        return self._run_auto_rating(provider, criteria_config, context_key, to_rate)
 
-        print(f"\n✓ Rated {total_rated} items using automated LLM rating")
-        return 0
+    def _load_rating_config(self) -> tuple[Any, Any] | None:
+        """Load and validate rating configuration.
 
-    def _get_conductor_model(self, rating_config: dict[str, Any]) -> str | None:
-        """Extract model from first conductor configuration."""
-        conductors = rating_config.get("conductors", [])
-        if not conductors:
-            print("Error: No rating conductors configured")
+        Returns:
+            Tuple of (provider, criteria_config) or None on error.
+        """
+        config = self._load_agent_config(self.args.agent_name)
+        if config is None:
+            print(f"Error: Agent config not found for '{self.args.agent_name}'")
             return None
 
-        conductor = conductors[0]  # Use first conductor
-        backend_config = conductor.get("backend", {})
-        return cast(str, backend_config.get("model", "auto"))
+        if "rating" not in config:
+            print(f"Error: No rating configuration found in {self.args.agent_name} config")
+            print("Add a 'rating:' section to the agent's YAML config")
+            return None
 
-    def _get_criteria_config(self, rating_config: dict[str, Any]) -> dict[str, Any] | None:
-        """Get type-specific criteria configuration."""
+        # Parse rating config using ConfigParser
+        rating_config = config.get("rating", {})
+        parser = ConfigParser(self.lg)
+        providers = parser.parse_providers(rating_config.get("providers", []))
+        criteria_map = parser.parse_criteria(rating_config.get("models", {}))
+
+        # Validate we have what we need
+        enabled_providers = [p for p in providers if p.enabled]
+        if not enabled_providers:
+            print("Error: No enabled rating providers configured")
+            return None
+
         fact_type = self.args.type or "solution"
-        criteria_config = rating_config.get("models", {}).get("atomic", {}).get(fact_type)
-        if not criteria_config:
-            print(f"Error: No model configured for fact type: {fact_type}")
+        if fact_type not in criteria_map:
+            print(f"Error: No criteria configured for fact type: {fact_type}")
             return None
-        return cast(dict[str, Any], criteria_config)
+
+        return enabled_providers[0], criteria_map[fact_type]
+
+    def _run_auto_rating(
+        self, provider: Any, criteria_config: Any, context_key: str, to_rate: int
+    ) -> int:
+        """Create LLM client and run auto rating."""
+        from llm_infer.client import Factory as LLMClientFactory
+
+        llm_config = self.app.config.get("llm", {})
+        llm_client = LLMClientFactory(self.lg).from_config(llm_config)
+
+        try:
+            service = Service(self.lg, llm_client)
+            total_rated = self._rate_with_service(
+                service, provider, criteria_config, context_key, to_rate
+            )
+            print(f"\n✓ Rated {total_rated} items using automated LLM rating")
+            return 0
+        finally:
+            llm_client.close()
 
     def _determine_rating_count(self, context_key: str) -> int:
         """Determine how many facts to rate based on limit and available unrated facts."""
-        unrated_count = self._count_unrated(context_key)
+        assert self._backend is not None
+        unrated_count = self._backend.get_unrated_count(
+            context_key, fact_type=self.args.type, category=self.args.category
+        )
         if unrated_count == 0:
             return 0
 
-        limit = self.args.limit
+        limit: int = self.args.limit
         if limit == 0:
             print(f"Found {unrated_count} unrated facts. Rating all...")
             return unrated_count
         else:
             to_rate = min(limit, unrated_count)
             print(f"Found {unrated_count} unrated facts. Rating {to_rate}...")
-            return cast(int, to_rate)
+            return to_rate
 
-    def _count_unrated(self, context_key: str) -> int:
-        """Count unrated facts."""
-        query, params = self._build_unrated_query(context_key)
-        query_count = query.replace(
-            "SELECT af.id, af.type, af.category, af.source, af.content, af.created_at",
-            "SELECT COUNT(*)",
-        ).replace("LIMIT :limit", "")
-        params_count = {k: v for k, v in params.items() if k != "limit"}
-
-        assert self._db is not None
-        with self._db.session() as session:
-            result = session.execute(text(query_count), params_count)
-            return result.scalar() or 0
-
-    def _rate_facts_batch(
-        self, llm_client: Any, model: str, criteria_config: Any, context_key: str, to_rate: int
+    def _rate_with_service(
+        self,
+        service: Service,
+        provider: Any,
+        criteria_config: Any,
+        context_key: str,
+        to_rate: int,
     ) -> int:
-        """Rate facts in batches.
+        """Rate facts using Service and save with backend.
 
         Args:
-            llm_client: LLM client to use.
-            model: Model name.
-            criteria_config: Criteria configuration.
-            context_key: Context key.
-            to_rate: Number to rate.
+            service: Rating service instance.
+            provider: Provider configuration.
+            criteria_config: Criteria configuration for the fact type.
+            context_key: Context key for filtering.
+            to_rate: Number of facts to rate.
 
         Returns:
-            Total rated.
+            Total number of facts rated.
         """
+        assert self._backend is not None
         batch_size = 10
         total_rated = 0
         remaining = to_rate if self.args.limit > 0 else None
 
         while remaining is None or remaining > 0:
             batch_limit = batch_size if remaining is None else min(batch_size, remaining)
-            facts = self._get_unrated_facts_batch(context_key, batch_limit)
+            facts = list(
+                self._backend.unrated_facts(
+                    context_key,
+                    fact_type=self.args.type,
+                    category=self.args.category,
+                    limit=batch_limit,
+                )
+            )
             if not facts:
                 break
 
-            total_rated += self._rate_fact_list(llm_client, model, criteria_config, facts)
+            for fact in facts:
+                if self._rate_and_save_fact(service, provider, criteria_config, fact):
+                    total_rated += 1
 
             if remaining is not None:
                 remaining -= len(facts)
@@ -489,210 +460,63 @@ class RateTool(Tool):
 
         return total_rated
 
-    def _rate_fact_list(
-        self, llm_client: Any, model: str, criteria_config: Any, facts: list[dict[str, Any]]
-    ) -> int:
-        """Rate a list of facts and return count of successful ratings."""
-        count = 0
-        for fact in facts:
-            try:
-                rating, actual_model = self._rate_single_fact(
-                    llm_client, model, fact["content"], criteria_config
-                )
-                self._save_auto_rating(fact["id"], rating, actual_model)
-
-                stars_visual = self._format_stars(rating["stars"])
-                print(f"{stars_visual} Fact {fact['id']}: {fact['content']}")
-
-                count += 1
-            except Exception as e:
-                self.lg.warning(
-                    "rating failed",
-                    extra={"exception": e, "fact_id": fact["id"]},
-                )
-        return count
-
-    def _get_unrated_facts_batch(self, context_key: str, limit: int) -> list[dict[str, Any]]:
-        """Get batch of unrated facts."""
-        query, params = self._build_unrated_query(context_key)
-        params["limit"] = limit
-
-        assert self._db is not None
-        with self._db.session() as session:
-            result = session.execute(text(query), params)
-            rows = result.fetchall()
-            return [
-                {
-                    "id": row[0],
-                    "type": row[1],
-                    "category": row[2],
-                    "source": row[3],
-                    "content": row[4],
-                    "created_at": row[5],
-                }
-                for row in rows
-            ]
-
-    def _rate_single_fact(
-        self, llm_client: Any, model: str, content: str, criteria_config: Any
-    ) -> tuple[dict[str, Any], str]:
-        """Rate a single fact using LLM.
-
-        Returns:
-            Tuple of (rating dict, actual_model) where rating contains stars, criteria_scores, reasoning
-        """
-        criteria_list = criteria_config.get("criteria", [])
-        prompt = self._build_rating_prompt(content, criteria_config, criteria_list)
-
-        # Call LLM (use chat_full to get actual model name)
-        response = llm_client.chat_full(
-            messages=[{"role": "user", "content": prompt}],
-            model=model,
-            temperature=0.7,  # Higher temperature for more rating variance
-        )
-
-        # Parse response and return with actual model
-        rating = self._parse_rating_json(response.content, criteria_list)
-        actual_model = response.model or model
-        return rating, actual_model
-
-    def _build_rating_prompt(
-        self, content: str, criteria_config: Any, criteria_list: list[dict[str, Any]]
-    ) -> str:
-        """Build rating prompt from criteria config and content."""
-        prompt_template = criteria_config.get("prompt", "Rate the following:")
-        criteria_desc = "\n".join(
-            f"- {c['name']}: {c.get('description', '')} (weight: {c.get('weight', 1.0)})"
-            for c in criteria_list
-        )
-
-        rating_instructions = self._get_rating_instructions()
-        return f"{prompt_template}\n\nCriteria:\n{criteria_desc}\n\nContent to rate:\n{content}\n\n{rating_instructions}"
-
-    def _get_rating_instructions(self) -> str:
-        """Get standard rating instructions and JSON format."""
-        return """**Important:** Be critical and use the full rating scale (1-5). Most content should be 2-4 stars.
-Reserve 5 stars for truly exceptional content. Don't hesitate to give 1-2 stars for poor content.
-
-Rating scale:
-- 5 stars: Exceptional - truly outstanding, memorable
-- 4 stars: Good - above average, works well
-- 3 stars: Acceptable - meets basic expectations
-- 2 stars: Below expectations - significant flaws
-- 1 star: Poor - fails to meet criteria
-
-Provide your rating in JSON format:
-{
-  "stars": <1-5>,
-  "criteria_scores": {
-    "criterion_name": <0.0-1.0>,
-    ...
-  },
-  "reasoning": "<brief explanation>"
-}
-
-Respond only with the JSON, no additional text."""
-
-    def _parse_rating_json(
-        self, response: str, criteria_list: list[dict[str, Any]]
-    ) -> dict[str, Any]:
-        """Parse JSON rating from LLM response."""
+    def _rate_and_save_fact(
+        self, service: Service, provider: Any, criteria_config: Any, fact: dict[str, Any]
+    ) -> bool:
+        """Rate a single fact and save. Returns True on success."""
+        assert self._backend is not None
         try:
-            # Clean response (remove markdown code fences)
-            json_str = response.strip()
-            if json_str.startswith("```"):
-                lines = json_str.split("\n")
-                json_str = "\n".join(lines[1:-1])
-            if json_str.startswith("json"):
-                json_str = "\n".join(json_str.split("\n")[1:])
+            # Build request using Service's expected format
+            request = Request(
+                fact=fact["id"],
+                content=fact["content"],
+                prompt_template=criteria_config.prompt,
+                criteria=criteria_config.criteria,
+                model=provider.model,
+                provider=f"llm_{provider.model}",
+                temperature=0.3,
+            )
 
-            data = json.loads(json_str)
-            return {
-                "stars": data.get("stars", 3),
-                "criteria_scores": data.get("criteria_scores", {}),
-                "reasoning": data.get("reasoning", ""),
-            }
-        except json.JSONDecodeError:
-            # Fallback to neutral rating
-            return {
-                "stars": 3,
-                "criteria_scores": {c["name"]: 0.5 for c in criteria_list},
-                "reasoning": "Failed to parse rating",
-            }
+            # Rate using service
+            result = service.rate_content(request)
 
-    def _save_auto_rating(self, fact_id: int, rating: dict[str, Any], model: str) -> None:
-        """Save automated rating to database."""
-        from datetime import datetime
+            # Save using backend
+            self._backend.save_rating(result, source="cli_rate_tool")
 
-        stars = rating["stars"]
-        signal, strength = self._map_stars_to_signal(stars)
+            stars_visual = self._format_stars(result.stars)
+            print(f"{stars_visual} Fact {fact['id']}: {fact['content'][:60]}...")
+            return True
 
-        context = {
-            "source": "llm_rater",
-            "conductor_type": "llm",
-            "model": model,
-            "rating_type": "automated",
-            "stars": stars,
-            "criteria_scores": rating["criteria_scores"],
-            "reasoning": rating["reasoning"],
-            "timestamp": datetime.utcnow().isoformat(),
-        }
+        except Exception as e:
+            self.lg.warning(
+                "rating failed",
+                extra={"exception": e, "fact_id": fact["id"]},
+            )
+            return False
 
-        query = """
-        INSERT INTO atomic_feedback_details (fact_id, signal, strength, context)
-        VALUES (:fact_id, :signal, :strength, :context)
-        """
-        params = {
-            "fact_id": fact_id,
-            "signal": signal,
-            "strength": strength,
-            "context": json.dumps(context),
-        }
+    def _save_manual_feedback(self, fact_id: int, signal: str, strength: float, stars: int) -> None:
+        """Save manual feedback from user input.
 
-        assert self._db is not None
-        with self._db.session() as session:
-            session.execute(text(query), params)
-
-    def _map_stars_to_signal(self, stars: int) -> tuple[str, float]:
-        """Map star rating to signal and strength."""
-        signal_map = {
-            1: ("negative", 1.0),
-            2: ("negative", 0.5),
-            3: ("dismiss", 1.0),
-            4: ("positive", 0.5),
-            5: ("positive", 1.0),
-        }
-        return signal_map.get(stars, ("dismiss", 1.0))
-
-    def _save_feedback(self, fact_id: int, signal: str, strength: float) -> None:
-        """Save feedback to database.
+        Uses the Result model with ProviderType.MANUAL for consistency.
 
         Args:
-            fact_id: ID of the fact being rated
-            signal: "positive" or "negative"
-            strength: Confidence [0.0-1.0]
+            fact_id: ID of the fact being rated.
+            signal: "positive", "negative", or "dismiss".
+            strength: Confidence [0.0-1.0].
+            stars: Star rating (1-5).
         """
-        if self._db is None:
-            raise RuntimeError("Database not initialized")
+        assert self._backend is not None
+        from llm_agent.core.memory.rating import Result
 
-        # Insert feedback_details directly for the fact being rated
-        query = """
-        INSERT INTO atomic_feedback_details (fact_id, signal, strength, context)
-        VALUES (:fact_id, :signal, :strength, :context)
-        """
-
-        context = {
-            "source": "cli_rate_tool",
-            "rating_type": "hybrid",
-        }
-
-        params = {
-            "fact_id": fact_id,
-            "signal": signal,
-            "strength": strength,
-            "context": json.dumps(context),
-        }
-
-        assert self._db is not None
-        with self._db.session() as session:
-            session.execute(text(query), params)
+        result = Result(
+            fact=fact_id,
+            signal=signal,  # type: ignore[arg-type]
+            strength=strength,
+            stars=stars,
+            criteria_scores={},
+            reasoning="Manual rating via CLI",
+            provider_type=ProviderType.MANUAL,
+            model=None,
+            provider="cli_rate_tool",
+        )
+        self._backend.save_rating(result, source="cli_rate_tool")
