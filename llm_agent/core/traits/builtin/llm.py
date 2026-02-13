@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from llm_infer.client import ChatResponse, LLMRouter
@@ -135,11 +136,11 @@ class LLMTrait(BaseTrait):
         return self._router
 
     @property
-    def models(self) -> dict[str, str]:
+    def models(self) -> Mapping[str, str]:
         """Model-to-backend routing table.
 
         Returns:
-            Dict mapping model IDs to backend names.
+            Mapping of model IDs to backend names.
         """
         return self.router.models
 
