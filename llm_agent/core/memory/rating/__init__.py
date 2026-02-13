@@ -2,7 +2,15 @@
 
 from .backends import AtomicFactsBackend
 from .config import ConfigParser
-from .models import Criteria, CriteriaConfig, ProviderConfig, ProviderType, Request, Result
+from .models import (
+    Criteria,
+    CriteriaConfig,
+    PairingConfig,
+    ProviderConfig,
+    ProviderType,
+    Request,
+    Result,
+)
 from .service import Service, stars_to_signal
 
 
@@ -11,6 +19,7 @@ __all__ = [
     "Criteria",
     "CriteriaConfig",
     "ConfigParser",
+    "PairingConfig",
     "ProviderConfig",
     "Request",
     "Result",

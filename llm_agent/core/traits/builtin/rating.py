@@ -10,6 +10,7 @@ from llm_agent.core.memory.rating import (
     AtomicFactsBackend,
     ConfigParser,
     CriteriaConfig,
+    PairingConfig,
     ProviderConfig,
     ProviderType,
 )
@@ -22,6 +23,8 @@ from ..base import BaseTrait
 
 if TYPE_CHECKING:
     from llm_agent.core.agent import Agent
+
+    from .learn import LearnTrait
 
 
 # Type alias for Rating configuration
@@ -36,17 +39,26 @@ Expected fields:
     models: Type-specific criteria and prompts
         atomic: Criteria for atomic facts
             solution: Prompt and criteria for solution facts
+    pairing: Preference pairing configuration for DPO training
+        - enabled: Enable automatic preference pairing (default: True)
+        - high_threshold: Minimum stars for "chosen" content (default: 4)
+        - low_threshold: Maximum stars for "rejected" content (default: 2)
+        - prompt: Context prompt for preference pairs (can use {category})
     batch_size: Number of items to rate per batch (default: 10)
     auto: Skip confirmation prompts (default: False)
 """
 
 
 class RatingTrait(BaseTrait):
-    """Automated LLM-based content rating trait.
+    """Automated LLM-based content rating trait with DPO preference pairing.
 
     Provides automated rating capabilities using LLM backends to evaluate
     agent-generated content. Stores ratings in atomic_feedback_details with
     source tracking for multi-rater scenarios.
+
+    **Preference Pairing:** When a rating qualifies (4+ stars or 2- stars),
+    the trait automatically looks for an unpaired opposite in the same category
+    and creates a preference pair for DPO (Direct Preference Optimization) training.
 
     **IMPORTANT:** RatingTrait depends on LearnTrait. LearnTrait must be attached
     to the agent BEFORE RatingTrait.
@@ -54,13 +66,15 @@ class RatingTrait(BaseTrait):
     Capabilities:
         - rate_unrated(): Find and rate unrated content automatically
         - rate_fact(): Rate a specific fact by ID
+        - rate_fact_with_all_providers(): Rate with all providers (for inline rating)
         - get_unrated_count(): Count unrated facts
         - Multi-provider support: Use multiple LLMs for rating comparison
+        - Automatic preference pairing for DPO training
 
     Example:
         from llm_agent.core.traits import RatingTrait, LearnTrait
 
-        # Configure rating
+        # Configure rating with pairing
         rating_config = RatingConfig(
             providers=[{
                 "type": "llm",
@@ -78,6 +92,12 @@ class RatingTrait(BaseTrait):
                     }
                 }
             },
+            pairing={
+                "enabled": True,
+                "high_threshold": 4,
+                "low_threshold": 2,
+                "prompt": "Tell me a {category}."
+            },
             batch_size=10,
             auto=True
         )
@@ -87,8 +107,10 @@ class RatingTrait(BaseTrait):
         agent.add_trait(RatingTrait(agent, rating_config))
         agent.start()
 
-        # Rate unrated content
-        results = agent.get_trait(RatingTrait).rate_unrated(limit=10)
+        # Rate content with automatic preference pairing
+        results = agent.get_trait(RatingTrait).rate_fact_with_all_providers(
+            fact_id=123, content="Why did the...", category="joke"
+        )
 
     Lifecycle:
         - on_start(): Initialize rating providers and validate configuration
@@ -112,6 +134,7 @@ class RatingTrait(BaseTrait):
         self._criteria: dict[str, CriteriaConfig] = {}  # fact_type -> CriteriaConfig
         self._service: RatingService | None = None
         self._backend: AtomicFactsBackend | None = None
+        self._pairing: PairingConfig | None = None
 
     def on_start(self) -> None:
         """Initialize rating service and backend.
@@ -130,10 +153,11 @@ class RatingTrait(BaseTrait):
         self._service = RatingService(self.agent.lg, llm_trait.router)
         self._backend = AtomicFactsBackend(self.agent.lg, learn_trait.learn.database)
 
-        # Parse provider and criteria configurations
+        # Parse provider, criteria, and pairing configurations
         parser = ConfigParser(self.agent.lg)
         self._providers = parser.parse_providers(self.config.get("providers", []))
         self._criteria = parser.parse_criteria(self.config.get("models", {}))
+        self._pairing = parser.parse_pairing(self.config.get("pairing"))
 
         self.agent.lg.debug(
             "rating trait started",
@@ -142,6 +166,7 @@ class RatingTrait(BaseTrait):
                 "enabled": sum(1 for p in self._providers if p.enabled),
                 "types": list(self._criteria.keys()),
                 "auto": self.config.get("auto", False),
+                "pairing_enabled": self._pairing.enabled if self._pairing else False,
             },
         )
 
@@ -151,6 +176,7 @@ class RatingTrait(BaseTrait):
         self._criteria = {}
         self._service = None
         self._backend = None
+        self._pairing = None
         self.agent.lg.debug("rating trait stopped")
 
     # =========================================================================
@@ -217,10 +243,16 @@ class RatingTrait(BaseTrait):
         return results
 
     def _try_rate_fact(self, fact: dict[str, Any], provider: ProviderConfig) -> RatingResult | None:
-        """Attempt to rate a single fact, logging failures."""
+        """Attempt to rate a single fact, save, and try pairing."""
         try:
             result = self.rate_fact(fact["id"], fact["content"], fact["type"], provider)
             self._save_rating(result)
+
+            # Try to create preference pair for DPO training
+            self._try_create_preference_pair(
+                fact["id"], fact["content"], fact.get("category"), result.stars
+            )
+
             return result
         except Exception as e:
             self.agent.lg.warning(
@@ -276,17 +308,24 @@ class RatingTrait(BaseTrait):
         return self._service.rate_content(request)
 
     def rate_fact_with_all_providers(
-        self, fact_id: int, content: str, fact_type: str = "solution"
+        self,
+        fact_id: int,
+        content: str,
+        fact_type: str = "solution",
+        category: str | None = None,
     ) -> list[RatingResult]:
         """Rate a fact with all enabled providers and save ratings.
 
         This is the primary method for agents to use for inline rating.
         Rates the content with each enabled LLM provider and saves all ratings.
+        If pairing is enabled and the rating qualifies (4+ or 2- stars),
+        attempts to create a preference pair for DPO training.
 
         Args:
             fact_id: ID of the fact to rate.
             content: Content to rate (e.g., joke text).
             fact_type: Type of fact (default: "solution").
+            category: Category for preference pairing (e.g., "joke").
 
         Returns:
             List of rating results from each provider.
@@ -302,16 +341,23 @@ class RatingTrait(BaseTrait):
         ]
 
         for provider in enabled_providers:
-            result = self._rate_and_save_with_provider(fact_id, content, fact_type, provider)
+            result = self._rate_and_save_with_provider(
+                fact_id, content, fact_type, category, provider
+            )
             if result:
                 results.append(result)
 
         return results
 
     def _rate_and_save_with_provider(
-        self, fact_id: int, content: str, fact_type: str, provider: ProviderConfig
+        self,
+        fact_id: int,
+        content: str,
+        fact_type: str,
+        category: str | None,
+        provider: ProviderConfig,
     ) -> RatingResult | None:
-        """Rate a fact with a single provider and save the result."""
+        """Rate a fact with a single provider, save, and attempt pairing."""
         try:
             # Rate with this provider
             result = self.rate_fact(fact_id, content, fact_type, provider)
@@ -327,6 +373,9 @@ class RatingTrait(BaseTrait):
                     "stars": result.stars,
                 },
             )
+
+            # Try to create preference pair for DPO training
+            self._try_create_preference_pair(fact_id, content, category, result.stars)
 
             return result
 
@@ -372,3 +421,155 @@ class RatingTrait(BaseTrait):
             raise RuntimeError("Rating backend not initialized - call on_start() first")
 
         self._backend.save_rating(result=result, source="llm_rater")
+
+    # =========================================================================
+    # Preference pairing for DPO training
+    # =========================================================================
+
+    def _try_create_preference_pair(
+        self,
+        fact_id: int,
+        content: str,
+        category: str | None,
+        stars: int,
+    ) -> int | None:
+        """Try to create a preference pair if this rating qualifies.
+
+        Called after saving a rating. If the rating is 4+ stars (high) or 2- stars (low),
+        looks for an unpaired opposite in the same category and creates a preference pair.
+
+        Args:
+            fact_id: ID of the just-rated fact.
+            content: Content of the fact.
+            category: Category of the fact (e.g., "joke").
+            stars: Star rating (1-5).
+
+        Returns:
+            Preference ID if a pair was created, None otherwise.
+        """
+        if not self._should_attempt_pairing(category, stars):
+            return None
+
+        return self._find_and_create_pair(fact_id, content, category, stars)
+
+    def _should_attempt_pairing(self, category: str | None, stars: int) -> bool:
+        """Check if pairing should be attempted for this rating."""
+        if not self._pairing or not self._pairing.enabled:
+            return False
+
+        if not category:
+            self.agent.lg.debug("skipping pairing - no category")
+            return False
+
+        if not self._backend:
+            return False
+
+        is_high = stars >= self._pairing.high_threshold
+        is_low = stars <= self._pairing.low_threshold
+
+        if not is_high and not is_low:
+            self.agent.lg.debug(
+                "skipping pairing - stars in neutral range",
+                extra={"stars": stars, "high": self._pairing.high_threshold, "low": self._pairing.low_threshold},
+            )
+            return False
+
+        return True
+
+    def _find_and_create_pair(
+        self, fact_id: int, content: str, category: str | None, stars: int
+    ) -> int | None:
+        """Find an opposite-rated fact and create preference pair."""
+        from .learn import LearnTrait
+
+        assert self._pairing is not None
+        assert self._backend is not None
+        assert category is not None
+
+        learn_trait = self.agent.require_trait(LearnTrait)
+        context_key = str(learn_trait.learn.context.context_key)
+
+        # Determine if this is a high or low rating and find opposite
+        is_high = stars >= self._pairing.high_threshold
+
+        if is_high:
+            # This is chosen, look for rejected (low stars)
+            opposites = self._backend.get_rated_unpaired_facts(
+                context_key=context_key,
+                category=category,
+                min_stars=1,
+                max_stars=self._pairing.low_threshold,
+                exclude_fact_id=fact_id,
+                limit=1,
+            )
+        else:
+            # This is rejected, look for chosen (high stars)
+            opposites = self._backend.get_rated_unpaired_facts(
+                context_key=context_key,
+                category=category,
+                min_stars=self._pairing.high_threshold,
+                max_stars=5,
+                exclude_fact_id=fact_id,
+                limit=1,
+            )
+
+        if not opposites:
+            self.agent.lg.debug(
+                "no unpaired opposite found for pairing",
+                extra={"fact_id": fact_id, "category": category, "is_high": is_high},
+            )
+            return None
+
+        opposite = opposites[0]
+        return self._create_preference_pair(
+            fact_id, content, stars, opposite, category, is_high, learn_trait
+        )
+
+    def _create_preference_pair(
+        self,
+        fact_id: int,
+        content: str,
+        stars: int,
+        opposite: dict[str, Any],
+        category: str,
+        is_high: bool,
+        learn_trait: LearnTrait,
+    ) -> int:
+        """Create preference pair and mark facts as paired."""
+        assert self._backend is not None
+        assert self._pairing is not None
+
+        # Determine chosen/rejected based on which one is high-rated
+        if is_high:
+            chosen_content = content
+            rejected_content = opposite["content"]
+        else:
+            chosen_content = opposite["content"]
+            rejected_content = content
+
+        # Build context prompt (can include category placeholder)
+        context_prompt = self._pairing.prompt.format(category=category)
+
+        # Create preference pair via LearnTrait
+        preference_id = learn_trait.record_preference(
+            context=context_prompt,
+            chosen=chosen_content,
+            rejected=rejected_content,
+        )
+
+        # Mark both facts as paired
+        self._backend.mark_facts_paired(fact_id, opposite["id"], preference_id)
+
+        self.agent.lg.info(
+            "created preference pair for DPO training",
+            extra={
+                "preference_id": preference_id,
+                "chosen_fact_id": fact_id if is_high else opposite["id"],
+                "chosen_stars": stars if is_high else opposite["stars"],
+                "rejected_fact_id": opposite["id"] if is_high else fact_id,
+                "rejected_stars": opposite["stars"] if is_high else stars,
+                "category": category,
+            },
+        )
+
+        return preference_id

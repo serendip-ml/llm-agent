@@ -116,6 +116,13 @@ rating:
             weight: 0.2
   batch_size: 5
   auto: true
+  # Preference pairing for DPO training
+  # When a joke gets 4+ or 2- stars, pair it with an opposite-rated joke
+  pairing:
+    enabled: true
+    high_threshold: 4  # 4+ stars = "chosen"
+    low_threshold: 2   # 2- stars = "rejected"
+    prompt: "Tell me a {category}."  # Context prompt for preference pairs
 
 # No tools needed - programmatic agent uses LearnTrait/LLMTrait directly
 # No conversation config - not using conversation runner
