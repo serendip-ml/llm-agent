@@ -13,6 +13,8 @@ from .builtin import (
     LLMConfig,
     LLMTrait,
     MethodTrait,
+    RatingConfig,
+    RatingTrait,
     SAIAConfig,
     SAIATrait,
     StorageTrait,
@@ -33,6 +35,7 @@ class TraitName(StrEnum):
     LLM = "llm"
     LEARN = "learn"
     HTTP = "http"
+    RATING = "rating"
     SAIA = "saia"
     STORAGE = "storage"
     TOOLS = "tools"
@@ -45,6 +48,7 @@ ALL_TRAITS: list[TraitName] = [
     TraitName.LLM,
     TraitName.LEARN,
     TraitName.HTTP,
+    TraitName.RATING,
     TraitName.SAIA,
     TraitName.STORAGE,
     TraitName.TOOLS,
@@ -75,6 +79,9 @@ __all__ = [
     # LLM
     "LLMConfig",
     "LLMTrait",
+    # Rating
+    "RatingConfig",
+    "RatingTrait",
     # SAIA
     "SAIAConfig",
     "SAIATrait",

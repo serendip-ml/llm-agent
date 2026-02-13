@@ -122,3 +122,27 @@ class JSONCleaner:
                     stack.pop()
 
         return stack
+
+    def extract_first_object(self, content: str) -> str:
+        """Extract only the first JSON object from content.
+
+        LLMs sometimes return multiple JSON objects. This extracts just the first one.
+
+        Args:
+            content: String potentially containing multiple JSON objects.
+
+        Returns:
+            String containing only the first JSON object.
+        """
+        cleaned = self.clean(content)
+        if not cleaned:
+            return cleaned
+
+        # Use raw_decode to extract just the first JSON object
+        try:
+            decoder = json.JSONDecoder()
+            _, end_idx = decoder.raw_decode(cleaned)
+            return cleaned[:end_idx]
+        except json.JSONDecodeError:
+            # If parsing fails, return the cleaned content for downstream error handling
+            return cleaned

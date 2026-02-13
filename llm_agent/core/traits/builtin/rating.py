@@ -1,0 +1,374 @@
+"""Rating trait for automated LLM-based content rating."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from appinfra import DotDict
+
+from llm_agent.core.memory.rating import (
+    AtomicFactsBackend,
+    ConfigParser,
+    CriteriaConfig,
+    ProviderConfig,
+    ProviderType,
+)
+from llm_agent.core.memory.rating import Request as RatingRequest
+from llm_agent.core.memory.rating import Result as RatingResult
+from llm_agent.core.memory.rating import Service as RatingService
+
+from ..base import BaseTrait
+
+
+if TYPE_CHECKING:
+    from llm_agent.core.agent import Agent
+
+
+# Type alias for Rating configuration
+RatingConfig = DotDict
+"""Rating configuration as DotDict.
+
+Expected fields:
+    providers: List of rating provider configurations
+        - type: Provider type ("llm" or "manual")
+        - backend: LLM backend configuration
+        - enabled: Whether this provider is enabled (default: True)
+    models: Type-specific criteria and prompts
+        atomic: Criteria for atomic facts
+            solution: Prompt and criteria for solution facts
+    batch_size: Number of items to rate per batch (default: 10)
+    auto: Skip confirmation prompts (default: False)
+"""
+
+
+class RatingTrait(BaseTrait):
+    """Automated LLM-based content rating trait.
+
+    Provides automated rating capabilities using LLM backends to evaluate
+    agent-generated content. Stores ratings in atomic_feedback_details with
+    source tracking for multi-rater scenarios.
+
+    **IMPORTANT:** RatingTrait depends on LearnTrait. LearnTrait must be attached
+    to the agent BEFORE RatingTrait.
+
+    Capabilities:
+        - rate_unrated(): Find and rate unrated content automatically
+        - rate_fact(): Rate a specific fact by ID
+        - get_unrated_count(): Count unrated facts
+        - Multi-provider support: Use multiple LLMs for rating comparison
+
+    Example:
+        from llm_agent.core.traits import RatingTrait, LearnTrait
+
+        # Configure rating
+        rating_config = RatingConfig(
+            providers=[{
+                "type": "llm",
+                "backend": {"model": "claude-sonnet-4.5", ...},
+                "enabled": True
+            }],
+            models={
+                "atomic": {
+                    "solution": {
+                        "prompt": "Rate this joke...",
+                        "criteria": [
+                            {"name": "humor", "description": "Is it funny?"},
+                            {"name": "originality", "description": "Is it original?"}
+                        ]
+                    }
+                }
+            },
+            batch_size=10,
+            auto=True
+        )
+
+        # Attach traits
+        agent.add_trait(LearnTrait(agent, learn_config))
+        agent.add_trait(RatingTrait(agent, rating_config))
+        agent.start()
+
+        # Rate unrated content
+        results = agent.get_trait(RatingTrait).rate_unrated(limit=10)
+
+    Lifecycle:
+        - on_start(): Initialize rating providers and validate configuration
+        - on_stop(): Cleanup resources
+    """
+
+    def __init__(
+        self,
+        agent: Agent,
+        config: RatingConfig | None = None,
+    ) -> None:
+        """Initialize rating trait.
+
+        Args:
+            agent: The agent this trait belongs to.
+            config: Rating configuration (None = use defaults).
+        """
+        super().__init__(agent)
+        self.config = config or RatingConfig()
+        self._providers: list[ProviderConfig] = []
+        self._criteria: dict[str, CriteriaConfig] = {}  # fact_type -> CriteriaConfig
+        self._service: RatingService | None = None
+        self._backend: AtomicFactsBackend | None = None
+
+    def on_start(self) -> None:
+        """Initialize rating service and backend.
+
+        Raises:
+            TraitNotFoundError: If LearnTrait or LLMTrait are not attached.
+        """
+        from .learn import LearnTrait
+        from .llm import LLMTrait
+
+        # Require dependencies
+        learn_trait = self.agent.require_trait(LearnTrait)
+        llm_trait = self.agent.require_trait(LLMTrait)
+
+        # Initialize rating service and backend
+        self._service = RatingService(self.agent.lg, llm_trait.client)
+        self._backend = AtomicFactsBackend(self.agent.lg, learn_trait.learn.database)
+
+        # Parse provider and criteria configurations
+        parser = ConfigParser(self.agent.lg)
+        self._providers = parser.parse_providers(self.config.get("providers", []))
+        self._criteria = parser.parse_criteria(self.config.get("models", {}))
+
+        self.agent.lg.debug(
+            "rating trait started",
+            extra={
+                "providers": len(self._providers),
+                "enabled": sum(1 for p in self._providers if p.enabled),
+                "types": list(self._criteria.keys()),
+                "auto": self.config.get("auto", False),
+            },
+        )
+
+    def on_stop(self) -> None:
+        """Clean up rating resources."""
+        self._providers = []
+        self._criteria = {}
+        self._service = None
+        self._backend = None
+        self.agent.lg.debug("rating trait stopped")
+
+    # =========================================================================
+    # Rating operations
+    # =========================================================================
+
+    def get_unrated_count(
+        self,
+        fact_type: str | None = None,
+        category: str | None = None,
+    ) -> int:
+        """Count unrated facts.
+
+        Args:
+            fact_type: Filter by fact type (e.g., "solution").
+            category: Filter by category (e.g., "joke").
+
+        Returns:
+            Number of unrated facts matching filters.
+        """
+        from .learn import LearnTrait
+
+        if not self._backend:
+            raise RuntimeError("Rating backend not initialized - call on_start() first")
+
+        learn_trait = self.agent.require_trait(LearnTrait)
+        context_key = str(learn_trait.learn.context.context_key)
+
+        return self._backend.get_unrated_count(context_key, fact_type, category)
+
+    def rate_unrated(
+        self,
+        limit: int = 10,
+        fact_type: str | None = None,
+        category: str | None = None,
+        provider_index: int = 0,
+    ) -> list[RatingResult]:
+        """Rate unrated facts automatically using configured providers.
+
+        Args:
+            limit: Maximum number of facts to rate.
+            fact_type: Filter by fact type (e.g., "solution").
+            category: Filter by category (e.g., "joke").
+            provider_index: Index of provider to use (default: 0 = first enabled).
+
+        Returns:
+            List of rating results.
+        """
+        from .learn import LearnTrait
+
+        if not self._backend:
+            raise RuntimeError("Rating backend not initialized - call on_start() first")
+
+        provider = self._select_provider(provider_index)
+        learn_trait = self.agent.require_trait(LearnTrait)
+        context_key = str(learn_trait.learn.context.context_key)
+
+        results = []
+        for fact in self._backend.unrated_facts(context_key, fact_type, category, limit):
+            result = self._try_rate_fact(fact, provider)
+            if result:
+                results.append(result)
+
+        return results
+
+    def _try_rate_fact(self, fact: dict[str, Any], provider: ProviderConfig) -> RatingResult | None:
+        """Attempt to rate a single fact, logging failures."""
+        try:
+            result = self.rate_fact(fact["id"], fact["content"], fact["type"], provider)
+            self._save_rating(result)
+            return result
+        except Exception as e:
+            self.agent.lg.warning(
+                "rating failed",
+                extra={
+                    "exception": e,
+                    "fact_id": fact["id"],
+                    "fact_type": fact["type"],
+                    "provider_type": provider.provider_type,
+                },
+            )
+            return None
+
+    def rate_fact(
+        self,
+        fact_id: int,
+        content: str,
+        fact_type: str,
+        provider: ProviderConfig,
+    ) -> RatingResult:
+        """Rate a specific fact using an LLM provider.
+
+        Args:
+            fact_id: ID of the fact to rate.
+            content: Content to rate.
+            fact_type: Type of fact (e.g., "solution", "prediction").
+            provider: Rating provider to use.
+
+        Returns:
+            Rating result with scores and reasoning.
+        """
+        if not self._service:
+            raise RuntimeError("Rating service not initialized - call on_start() first")
+
+        # Get type-specific criteria
+        type_criteria = self._criteria.get(fact_type)
+        if not type_criteria:
+            raise ValueError(f"No criteria configured for fact type: {fact_type}")
+
+        # Use rating service to rate content
+        # Build unique provider identifier (handles model="auto" case)
+        backend_type = provider.backend.get("type", "unknown")
+        provider_id = f"llm_{provider.model}_{backend_type}"
+        request = RatingRequest(
+            fact=fact_id,
+            content=content,
+            prompt_template=type_criteria.prompt,
+            criteria=type_criteria.criteria,
+            model=provider.model,
+            provider=provider_id,
+            temperature=0.3,
+        )
+        return self._service.rate_content(request)
+
+    def rate_fact_with_all_providers(
+        self, fact_id: int, content: str, fact_type: str = "solution"
+    ) -> list[RatingResult]:
+        """Rate a fact with all enabled providers and save ratings.
+
+        This is the primary method for agents to use for inline rating.
+        Rates the content with each enabled LLM provider and saves all ratings.
+
+        Args:
+            fact_id: ID of the fact to rate.
+            content: Content to rate (e.g., joke text).
+            fact_type: Type of fact (default: "solution").
+
+        Returns:
+            List of rating results from each provider.
+        """
+        from .llm import LLMTrait
+
+        # Verify LLMTrait is available
+        self.agent.require_trait(LLMTrait)
+
+        results = []
+        enabled_providers = [
+            p for p in self._providers if p.enabled and p.provider_type == ProviderType.LLM
+        ]
+
+        for provider in enabled_providers:
+            result = self._rate_and_save_with_provider(fact_id, content, fact_type, provider)
+            if result:
+                results.append(result)
+
+        return results
+
+    def _rate_and_save_with_provider(
+        self, fact_id: int, content: str, fact_type: str, provider: ProviderConfig
+    ) -> RatingResult | None:
+        """Rate a fact with a single provider and save the result."""
+        try:
+            # Rate with this provider
+            result = self.rate_fact(fact_id, content, fact_type, provider)
+
+            # Save rating to database
+            self._save_rating(result)
+
+            self.agent.lg.debug(
+                "rated fact with provider",
+                extra={
+                    "fact_id": fact_id,
+                    "provider_model": provider.model,
+                    "stars": result.stars,
+                },
+            )
+
+            return result
+
+        except Exception as e:
+            self.agent.lg.warning(
+                "rating failed for provider",
+                extra={
+                    "exception": e,
+                    "fact_id": fact_id,
+                    "provider_type": provider.provider_type,
+                },
+            )
+            return None
+
+    def _select_provider(self, index: int = 0) -> ProviderConfig:
+        """Select rating provider by index.
+
+        Args:
+            index: Index of enabled provider to use (default: 0).
+
+        Returns:
+            Selected provider.
+
+        Raises:
+            RuntimeError: If no enabled providers configured.
+            IndexError: If index out of range.
+        """
+        enabled_providers = [p for p in self._providers if p.enabled]
+
+        if not enabled_providers:
+            raise RuntimeError("No enabled rating providers configured")
+
+        if index >= len(enabled_providers):
+            raise IndexError(
+                f"Provider index {index} out of range (have {len(enabled_providers)} enabled)"
+            )
+
+        return enabled_providers[index]
+
+    def _save_rating(self, result: RatingResult) -> None:
+        """Save rating using backend."""
+        if not self._backend:
+            raise RuntimeError("Rating backend not initialized - call on_start() first")
+
+        self._backend.save_rating(result=result, source="llm_rater")

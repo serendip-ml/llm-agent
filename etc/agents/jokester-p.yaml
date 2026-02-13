@@ -43,6 +43,80 @@ task:
 schedule:
   interval: 43200  # Every 12 hours (override: INFRA_AGENTS_JOKESTER_P_SCHEDULE_INTERVAL=60)
 
+# Automated rating configuration
+rating:
+  providers:
+    - type: llm
+      backend: !include '../llm.yaml#backends.local'
+      enabled: true
+  models:
+    atomic:
+      solution:
+        prompt: |
+          You are a HARSH comedy critic. Most amateur jokes are weak (2 stars) or mediocre (3 stars).
+          Use the FULL 1-5 scale. Don't be generous.
+
+          EXPECTED DISTRIBUTION:
+          - Most jokes should be 2-3 stars (weak to mediocre)
+          - Only ~20% should get 4 stars (genuinely funny)
+          - Only ~5% should get 5 stars (exceptional)
+          - Bad jokes get 1 star (don't be afraid to use it)
+
+          RATING SCALE (use ALL levels):
+
+          1 star ★☆☆☆☆ - FAILS AS A JOKE
+          - No clear punchline, doesn't make logical sense
+          - Just a random observation with no humor
+          - Completely unfunny, confusing, or broken
+
+          2 stars ★★☆☆☆ - WEAK (most amateur jokes land here)
+          - Obvious pun everyone has heard ("anti-gravity book is impossible to put down")
+          - Tired cliché or predictable setup ("why did the chicken cross the road")
+          - Forced wordplay that doesn't quite work ("magnet on forehead draws you to fridge")
+          - Just describing something absurd without a real punchline
+          - You see what they tried to do, but it's not funny
+
+          3 stars ★★★☆☆ - MEDIOCRE (acceptable but forgettable)
+          - Clear punchline, mildly amusing, but nothing special
+          - "I told my wife her eyebrows were too high. She looked surprised."
+          - Works as a joke, but won't make anyone actually laugh
+          - Competent execution of an unremarkable idea
+
+          4 stars ★★★★☆ - GOOD (genuinely funny, reserve for quality)
+          - Makes you actually smile or chuckle, not just "I get it"
+          - "I have a fear of speed bumps, but I'm slowly getting over it."
+          - Original concept with clever execution
+          - Unexpected twist or multiple meanings that land well
+          - You'd remember this joke and maybe tell it to someone
+
+          5 stars ★★★★★ - EXCELLENT (rare, professional-level)
+          - Laugh-out-loud funny, genuinely surprised by the punchline
+          - Clever on multiple levels, quotable, memorable
+          - Quality you'd expect from a professional comedian's best material
+          - You'd seek out more jokes from this source
+
+          CRITICAL RULES:
+          1. If you wouldn't actually laugh or smile, it's NOT 4+ stars
+          2. Obvious puns and tired setups are 2 stars maximum
+          3. "Mildly amusing" = 3 stars at most
+          4. Use 1 star for jokes that fail completely
+          5. Use 5 stars for jokes that are genuinely exceptional (they exist!)
+          6. When in doubt between two ratings, pick the LOWER one
+
+          Don't inflate scores. Be brutally honest about what's actually funny vs. what's just "attempting humor".
+        criteria:
+          - name: humor
+            description: "Does it make you genuinely laugh or smile? Not just 'I see what you did there'"
+            weight: 1.0
+          - name: originality
+            description: "Is the concept fresh? Penalize heavily for clichés, common pun formats, tired setups"
+            weight: 0.9
+          - name: appropriateness
+            description: "Binary check: If offensive/problematic, set to 0.0. Otherwise 1.0 (don't reward for being safe)"
+            weight: 0.2
+  batch_size: 5
+  auto: true
+
 # No tools needed - programmatic agent uses LearnTrait/LLMTrait directly
 # No conversation config - not using conversation runner
 # No events - programmatic agent handles logic directly

@@ -122,7 +122,8 @@ class AgentConfigYAML(BaseModel):
     events: dict[str, EventHandlerConfig] = {}
     """Event handlers keyed by event name (schedule, question)."""
 
-    model_config = {"populate_by_name": True}
+    # Allow extra fields (rating, max_retries, etc.) to pass through from YAML
+    model_config = {"populate_by_name": True, "extra": "allow"}
 
 
 class AgentServerConfig(BaseModel):

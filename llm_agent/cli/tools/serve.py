@@ -504,6 +504,11 @@ class ServeTool(Tool):
         # Common optional fields
         self._add_optional_fields(config_dict, agent_config)
 
+        # Add extra fields from YAML (rating, max_retries, similarity_threshold, etc.)
+        # These are fields not explicitly defined in AgentConfigYAML schema
+        if hasattr(agent_config, "__pydantic_extra__") and agent_config.__pydantic_extra__:
+            config_dict.update(agent_config.__pydantic_extra__)
+
         return config_dict
 
     def _add_type_specific_fields(self, config_dict: DotDict, agent_config: Any) -> None:
