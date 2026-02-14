@@ -9,7 +9,7 @@ factory: Factory
 identity:
   name: "jokester-p"
 
-max_retries: 10
+max_retries: 0
 similarity_threshold: 0.85
 
 denylist:

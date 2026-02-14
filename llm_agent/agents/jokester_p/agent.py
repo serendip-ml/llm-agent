@@ -10,11 +10,13 @@ which cannot be reliably enforced through prompts alone due to context window li
 
 from __future__ import annotations
 
+import time
 from collections import deque
 from typing import Any
 
 from appinfra import DotDict
 from appinfra.log import Logger
+from appinfra.time import since
 from llm_infer.client.exceptions import BackendUnavailableError
 
 from ...core.agent import Agent, ExecutionResult
@@ -61,6 +63,7 @@ class JokesterAgent(Agent):
         self._storage: Storage | None = None
         self._generator: JokeGenerator | None = None
         self._rater: InlineRater | None = None
+        self._last_joke_time: float = time.monotonic()
 
     def start(self) -> None:
         """Start agent and traits."""
@@ -156,6 +159,7 @@ class JokesterAgent(Agent):
         self._recent_results.append(result)
 
         self._lg.info("found new joke", extra=self._build_joke_log_extra(attempt))
+        self._last_joke_time = time.monotonic()
         if attempt.similar_joke:
             self._lg.debug("closest existing joke", extra={"joke": attempt.similar_joke})
         return result
@@ -164,12 +168,13 @@ class JokesterAgent(Agent):
         """Build log extra dict for joke generation."""
         assert attempt.joke is not None
         return {
+            "after": since(self._last_joke_time),
             "agent": self.name,
             "attempts": {"run": attempt.run_attempts, "cumulative": attempt.cumulative_attempts},
             "style": attempt.joke.style,
             "joke": attempt.joke.text,
             "session_count": self._jokes_generated_this_session,
-            "closest": attempt.max_similarity,
+            "closest": round(attempt.max_similarity, 2),
         }
 
     def ask(self, question: str) -> str:
@@ -179,10 +184,8 @@ class JokesterAgent(Agent):
     def _get_recent_jokes(self, learn_trait: LearnTrait, limit: int) -> list[str]:
         """Fetch recent jokes chronologically for style inspiration."""
         try:
-            # Fetch recent facts and filter by category
-            all_facts = learn_trait.learn.facts.list(limit=limit * 2)
-            jokes = [f.content for f in all_facts if f.category == "joke"]
-            return jokes[:limit]
+            facts = learn_trait.learn.solutions.list_by_category("joke", limit=limit)
+            return [f.content for f in facts if f.content]
         except Exception as e:
             self._lg.debug("failed to fetch recent jokes", extra={"exception": e})
             return []

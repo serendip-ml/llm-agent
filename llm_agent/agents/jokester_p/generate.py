@@ -105,8 +105,6 @@ class JokeGenerator:
             GenerationAttempt with result and metadata.
         """
         max_attempts = self._max_retries + 1
-        last_model = "unknown"
-        last_fallback = False
 
         for attempt in range(1, max_attempts + 1):
             if attempt > 1:
@@ -114,24 +112,31 @@ class JokeGenerator:
 
             result = self._try_single_attempt(context, attempt)
             if result is not None:
-                joke, last_model, last_fallback, novelty = result
-                self._recent_failed.clear()
-                return GenerationAttempt(
-                    joke=joke,
-                    run_attempts=attempt,
-                    cumulative_attempts=self._cumulative_attempts,
-                    model_name=last_model,
-                    adapter_fallback=last_fallback,
-                    novelty=novelty,
-                )
+                return self._success_attempt(attempt, *result)
 
         self._lg.debug("failed to generate novel joke", extra={"attempts": max_attempts})
         return GenerationAttempt(
             joke=None,
             run_attempts=max_attempts,
             cumulative_attempts=self._cumulative_attempts,
-            model_name=last_model,
-            adapter_fallback=last_fallback,
+            model_name="unknown",
+            adapter_fallback=False,
+        )
+
+    def _success_attempt(
+        self, attempt: int, joke: Joke, model: str, fallback: bool, novelty: NoveltyCheck | None
+    ) -> GenerationAttempt:
+        """Build successful generation attempt and reset state."""
+        self._recent_failed.clear()
+        cumulative = self._cumulative_attempts
+        self._cumulative_attempts = 0
+        return GenerationAttempt(
+            joke=joke,
+            run_attempts=attempt,
+            cumulative_attempts=cumulative,
+            model_name=model,
+            adapter_fallback=fallback,
+            novelty=novelty,
         )
 
     def _try_single_attempt(
