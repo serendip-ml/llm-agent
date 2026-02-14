@@ -155,6 +155,7 @@ class JSONCleaner:
         """Extract only the last JSON object from content.
 
         Useful when LLM echoes schema definition before actual data.
+        Skips objects that look like JSON schema definitions.
         """
         if not content:
             return content
@@ -166,8 +167,11 @@ class JSONCleaner:
 
         try:
             while idx < len(content):
-                _, end_idx = decoder.raw_decode(content[idx:])
-                last_obj = content[idx : idx + end_idx]
+                obj, end_idx = decoder.raw_decode(content[idx:])
+                candidate = content[idx : idx + end_idx]
+                # Skip JSON schema definitions
+                if not self._looks_like_schema(obj):
+                    last_obj = candidate
                 idx += end_idx
                 # Skip whitespace and commas between objects
                 while idx < len(content) and content[idx] in " \t\n,":
@@ -176,3 +180,9 @@ class JSONCleaner:
             pass
 
         return last_obj
+
+    def _looks_like_schema(self, obj: object) -> bool:
+        """Check if parsed object looks like a JSON schema definition."""
+        if not isinstance(obj, dict):
+            return False
+        return "properties" in obj and obj.get("type") == "object"

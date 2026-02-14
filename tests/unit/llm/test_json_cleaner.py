@@ -101,6 +101,21 @@ class TestJSONCleanerMultipleObjects:
         result = cleaner.clean(content)
         assert result == '{"second": 2}'
 
+    def test_skip_schema_only(self) -> None:
+        """When only a schema is returned, skip it."""
+        cleaner = JSONCleaner()
+        content = '{"properties": {"text": {}}, "type": "object"}'
+        result = cleaner.clean(content)
+        # Schema is skipped, returns original (no valid data found)
+        assert result == content
+
+    def test_skip_schema_keep_data(self) -> None:
+        """Schema followed by data - schema skipped, data kept."""
+        cleaner = JSONCleaner()
+        content = '{"properties": {}, "type": "object"}, {"text": "hello"}'
+        result = cleaner.clean(content)
+        assert result == '{"text": "hello"}'
+
 
 class TestExtractFirstObject:
     """Test extract_first_object method."""
