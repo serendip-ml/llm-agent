@@ -87,11 +87,6 @@ class JokesterAgent(Agent):
         """Stop agent and traits."""
         if not self._started:
             return
-
-        # Flush any remaining queued jokes for rating before stopping
-        if self._rater:
-            self._rater.flush()
-
         self._stop_traits()
         self._storage = None
         self._generator = None

@@ -146,18 +146,32 @@ class BatchRater:
         items = self._queue[:]
         self._queue.clear()
 
-        self._lg.info(
-            "flushing batch for rating",
-            extra={"count": len(items), "fact_ids": [i[0] for i in items]},
-        )
-
         try:
             rated = self._rating.rate_items(items, self._fact_type, self._category)
-            self._lg.info("batch rating complete", extra={"rated": rated})
+            self._log_batch_results(items, rated)
             return rated
         except Exception as e:
             self._lg.warning("batch rating failed", extra={"exception": e})
             return 0
+
+    def _log_batch_results(self, items: list[tuple[int, str]], rated: int) -> None:
+        """Log batch completion and individual ratings."""
+        self._lg.debug(
+            "flushed batch for rating",
+            extra={"count": len(items), "rated": rated},
+        )
+
+        for fact_id, content in items:
+            stars = (
+                self._rating._backend.get_fact_rating(fact_id) if self._rating._backend else None
+            )
+            if stars:
+                stars_visual = "★" * stars + "☆" * (5 - stars)
+                joke_preview = content[:80] + "..." if len(content) > 80 else content
+                self._lg.info(
+                    f"rated: {stars_visual}",
+                    extra={"fact_id": fact_id, "stars": stars, "joke": joke_preview},
+                )
 
     @property
     def pending_count(self) -> int:

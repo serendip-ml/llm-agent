@@ -28,17 +28,26 @@ class ConfigParser:
         """
         self._lg = lg
 
-    def parse_providers(self, providers_config: list[Any]) -> list[ProviderConfig]:
+    def parse_providers(self, providers_config: list[Any] | dict[str, Any]) -> list[ProviderConfig]:
         """Parse provider configurations from config.
 
-        Format:
+        Supports both list and dict formats:
+
+          # List format (legacy)
           providers:
             - type: llm
               backend: ${llm.backends.local}
               enabled: true
 
+          # Dict format (preferred - gives providers names)
+          providers:
+            anthropic:
+              type: llm
+              backend: ${llm.backends.anthropic}
+              enabled: true
+
         Args:
-            providers_config: List of provider configurations.
+            providers_config: List or dict of provider configurations.
 
         Returns:
             List of parsed ProviderConfig objects.
@@ -46,6 +55,16 @@ class ConfigParser:
         if not providers_config:
             return []
 
+        # Handle dict format (name -> config)
+        if isinstance(providers_config, dict):
+            providers = []
+            for name, cfg in providers_config.items():
+                provider = self._parse_provider(cfg, name=name)
+                if provider:
+                    providers.append(provider)
+            return providers
+
+        # Handle list format (legacy)
         providers = []
         for provider_cfg in providers_config:
             provider = self._parse_provider(provider_cfg)
@@ -54,11 +73,14 @@ class ConfigParser:
 
         return providers
 
-    def _parse_provider(self, config: dict[str, Any] | DotDict) -> ProviderConfig | None:
+    def _parse_provider(
+        self, config: dict[str, Any] | DotDict, name: str | None = None
+    ) -> ProviderConfig | None:
         """Parse a single provider configuration.
 
         Args:
             config: Provider config with type, backend, enabled.
+            name: Optional provider name (from dict key).
 
         Returns:
             ProviderConfig or None if invalid.
@@ -69,7 +91,10 @@ class ConfigParser:
         # Extract backend config (from ${llm.backends.local} expansion)
         backend = config.get("backend")
         if not backend:
-            self._lg.warning("provider missing backend config, skipping")
+            self._lg.warning(
+                "provider missing backend config, skipping",
+                extra={"name": name} if name else {},
+            )
             return None
 
         backend = self._ensure_dotdict(backend)
