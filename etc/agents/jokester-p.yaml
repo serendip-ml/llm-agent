@@ -36,6 +36,10 @@ directive: |
 
   You keep it short. A joke should fit in a text message.
 
+  IMPORTANT: Every joke must be COMPLETE with both setup AND punchline.
+  Never output just a question without an answer. A question like
+  "Why did the chicken cross the road?" is NOT a joke - it needs the punchline.
+
 # Task definition (for documentation/context only - agent logic is in code)
 task:
   description: |

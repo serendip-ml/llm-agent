@@ -93,7 +93,8 @@ class JokeGenerator:
         self._max_retries = max_retries
         self._denylist = [term.lower() for term in (denylist or [])]
         self._cumulative_attempts = 0
-        self._recent_failed: deque[str] = deque(maxlen=10)
+        # Track (generated_joke, similar_existing_joke) pairs for smarter retries
+        self._recent_failed: deque[tuple[str, str | None]] = deque(maxlen=10)
 
     def generate(self, context: list[str]) -> GenerationAttempt:
         """Generate a novel joke with retry loop.
@@ -169,18 +170,36 @@ class JokeGenerator:
     def _validate(
         self, joke: Joke, model_name: str, adapter_fallback: bool, attempt: int
     ) -> tuple[Joke, str, bool, NoveltyCheck | None] | None:
-        """Validate joke against denylist and novelty checks."""
+        """Validate joke against denylist, completeness, and novelty checks."""
+        if self._is_incomplete(joke.text):
+            self._lg.debug(
+                "joke incomplete (question without punchline)", extra={"attempt": attempt}
+            )
+            self._recent_failed.append((joke.text, None))
+            return None
+
         if self._contains_denied(joke.text):
             self._lg.debug("joke denied by denylist", extra={"attempt": attempt})
-            self._recent_failed.append(joke.text)
+            self._recent_failed.append((joke.text, None))
             return None
 
         novelty = self._novelty.check(joke.text)
         if not novelty.is_novel:
-            self._recent_failed.append(joke.text)
+            self._recent_failed.append((joke.text, novelty.similar_joke))
             return None
 
         return joke, model_name, adapter_fallback, novelty
+
+    def _is_incomplete(self, text: str) -> bool:
+        """Check if joke is incomplete (question without punchline)."""
+        text = text.strip()
+        # Incomplete if ends with ? and has no content after the question
+        if not text.endswith("?"):
+            return False
+        # Check if there's any text after the last question mark (punchline)
+        last_q = text.rfind("?")
+        after_q = text[last_q + 1 :].strip()
+        return len(after_q) == 0
 
     def _contains_denied(self, text: str) -> bool:
         """Check if text contains denied words/phrases."""
@@ -200,10 +219,7 @@ class JokeGenerator:
         avoid_text = ""
         if self._recent_failed:
             recent = list(self._recent_failed)[-5:]
-            avoid_text = (
-                "\n\nDO NOT generate anything similar to these recent attempts "
-                "(too similar to existing jokes):\n" + "\n".join(f"- {j}" for j in recent)
-            )
+            avoid_text = self._format_avoid_section(recent)
 
         retry_text = f"\n\n{retry_feedback}" if retry_feedback else ""
 
@@ -212,3 +228,19 @@ class JokeGenerator:
 {context_text}{avoid_text}{retry_text}
 
 Return your joke in JSON format with 'text' and 'style' fields."""
+
+    def _format_avoid_section(self, recent: list[tuple[str, str | None]]) -> str:
+        """Format the avoid section with detailed similarity info."""
+        lines = [
+            "\n\nDO NOT generate jokes similar to these - they are too close to existing jokes:"
+        ]
+        for generated, existing in recent:
+            if existing:
+                lines.append(f'- You tried: "{generated}"')
+                lines.append(f'  Too similar to existing: "{existing}"')
+            else:
+                lines.append(f'- Rejected: "{generated}"')
+        lines.append(
+            "\nGenerate something with a COMPLETELY different topic, setup, and punchline."
+        )
+        return "\n".join(lines)
