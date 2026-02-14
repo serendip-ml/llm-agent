@@ -182,7 +182,7 @@ class AtomicFactsBackend:
         FROM atomic_facts af
         LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
         WHERE afd.id IS NULL
-          AND af.context_key LIKE :context_pattern ESCAPE '\\\\'
+          AND af.context_key LIKE :context_pattern ESCAPE '\\'
           AND af.active = true
         """
 
@@ -265,7 +265,7 @@ class AtomicFactsBackend:
         SELECT af.id, af.content, (afd.context->>'stars')::int as stars, afd.id as feedback_id
         FROM atomic_facts af
         JOIN atomic_feedback_details afd ON af.id = afd.fact_id
-        WHERE af.context_key LIKE :context_pattern ESCAPE '\\\\'
+        WHERE af.context_key LIKE :context_pattern ESCAPE '\\'
           AND af.category = :category
           AND af.active = true
           AND (afd.context->>'stars')::int >= :min_stars

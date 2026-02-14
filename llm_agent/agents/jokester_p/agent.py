@@ -283,7 +283,7 @@ class JokesterAgent(Agent):
 
         try:
             results = rating_trait.rate_fact_with_all_providers(
-                fact_id=fact_id, content=joke_text, fact_type="solution"
+                fact_id=fact_id, content=joke_text, fact_type="solution", category="joke"
             )
             # Log summary of ratings
             for result in results:
