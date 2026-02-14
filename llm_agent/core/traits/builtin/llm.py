@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -114,6 +115,7 @@ class LLMTrait(BaseTrait):
         self.config: LLMConfig = config or DotDict()
         self._router: LLMRouter | None = None
         self._defaults: dict[str, Any] = {}
+        self._last_adapter_fallback_warning: float = 0.0
 
     def on_start(self) -> None:
         """Create LLM router on agent start."""
@@ -183,33 +185,61 @@ class LLMTrait(BaseTrait):
         if tools and output_schema:
             raise ValueError("Cannot use both tools and output_schema")
 
-        api_messages = self._messages_to_dicts(messages)
-        extra_body = None
+        api_messages, extra_body = self._prepare_messages(messages, output_schema)
+        params = self._resolve_params(model, temperature, max_tokens, adapter_id)
 
-        if output_schema:
-            api_messages = self._inject_schema_prompt(api_messages, output_schema)
-            extra_body = {"response_format": {"type": "json_object"}}
+        self._log_request(
+            api_messages, params["model"], params["temp"], params["max_tokens"], params["adapter"]
+        )
 
         response = self.router.chat_full(
             messages=api_messages,
-            model=model or self._defaults.get("model"),
-            temperature=temperature
-            if temperature is not None
-            else self._defaults.get("temperature", 0.7),
-            max_tokens=max_tokens if max_tokens is not None else self._defaults.get("max_tokens"),
+            model=params["model"],
+            temperature=params["temp"],
+            max_tokens=params["max_tokens"],
             tools=tools,
             backend=backend,
-            adapter_id=adapter_id or self._defaults.get("adapter_id"),
+            adapter_id=params["adapter"],
             extra_body=extra_body,
         )
 
+        self._log_response(response)
         result = self._response_to_result(response)
 
-        # Parse and validate structured output
         if output_schema:
             result.parsed = self._parse_structured_output(result.content, output_schema)
 
         return result
+
+    def _prepare_messages(
+        self, messages: list[Message], output_schema: type[BaseModel] | None
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        """Prepare messages and extra_body for API call."""
+        api_messages = self._messages_to_dicts(messages)
+        extra_body = None
+        if output_schema:
+            api_messages = self._inject_schema_prompt(api_messages, output_schema)
+            extra_body = {"response_format": {"type": "json_object"}}
+        return api_messages, extra_body
+
+    def _resolve_params(
+        self,
+        model: str | None,
+        temperature: float | None,
+        max_tokens: int | None,
+        adapter_id: str | None,
+    ) -> dict[str, Any]:
+        """Resolve parameters with defaults."""
+        return {
+            "model": model or self._defaults.get("model"),
+            "temp": temperature
+            if temperature is not None
+            else self._defaults.get("temperature", 0.7),
+            "max_tokens": max_tokens
+            if max_tokens is not None
+            else self._defaults.get("max_tokens"),
+            "adapter": adapter_id or self._defaults.get("adapter_id"),
+        }
 
     def _messages_to_dicts(self, messages: list[Message]) -> list[dict[str, Any]]:
         """Convert Message objects to API format."""
@@ -264,13 +294,55 @@ class LLMTrait(BaseTrait):
         ]
 
     def _check_adapter_fallback(self, response: ChatResponse) -> None:
-        """Log warning if adapter fallback occurred."""
-        if getattr(response, "adapter_fallback", False):
-            adapter_requested = getattr(response, "adapter_requested", None)
-            self.agent.lg.warning(
-                "adapter not available, using base model",
-                extra={"adapter_requested": adapter_requested},
-            )
+        """Log if adapter fallback occurred (warning every 10 min, else debug)."""
+        if not getattr(response, "adapter_fallback", False):
+            return
+
+        adapter_requested = getattr(response, "adapter_requested", None)
+        extra = {"adapter_requested": adapter_requested}
+
+        now = time.monotonic()
+        if now - self._last_adapter_fallback_warning >= 600:
+            self.agent.lg.warning("adapter not available, using base model", extra=extra)
+            self._last_adapter_fallback_warning = now
+        else:
+            self.agent.lg.debug("adapter not available, using base model", extra=extra)
+
+    def _log_request(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None,
+        temperature: float | None,
+        max_tokens: int | None,
+        adapter_id: str | None,
+    ) -> None:
+        """Log full LLM request at trace level."""
+        self.agent.lg.trace(
+            "llm request",
+            extra={
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "adapter_id": adapter_id,
+                "messages": messages,
+            },
+        )
+
+    def _log_response(self, response: ChatResponse) -> None:
+        """Log full LLM response at trace level."""
+        self.agent.lg.trace(
+            "llm response",
+            extra={
+                "content": response.content,
+                "model": getattr(response, "model", None),
+                "usage": getattr(response, "usage", None),
+                "tool_calls": [
+                    {"name": tc.function.name, "arguments": tc.function.arguments}
+                    for tc in (response.tool_calls or [])
+                ],
+                "adapter_fallback": getattr(response, "adapter_fallback", False),
+            },
+        )
 
     def _build_schema_prompt(self, schema: type[BaseModel]) -> str:
         """Generate prompt instructing LLM to output JSON matching schema."""

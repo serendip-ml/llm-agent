@@ -155,22 +155,21 @@ class JokesterAgent(Agent):
         )
         self._recent_results.append(result)
 
-        self._lg.info("found new joke", extra=self._build_joke_log_extra(result, attempt))
+        self._lg.info("found new joke", extra=self._build_joke_log_extra(attempt))
+        if attempt.similar_joke:
+            self._lg.debug("closest existing joke", extra={"joke": attempt.similar_joke})
         return result
 
-    def _build_joke_log_extra(
-        self, result: ExecutionResult, attempt: GenerationAttempt
-    ) -> dict[str, Any]:
+    def _build_joke_log_extra(self, attempt: GenerationAttempt) -> dict[str, Any]:
         """Build log extra dict for joke generation."""
         assert attempt.joke is not None
         return {
             "agent": self.name,
-            "success": result.success,
             "attempts": {"run": attempt.run_attempts, "cumulative": attempt.cumulative_attempts},
             "style": attempt.joke.style,
             "joke": attempt.joke.text,
             "session_count": self._jokes_generated_this_session,
-            "closest": {"similarity": attempt.max_similarity, "joke": attempt.similar_joke or ""},
+            "closest": attempt.max_similarity,
         }
 
     def ask(self, question: str) -> str:
