@@ -376,18 +376,21 @@ class RateTool(Tool):
         """Create LLM client and run auto rating."""
         from llm_infer.client import Factory as LLMClientFactory
 
+        from llm_agent.core.llm import LLMCaller
+
         llm_config = self.app.config.get("llm", {})
-        llm_client = LLMClientFactory(self.lg).from_config(llm_config)
+        router = LLMClientFactory(self.lg).from_config(llm_config)
+        caller = LLMCaller(self.lg, router)
 
         try:
-            service = Service(self.lg, llm_client)
+            service = Service(self.lg, caller)
             total_rated = self._rate_with_service(
                 service, provider, criteria_config, context_key, to_rate, fact_type
             )
             print(f"\n✓ Rated {total_rated} items using automated LLM rating")
             return 0
         finally:
-            llm_client.close()
+            caller.close()
 
     def _determine_rating_count(self, context_key: str, fact_type: str) -> int:
         """Determine how many facts to rate based on limit and available unrated facts."""

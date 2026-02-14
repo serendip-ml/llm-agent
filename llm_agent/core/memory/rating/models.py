@@ -35,6 +35,7 @@ class Request:
     criteria: list[Criteria]
     model: str
     provider: str
+    backend: str | None = None  # LLM backend (e.g., "anthropic", "local")
     temperature: float = 0.3
 
 
@@ -102,6 +103,7 @@ class BatchRequest:
     prompt_template: str  # Base prompt describing what to rate and scale
     model: str
     provider: str
+    backend: str | None = None  # LLM backend (e.g., "anthropic", "local")
     temperature: float = 0.3
 
 

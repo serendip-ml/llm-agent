@@ -56,7 +56,8 @@ schedule:
 # Automated rating configuration
 rating:
   providers:
-    - type: llm
+    anthropic:
+      type: llm
       backend: !include '../llm.yaml#backends.anthropic'
       enabled: true
   models:
@@ -100,7 +101,7 @@ rating:
             description: "Binary check: If offensive/problematic, set to 0.0. Otherwise 1.0 (don't reward for being safe)"
             weight: 0.2
   batch_size: 5
-  auto: false
+  auto: true
   # Preference pairing for DPO training
   # Disabled - pairing done at training time via llm-learn CLI for optimal matching
   pairing:

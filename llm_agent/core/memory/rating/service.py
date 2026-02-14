@@ -17,7 +17,7 @@ from .models import BatchItem, BatchRequest, Criteria, ProviderType, Request, Re
 
 
 if TYPE_CHECKING:
-    from llm_infer.client import LLMClient, LLMRouter
+    from llm_agent.core.llm import LLMCaller
 
 
 def stars_to_signal(stars: int) -> tuple[Literal["positive", "negative", "dismiss"], float]:
@@ -46,10 +46,14 @@ class Service:
     Does NOT handle persistence - use a backend for saving ratings.
 
     Example:
+        from llm_infer.client import Factory as LLMClientFactory
+        from llm_agent.core.llm import LLMCaller
         from llm_agent.core.memory.rating import Service, AtomicFactsBackend
         from llm_agent.core.memory.rating import Request, Criteria
 
-        service = Service(lg, llm_client)
+        router = LLMClientFactory(lg).from_config(config)
+        caller = LLMCaller(lg, router)
+        service = Service(lg, caller)
         backend = AtomicFactsBackend(lg, database)
 
         # Rate content with LLM
@@ -67,15 +71,15 @@ class Service:
         backend.save_rating(result, source="llm_rater")
     """
 
-    def __init__(self, lg: Logger, llm_client: LLMClient | LLMRouter) -> None:
+    def __init__(self, lg: Logger, llm_caller: LLMCaller) -> None:
         """Initialize rating service.
 
         Args:
             lg: Logger instance.
-            llm_client: LLM client or router for rating.
+            llm_caller: LLM caller for rating (provides logging and dry-run).
         """
         self._lg = lg
-        self._llm_client = llm_client
+        self._llm_caller = llm_caller
 
     def rate_content(self, request: Request) -> Result:
         """Rate content using LLM.
@@ -86,31 +90,26 @@ class Service:
         Returns:
             Rating result with scores and reasoning.
         """
-        prompt = self._build_prompt(request.content, request.prompt_template, request.criteria)
-        response = self._call_llm(prompt, request.model, request.temperature)
+        prompt = self._build_prompt(request)
+        response = self._call_llm(prompt, request)
         actual_model = response.model or request.model
         return self._parse_response(
             request.fact, response.content, request.criteria, actual_model, request.provider
         )
 
-    def _build_prompt(
-        self,
-        content: str,
-        prompt_template: str,
-        criteria: list[Criteria],
-    ) -> str:
+    def _build_prompt(self, request: Request) -> str:
         """Build rating prompt from template and criteria."""
         criteria_desc = "\n".join(
-            f"- {c.name}: {c.description} (weight: {c.weight})" for c in criteria
+            f"- {c.name}: {c.description} (weight: {c.weight})" for c in request.criteria
         )
 
-        return f"""{prompt_template}
+        return f"""{request.prompt_template}
 
 Criteria:
 {criteria_desc}
 
 Content to rate:
-{content}
+{request.content}
 
 Provide your rating in JSON format:
 {{
@@ -131,13 +130,15 @@ Rating scale:
 
 Respond only with the JSON, no additional text."""
 
-    def _call_llm(self, prompt: str, model: str, temperature: float) -> Any:
+    def _call_llm(self, prompt: str, request: Request | BatchRequest) -> Any:
         """Call LLM with rating prompt."""
-        return self._llm_client.chat_full(
+        result = self._llm_caller.chat(
             messages=[{"role": "user", "content": prompt}],
-            model=model,
-            temperature=temperature,
+            model=request.model,
+            temperature=request.temperature,
+            backend=request.backend,
         )
+        return result
 
     def _parse_response(
         self,
@@ -197,6 +198,33 @@ Respond only with the JSON, no additional text."""
         """Convert star rating to signal and strength."""
         return stars_to_signal(stars)
 
+    def _truncate(self, text: str, max_len: int = 200) -> str:
+        """Truncate text with '... (N more chars)' suffix."""
+        if len(text) <= max_len:
+            return text
+        remaining = len(text) - max_len
+        return f"{text[:max_len]}... ({remaining} more chars)"
+
+    def _log_batch_results(self, items: list[BatchItem], results: list[Result], model: str) -> None:
+        """Log batch rating results."""
+        item_content = {i.fact: i.content for i in items}
+        self._lg.debug(
+            "rated batch",
+            extra={
+                "count": len(items),
+                "model": model,
+                "ratings": [
+                    {
+                        "fact_id": r.fact,
+                        "stars": r.stars,
+                        "rating": "★" * r.stars + "☆" * (5 - r.stars),
+                        "fact": self._truncate(item_content.get(r.fact, "")),
+                    }
+                    for r in results
+                ],
+            },
+        )
+
     # =========================================================================
     # Batch rating
     # =========================================================================
@@ -211,25 +239,41 @@ Respond only with the JSON, no additional text."""
 
         Returns:
             List of rating results (may be fewer than items if parsing fails).
+            Returns empty list in dry-run mode.
         """
         if not request.items:
             return []
 
-        prompt = self._build_batch_prompt(request.items, request.prompt_template)
-        response = self._call_llm(prompt, request.model, request.temperature)
-        actual_model = response.model or request.model
+        self._lg.trace(
+            "rating batch...",
+            extra={"items": [{"id": i.fact, "content": i.content} for i in request.items]},
+        )
 
-        return self._parse_batch_response(
+        prompt = self._build_batch_prompt(request)
+        response = self._call_llm(prompt, request)
+
+        # Dry-run mode: no real response to parse
+        if response.dry_run:
+            self._lg.debug("rated batch", extra={"count": len(request.items), "dry_run": True})
+            return []
+
+        actual_model = response.model or request.model
+        results = self._parse_batch_response(
             request.items, response.content, actual_model, request.provider
         )
 
-    def _build_batch_prompt(self, items: list[BatchItem], prompt_template: str) -> str:
+        self._log_batch_results(request.items, results, actual_model)
+
+        return results
+
+    def _build_batch_prompt(self, request: BatchRequest) -> str:
         """Build batch rating prompt."""
         items_text = "\n\n".join(
-            f"ITEM {i + 1} (ID: {item.fact}):\n{item.content}" for i, item in enumerate(items)
+            f"ITEM {i + 1} (ID: {item.fact}):\n{item.content}"
+            for i, item in enumerate(request.items)
         )
 
-        return f"""{prompt_template}
+        return f"""{request.prompt_template}
 
 {items_text}
 

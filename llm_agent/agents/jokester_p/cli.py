@@ -14,7 +14,7 @@ from .rating import RatingService
 
 
 if TYPE_CHECKING:
-    from llm_infer.client import LLMRouter
+    from ...core.llm import LLMCaller
 
 
 class JokesterCLI(Tool):
@@ -72,6 +72,9 @@ class JokesterCLI(Tool):
         p.add_argument("--limit", type=int, help="Maximum jokes to rate (default: all unrated)")
         p.add_argument(
             "--batch-size", type=int, help="Jokes per API call (default: from config, typically 5)"
+        )
+        p.add_argument(
+            "--dry-run", action="store_true", help="Show what would be rated without sending to LLM"
         )
 
     def run(self, **kwargs: Any) -> int:
@@ -154,27 +157,30 @@ class JokesterCLI(Tool):
         if rate_config is None:
             return 1
 
-        prompt_template, batch_size = rate_config
+        prompt_template, batch_size, provider, model = rate_config
+        dry_run = getattr(self.args, "dry_run", False)
 
-        llm_client = self._create_llm_client()
-        if llm_client is None:
-            print("Error: Could not create LLM client")
+        llm_caller = self._create_llm_caller(dry_run=dry_run)
+        if llm_caller is None:
+            print("Error: Could not create LLM caller")
             return 1
 
         try:
             service = RatingService(
                 lg=self.lg,
                 pg=self._pg,
-                llm_client=llm_client,
+                llm_caller=llm_caller,
                 prompt_template=prompt_template,
                 batch_size=batch_size,
+                provider=provider,
+                model=model,
             )
             return self._run_rating(service, batch_size)
         finally:
-            llm_client.close()
+            llm_caller.close()
 
-    def _load_rate_config(self) -> tuple[str, int] | None:
-        """Load rating config. Returns (prompt_template, batch_size) or None on error."""
+    def _load_rate_config(self) -> tuple[str, int, str, str] | None:
+        """Load rating config. Returns (prompt, batch_size, provider, model) or None."""
         agent_config = self._get_agent_config()
         if agent_config is None:
             print("Error: Could not load agent config")
@@ -185,7 +191,10 @@ class JokesterCLI(Tool):
         config_batch_size = rating_config.get("batch_size", 5)
         batch_size = self.args.batch_size or config_batch_size
 
-        return (prompt_template, batch_size)
+        # Extract provider and model from first enabled provider
+        provider, model = self._get_provider_settings(rating_config)
+
+        return (prompt_template, batch_size, provider, model)
 
     def _run_rating(self, service: RatingService, batch_size: int) -> int:
         """Execute rating and print results."""
@@ -199,12 +208,19 @@ class JokesterCLI(Tool):
         print(f"Estimated batches: {(len(unrated) + batch_size - 1) // batch_size}")
         print()
 
-        result = service.rate_all(limit=self.args.limit, batch_size=batch_size)
+        total_rated = 0
+        batch_count = 0
 
-        print(f"\n✓ Rated: {result.rated}")
-        if result.failed > 0:
-            print(f"  Failed: {result.failed}")
-        print(f"  Batches: {result.batches}")
+        for batch in service.rate_batches(limit=self.args.limit, batch_size=batch_size):
+            batch_count += 1
+            for r in batch:
+                total_rated += 1
+                stars = "★" * r.stars + "☆" * (5 - r.stars)
+                joke = r.content[:90] + "..." if len(r.content) > 90 else r.content
+                print(f"{r.id}  ({r.stars})  {stars}  {joke}")
+
+        print(f"\n✓ Rated: {total_rated}")
+        print(f"  Batches: {batch_count}")
 
         return 0
 
@@ -222,15 +238,37 @@ class JokesterCLI(Tool):
         solution = atomic.get("solution", {})
         return str(solution.get("prompt", "Rate this content 1-5 stars."))
 
-    def _create_llm_client(self) -> LLMRouter | None:
-        """Create LLM client from config."""
+    def _get_provider_settings(self, rating_config: dict[str, Any]) -> tuple[str, str]:
+        """Extract provider name and model from first enabled provider.
+
+        Returns:
+            Tuple of (provider, model). Provider is used for both routing and identification.
+        """
+        providers = rating_config.get("providers", {})
+        for name, config in providers.items():
+            if not config.get("enabled", True):
+                continue
+            backend_config = config.get("backend", {})
+            model = backend_config.get("model", "auto")
+            return (name, model)
+        return ("local", "auto")
+
+    def _create_llm_caller(self, dry_run: bool = False) -> LLMCaller | None:
+        """Create LLM caller from config.
+
+        Args:
+            dry_run: If True, caller will log but not send requests.
+        """
         from llm_infer.client import Factory as LLMClientFactory
+
+        from ...core.llm import LLMCaller
 
         llm_config = self.app.config.get("llm", {})
         try:
-            return LLMClientFactory(self.lg).from_config(llm_config)
+            router = LLMClientFactory(self.lg).from_config(llm_config)
+            return LLMCaller(self.lg, router, dry_run=dry_run)
         except Exception as e:
-            self.lg.error("failed to create LLM client", extra={"exception": e})
+            self.lg.error("failed to create LLM caller", extra={"exception": e})
             return None
 
     def _print_pairs_preview(self, pairs: list[PreferencePair]) -> None:
