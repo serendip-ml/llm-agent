@@ -19,7 +19,7 @@ from .agent import JokesterAgent
 from .cli import JokesterCLI
 from .generate import JokeGenerator
 from .novelty import NoveltyChecker
-from .rating import InlineRater
+from .rating import BatchRater
 from .schema import ModelUsage, TrainingMetadata
 from .storage import Storage
 
@@ -34,7 +34,7 @@ class Components:
 
     generator: JokeGenerator
     storage: Storage
-    rater: InlineRater | None
+    rater: BatchRater | None
 
 
 class Factory(BaseFactory):
@@ -109,9 +109,13 @@ class Factory(BaseFactory):
         )
 
     @classmethod
-    def _create_rater(cls, agent: JokesterAgent, lg: Logger, config: DotDict) -> InlineRater | None:
-        """Create InlineRater if auto-rating is enabled."""
-        if not config.get("rating", {}).get("auto", False):
+    def _create_rater(cls, agent: JokesterAgent, lg: Logger, config: DotDict) -> BatchRater | None:
+        """Create BatchRater if auto-rating is enabled."""
+        rating_config = config.get("rating", {})
+        if not rating_config.get("auto", False):
             return None
         rating_trait = agent.get_trait(RatingTrait)
-        return InlineRater(lg, rating_trait) if rating_trait else None
+        if not rating_trait:
+            return None
+        batch_size = rating_config.get("batch_size", 5)
+        return BatchRater(lg, rating_trait, batch_size)

@@ -289,6 +289,27 @@ class AtomicFactsBackend:
         params["limit"] = limit
         return query, params
 
+    def get_fact_rating(self, fact_id: int) -> int | None:
+        """Get the star rating for a specific fact.
+
+        Args:
+            fact_id: ID of the fact to get rating for.
+
+        Returns:
+            Star rating (1-5) if rated, None if unrated.
+        """
+        query = text("""
+            SELECT (context->>'stars')::int as stars
+            FROM atomic_feedback_details
+            WHERE fact_id = :fact_id
+            ORDER BY id DESC
+            LIMIT 1
+        """)
+        with self._db.session() as session:
+            result = session.execute(query, {"fact_id": fact_id})
+            row = result.fetchone()
+            return row[0] if row else None
+
     def mark_facts_paired(self, fact_id_1: int, fact_id_2: int, preference_id: int) -> None:
         """Mark two facts as paired for DPO training."""
         query = text("""

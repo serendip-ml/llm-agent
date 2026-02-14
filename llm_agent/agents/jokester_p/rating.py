@@ -8,20 +8,27 @@ Provides:
 from __future__ import annotations
 
 import json
+from collections.abc import Generator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 
-from llm_agent.core.memory.rating import BatchItem, BatchRequest, Result
-from llm_agent.core.memory.rating import Service as CoreRatingService
+from llm_agent.core.memory.rating import (
+    BatchItem,
+    BatchRequest,
+    Result,
+)
+from llm_agent.core.memory.rating import (
+    Service as CoreRatingService,
+)
 
 
 if TYPE_CHECKING:
     from appinfra.db.pg import PG
     from appinfra.log import Logger
-    from llm_infer.client import LLMRouter
 
+    from ...core.llm import LLMCaller
     from ...core.traits.builtin.rating import RatingTrait
 
 
@@ -71,6 +78,93 @@ class InlineRater:
         )
 
 
+class BatchRater:
+    """Batches jokes for efficient batch rating.
+
+    Instead of rating each joke immediately (one LLM call per joke),
+    this rater queues jokes and flushes when the batch is full.
+    Reduces LLM calls by ~5x with default batch_size=5.
+
+    Usage:
+        rater = BatchRater(lg, rating_trait, batch_size=5)
+
+        # During generation
+        rater.queue(fact_id, joke_text)  # Auto-flushes when batch is full
+
+        # On agent stop (rate partial batch)
+        rater.flush()
+    """
+
+    def __init__(
+        self,
+        lg: Logger,
+        rating_trait: RatingTrait,
+        batch_size: int,
+        fact_type: str = "solution",
+        category: str = "joke",
+    ) -> None:
+        """Initialize batch rater.
+
+        Args:
+            lg: Logger instance.
+            rating_trait: RatingTrait for batch rating operations.
+            batch_size: Number of items to queue before auto-flushing.
+            fact_type: Type of facts (default: "solution").
+            category: Category for preference pairing (default: "joke").
+        """
+        self._lg = lg
+        self._rating = rating_trait
+        self._batch_size = batch_size
+        self._fact_type = fact_type
+        self._category = category
+        self._queue: list[tuple[int, str]] = []
+
+    def queue(self, fact_id: int, content: str) -> None:
+        """Queue a fact for rating. Flushes when batch is full.
+
+        Args:
+            fact_id: ID of the saved joke fact.
+            content: Text of the joke to rate.
+        """
+        self._queue.append((fact_id, content))
+        self._lg.debug(
+            "queued for batch rating",
+            extra={"fact_id": fact_id, "queue_size": len(self._queue)},
+        )
+        if len(self._queue) >= self._batch_size:
+            self.flush()
+
+    def flush(self) -> int:
+        """Rate all queued items. Returns count rated.
+
+        Returns:
+            Number of items successfully rated.
+        """
+        if not self._queue:
+            return 0
+
+        items = self._queue[:]
+        self._queue.clear()
+
+        self._lg.info(
+            "flushing batch for rating",
+            extra={"count": len(items), "fact_ids": [i[0] for i in items]},
+        )
+
+        try:
+            rated = self._rating.rate_items(items, self._fact_type, self._category)
+            self._lg.info("batch rating complete", extra={"rated": rated})
+            return rated
+        except Exception as e:
+            self._lg.warning("batch rating failed", extra={"exception": e})
+            return 0
+
+    @property
+    def pending_count(self) -> int:
+        """Number of items currently queued."""
+        return len(self._queue)
+
+
 @dataclass
 class UnratedJoke:
     """An unrated joke from the database."""
@@ -80,12 +174,22 @@ class UnratedJoke:
 
 
 @dataclass
+class RatedJoke:
+    """A rated joke with its result."""
+
+    id: int
+    content: str
+    stars: int
+
+
+@dataclass
 class BatchRatingResult:
     """Result of batch rating operation."""
 
     rated: int
     failed: int
     batches: int
+    ratings: list[RatedJoke]
 
 
 class RatingService:
@@ -101,15 +205,19 @@ class RatingService:
         self,
         lg: Logger,
         pg: PG,
-        llm_client: LLMRouter,
+        llm_caller: LLMCaller,
         prompt_template: str,
         batch_size: int = 5,
+        provider: str = "local",
+        model: str = "auto",
     ) -> None:
         self._lg = lg
         self._pg = pg
-        self._core_service = CoreRatingService(lg, llm_client)
+        self._core_service = CoreRatingService(lg, llm_caller)
         self._prompt_template = prompt_template
         self._batch_size = batch_size
+        self._provider = provider
+        self._model = model
 
     def get_unrated_jokes(self, limit: int | None = None) -> list[UnratedJoke]:
         """Get unrated jokes from the database."""
@@ -120,7 +228,7 @@ class RatingService:
             WHERE af.context_key = :context_key
               AND af.type = 'solution'
               AND afd.id IS NULL
-            ORDER BY af.created_at DESC
+            ORDER BY af.created_at ASC
             LIMIT :limit
         """)
         with self._pg.connect() as conn:
@@ -129,69 +237,70 @@ class RatingService:
             ).fetchall()
         return [UnratedJoke(id=r[0], content=r[1]) for r in rows]
 
-    def rate_all(
+    def rate_batches(
         self, limit: int | None = None, batch_size: int | None = None
-    ) -> BatchRatingResult:
-        """Rate all unrated jokes in batches.
+    ) -> Generator[list[RatedJoke], None, None]:
+        """Rate unrated jokes, yielding results batch by batch.
 
         Args:
             limit: Maximum jokes to rate (None = all).
             batch_size: Items per batch (None = use configured default).
 
-        Returns:
-            BatchRatingResult with counts.
+        Yields:
+            List of RatedJoke for each batch.
         """
         jokes = self.get_unrated_jokes(limit)
         if not jokes:
-            return BatchRatingResult(rated=0, failed=0, batches=0)
+            return
 
         size = batch_size or self._batch_size
-        total_rated = 0
-        total_failed = 0
-        batch_count = 0
 
         for i in range(0, len(jokes), size):
             batch = jokes[i : i + size]
-            batch_count += 1
+            batch_ratings, failed = self._rate_batch(batch)
 
-            rated, failed = self._rate_batch(batch)
-            total_rated += rated
-            total_failed += failed
-
-            self._lg.info(
+            self._lg.debug(
                 "batch completed",
-                extra={"batch": batch_count, "rated": rated, "failed": failed},
+                extra={"rated": len(batch_ratings), "failed": failed},
             )
 
-        return BatchRatingResult(rated=total_rated, failed=total_failed, batches=batch_count)
+            yield batch_ratings
 
-    def _rate_batch(self, jokes: list[UnratedJoke]) -> tuple[int, int]:
-        """Rate a single batch. Returns (rated, failed)."""
+    def _rate_batch(self, jokes: list[UnratedJoke]) -> tuple[list[RatedJoke], int]:
+        """Rate a single batch. Returns (rated_jokes, failed_count)."""
         items = [BatchItem(fact=j.id, content=j.content) for j in jokes]
+        joke_map = {j.id: j.content for j in jokes}
         request = BatchRequest(
             items=items,
             prompt_template=self._prompt_template,
-            model="auto",
-            provider="cli_batch_rating",
+            model=self._model,
+            provider=self._provider,
+            backend=self._provider,  # Provider name matches backend name
         )
 
         try:
             results = self._core_service.rate_batch(request)
-            saved = 0
+            rated: list[RatedJoke] = []
             for result in results:
                 if self._save_rating(result):
-                    saved += 1
-            return (saved, len(items) - saved)
+                    rated.append(
+                        RatedJoke(
+                            id=result.fact,
+                            content=joke_map.get(result.fact, ""),
+                            stars=result.stars,
+                        )
+                    )
+            return (rated, len(items) - len(rated))
         except Exception as e:
             self._lg.warning("batch rating failed", extra={"exception": e})
-            return (0, len(items))
+            return ([], len(items))
 
     def _save_rating(self, result: Result) -> bool:
         """Save a rating to the database."""
         sql = text("""
             INSERT INTO atomic_feedback_details
-                (fact_id, signal, strength, context, provider, created_at)
-            VALUES (:fact_id, :signal, :strength, :context::jsonb, :provider, NOW())
+                (fact_id, signal, strength, context, provider)
+            VALUES (:fact_id, :signal, :strength, CAST(:context AS jsonb), :provider)
         """)
         params = {
             "fact_id": result.fact,

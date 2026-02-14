@@ -24,7 +24,7 @@ from ...core.llm.backend import StructuredOutputError
 from ...core.traits.builtin.learn import LearnTrait
 from ...core.traits.builtin.llm import LLMTrait
 from .generate import GenerationAttempt, JokeGenerator
-from .rating import InlineRater
+from .rating import BatchRater
 from .storage import Storage
 
 
@@ -62,7 +62,7 @@ class JokesterAgent(Agent):
         self._recent_results: deque[ExecutionResult] = deque(maxlen=100)
         self._storage: Storage | None = None
         self._generator: JokeGenerator | None = None
-        self._rater: InlineRater | None = None
+        self._rater: BatchRater | None = None
         self._last_joke_time: float = time.monotonic()
 
     def start(self) -> None:
@@ -87,6 +87,11 @@ class JokesterAgent(Agent):
         """Stop agent and traits."""
         if not self._started:
             return
+
+        # Flush any remaining queued jokes for rating before stopping
+        if self._rater:
+            self._rater.flush()
+
         self._stop_traits()
         self._storage = None
         self._generator = None
@@ -149,7 +154,7 @@ class JokesterAgent(Agent):
         self._jokes_generated_this_session += 1
 
         if self._rater:
-            self._rater.rate(fact_id, attempt.joke.text)
+            self._rater.queue(fact_id, attempt.joke.text)
 
         result = ExecutionResult(
             success=True,

@@ -146,6 +146,8 @@ class RatingTrait(BaseTrait):
         Raises:
             TraitNotFoundError: If LearnTrait or LLMTrait are not attached.
         """
+        from llm_agent.core.llm import LLMCaller
+
         from .learn import LearnTrait
         from .llm import LLMTrait
 
@@ -153,17 +155,24 @@ class RatingTrait(BaseTrait):
         learn_trait = self.agent.require_trait(LearnTrait)
         llm_trait = self.agent.require_trait(LLMTrait)
 
-        # Initialize rating service and backend
-        self._service = RatingService(self.agent.lg, llm_trait.router)
+        # Initialize rating service and backend with LLMCaller wrapper
+        caller = LLMCaller(self.agent.lg, llm_trait.router)
+        self._service = RatingService(self.agent.lg, caller)
         self._backend = AtomicFactsBackend(self.agent.lg, learn_trait.learn.database)
 
-        # Parse provider, criteria, pairing, and batch configurations
+        self._parse_config()
+        self._log_started()
+
+    def _parse_config(self) -> None:
+        """Parse provider, criteria, pairing, and batch configurations."""
         parser = ConfigParser(self.agent.lg)
         self._providers = parser.parse_providers(self.config.get("providers", []))
         self._criteria = parser.parse_criteria(self.config.get("models", {}))
         self._pairing = parser.parse_pairing(self.config.get("pairing"))
         self._batch = parser.parse_batch(self.config.get("batch_size"))
 
+    def _log_started(self) -> None:
+        """Log trait started with config summary."""
         self.agent.lg.debug(
             "rating trait started",
             extra={
@@ -454,6 +463,70 @@ class RatingTrait(BaseTrait):
                 results.append(result)
 
         return results
+
+    def rate_items(
+        self,
+        items: list[tuple[int, str]],
+        fact_type: str = "solution",
+        category: str | None = None,
+    ) -> int:
+        """Rate specific items in a batch.
+
+        Primary method for batch auto-rating. Takes a list of (fact_id, content)
+        tuples and rates them together in a single LLM call for efficiency.
+
+        Args:
+            items: List of (fact_id, content) tuples to rate.
+            fact_type: Type of facts (default: "solution").
+            category: Category for preference pairing (e.g., "joke").
+
+        Returns:
+            Number of items successfully rated.
+        """
+        if not items:
+            return 0
+
+        if not self._service:
+            raise RuntimeError("Rating service not initialized - call on_start() first")
+
+        provider = self._select_provider(0)
+        type_criteria = self._criteria.get(fact_type)
+        if not type_criteria:
+            raise ValueError(f"No criteria configured for fact type: {fact_type}")
+
+        backend_type = provider.backend.get("type", "unknown")
+        provider_id = f"llm_{provider.model}_{backend_type}"
+
+        # Convert tuples to dict format expected by _process_batch
+        batch_facts = [{"id": fact_id, "content": content} for fact_id, content in items]
+
+        rated, _ = self._process_batch(
+            batch_facts, type_criteria.prompt, provider.model, provider_id, 0
+        )
+
+        # Attempt preference pairing for each rated item
+        if category and self._pairing and self._pairing.enabled:
+            self._try_pair_batch_items(items, category)
+
+        return rated
+
+    def _try_pair_batch_items(
+        self,
+        items: list[tuple[int, str]],
+        category: str,
+    ) -> None:
+        """Attempt preference pairing for batch-rated items.
+
+        After batch rating, check each item's rating and try to create
+        preference pairs for qualifying ratings (4+ or 2- stars).
+        """
+        if not self._backend:
+            return
+
+        for fact_id, content in items:
+            rating = self._backend.get_fact_rating(fact_id)
+            if rating:
+                self._try_create_preference_pair(fact_id, content, category, rating)
 
     def _rate_and_save_with_provider(
         self,
