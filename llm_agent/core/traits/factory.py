@@ -85,9 +85,53 @@ class Factory:
         return self.create_directive_trait(agent, agent.config.get("directive"))
 
     def _create_llm(self, agent: Agent) -> LLMTrait:
-        """Route to create_llm_trait."""
+        """Route to create_llm_trait.
+
+        Merges agent-level llm config (from agent YAML) with global llm config.
+        Agent config overrides global config at the backend level.
+
+        Example agent config:
+            llm:
+              backends:
+                local:
+                  adapter_id: my-adapter
+        """
         llm_config: DotDict = DotDict(self._platform.llm_config())
+
+        # Merge agent-level llm config into global config
+        agent_llm_config = agent.config.get("llm", {})
+        if agent_llm_config:
+            llm_config = self._merge_llm_config(llm_config, agent_llm_config)
+
         return self.create_llm_trait(agent, llm_config)
+
+    def _merge_llm_config(self, base: DotDict, override: dict[str, Any]) -> DotDict:
+        """Merge agent-level llm config into global config.
+
+        Performs deep merge at the backends level, so agent can override
+        specific backend settings (like adapter_id) without replacing
+        the entire backend config.
+        """
+        import copy
+
+        result = copy.deepcopy(dict(base))
+
+        # Merge backends
+        if "backends" in override and "backends" in result:
+            for backend_name, backend_override in override["backends"].items():
+                if backend_name in result["backends"]:
+                    result["backends"][backend_name].update(backend_override)
+                else:
+                    result["backends"][backend_name] = backend_override
+        elif "backends" in override:
+            result["backends"] = override["backends"]
+
+        # Merge top-level keys (except backends, already handled)
+        for key, value in override.items():
+            if key != "backends":
+                result[key] = value
+
+        return DotDict(result)
 
     def _create_learn(self, agent: Agent) -> LearnTrait:
         """Route to create_learn_trait."""

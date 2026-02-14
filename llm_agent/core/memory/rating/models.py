@@ -84,3 +84,30 @@ class PairingConfig:
     high_threshold: int = 4  # Minimum stars for "chosen" (4+)
     low_threshold: int = 2  # Maximum stars for "rejected" (2-)
     prompt: str = "Generate content for this category."  # Context prompt for preference
+
+
+@dataclass
+class BatchItem:
+    """A single item in a batch rating request."""
+
+    fact: Any  # Backend-specific identifier (e.g., fact_id)
+    content: str
+
+
+@dataclass
+class BatchRequest:
+    """Request to rate multiple items in a single LLM call."""
+
+    items: list[BatchItem]
+    prompt_template: str  # Base prompt describing what to rate and scale
+    model: str
+    provider: str
+    temperature: float = 0.3
+
+
+@dataclass
+class BatchConfig:
+    """Configuration for batch rating."""
+
+    enabled: bool = True
+    size: int = 5  # Number of items per batch

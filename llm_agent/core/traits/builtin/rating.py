@@ -8,6 +8,9 @@ from appinfra import DotDict
 
 from llm_agent.core.memory.rating import (
     AtomicFactsBackend,
+    BatchConfig,
+    BatchItem,
+    BatchRequest,
     ConfigParser,
     CriteriaConfig,
     PairingConfig,
@@ -135,6 +138,7 @@ class RatingTrait(BaseTrait):
         self._service: RatingService | None = None
         self._backend: AtomicFactsBackend | None = None
         self._pairing: PairingConfig | None = None
+        self._batch: BatchConfig | None = None
 
     def on_start(self) -> None:
         """Initialize rating service and backend.
@@ -153,11 +157,12 @@ class RatingTrait(BaseTrait):
         self._service = RatingService(self.agent.lg, llm_trait.router)
         self._backend = AtomicFactsBackend(self.agent.lg, learn_trait.learn.database)
 
-        # Parse provider, criteria, and pairing configurations
+        # Parse provider, criteria, pairing, and batch configurations
         parser = ConfigParser(self.agent.lg)
         self._providers = parser.parse_providers(self.config.get("providers", []))
         self._criteria = parser.parse_criteria(self.config.get("models", {}))
         self._pairing = parser.parse_pairing(self.config.get("pairing"))
+        self._batch = parser.parse_batch(self.config.get("batch_size"))
 
         self.agent.lg.debug(
             "rating trait started",
@@ -177,6 +182,7 @@ class RatingTrait(BaseTrait):
         self._service = None
         self._backend = None
         self._pairing = None
+        self._batch = None
         self.agent.lg.debug("rating trait stopped")
 
     # =========================================================================
@@ -241,6 +247,106 @@ class RatingTrait(BaseTrait):
                 results.append(result)
 
         return results
+
+    def rate_batch(
+        self,
+        limit: int | None = None,
+        batch_size: int | None = None,
+        fact_type: str | None = None,
+        category: str | None = None,
+        provider_index: int = 0,
+    ) -> tuple[int, int]:
+        """Rate unrated facts in batches for efficiency.
+
+        Batches multiple facts per LLM call to reduce API costs.
+
+        Args:
+            limit: Maximum facts to rate (None = all unrated).
+            batch_size: Items per batch (None = use config default).
+            fact_type: Filter by fact type (e.g., "solution").
+            category: Filter by category (e.g., "joke").
+            provider_index: Index of provider to use (default: 0).
+
+        Returns:
+            Tuple of (rated_count, failed_count).
+        """
+        from .learn import LearnTrait
+
+        if not self._backend or not self._service:
+            raise RuntimeError("Rating not initialized - call on_start() first")
+
+        provider = self._select_provider(provider_index)
+        learn_trait = self.agent.require_trait(LearnTrait)
+        context_key = str(learn_trait.learn.context.context_key)
+
+        # Determine batch size
+        size = batch_size or (self._batch.size if self._batch else 5)
+
+        # Get type-specific criteria for prompt template
+        resolved_type = fact_type or "solution"
+        type_criteria = self._criteria.get(resolved_type)
+        if not type_criteria:
+            raise ValueError(f"No criteria configured for fact type: {resolved_type}")
+
+        # Build provider identifier
+        backend_type = provider.backend.get("type", "unknown")
+        provider_id = f"llm_{provider.model}_{backend_type}"
+
+        # Collect unrated facts
+        facts = list(self._backend.unrated_facts(context_key, fact_type, category, limit or 10000))
+        if not facts:
+            return (0, 0)
+
+        return self._rate_facts_in_batches(
+            facts, size, type_criteria.prompt, provider.model, provider_id
+        )
+
+    def _rate_facts_in_batches(
+        self,
+        facts: list[dict[str, Any]],
+        batch_size: int,
+        prompt_template: str,
+        model: str,
+        provider_id: str,
+    ) -> tuple[int, int]:
+        """Rate facts in batches and save results."""
+        assert self._service is not None
+        total_rated, total_failed = 0, 0
+
+        for i in range(0, len(facts), batch_size):
+            batch_facts = facts[i : i + batch_size]
+            rated, failed = self._process_batch(batch_facts, prompt_template, model, provider_id, i)
+            total_rated += rated
+            total_failed += failed
+
+        return (total_rated, total_failed)
+
+    def _process_batch(
+        self,
+        batch_facts: list[dict[str, Any]],
+        prompt_template: str,
+        model: str,
+        provider_id: str,
+        batch_start: int,
+    ) -> tuple[int, int]:
+        """Process a single batch of facts. Returns (rated, failed) counts."""
+        assert self._service is not None
+        items = [BatchItem(fact=f["id"], content=f["content"]) for f in batch_facts]
+        request = BatchRequest(
+            items=items, prompt_template=prompt_template, model=model, provider=provider_id
+        )
+
+        try:
+            results = self._service.rate_batch(request)
+            for result in results:
+                self._save_rating(result)
+            return (len(results), len(items) - len(results))
+        except Exception as e:
+            self.agent.lg.warning(
+                "batch rating failed",
+                extra={"exception": e, "batch_start": batch_start, "batch_size": len(items)},
+            )
+            return (0, len(items))
 
     def _try_rate_fact(self, fact: dict[str, Any], provider: ProviderConfig) -> RatingResult | None:
         """Attempt to rate a single fact, save, and try pairing."""
@@ -359,34 +465,18 @@ class RatingTrait(BaseTrait):
     ) -> RatingResult | None:
         """Rate a fact with a single provider, save, and attempt pairing."""
         try:
-            # Rate with this provider
             result = self.rate_fact(fact_id, content, fact_type, provider)
-
-            # Save rating to database
             self._save_rating(result)
-
             self.agent.lg.debug(
-                "rated fact with provider",
-                extra={
-                    "fact_id": fact_id,
-                    "provider_model": provider.model,
-                    "stars": result.stars,
-                },
+                "rated fact",
+                extra={"fact_id": fact_id, "model": provider.model, "stars": result.stars},
             )
-
-            # Try to create preference pair for DPO training
             self._try_create_preference_pair(fact_id, content, category, result.stars)
-
             return result
-
         except Exception as e:
             self.agent.lg.warning(
-                "rating failed for provider",
-                extra={
-                    "exception": e,
-                    "fact_id": fact_id,
-                    "provider_type": provider.provider_type,
-                },
+                "rating failed",
+                extra={"exception": e, "fact_id": fact_id, "provider": provider.provider_type},
             )
             return None
 
@@ -470,7 +560,11 @@ class RatingTrait(BaseTrait):
         if not is_high and not is_low:
             self.agent.lg.debug(
                 "skipping pairing - stars in neutral range",
-                extra={"stars": stars, "high": self._pairing.high_threshold, "low": self._pairing.low_threshold},
+                extra={
+                    "stars": stars,
+                    "high": self._pairing.high_threshold,
+                    "low": self._pairing.low_threshold,
+                },
             )
             return False
 
@@ -488,42 +582,41 @@ class RatingTrait(BaseTrait):
 
         learn_trait = self.agent.require_trait(LearnTrait)
         context_key = str(learn_trait.learn.context.context_key)
-
-        # Determine if this is a high or low rating and find opposite
         is_high = stars >= self._pairing.high_threshold
 
-        if is_high:
-            # This is chosen, look for rejected (low stars)
-            opposites = self._backend.get_rated_unpaired_facts(
-                context_key=context_key,
-                category=category,
-                min_stars=1,
-                max_stars=self._pairing.low_threshold,
-                exclude_fact_id=fact_id,
-                limit=1,
-            )
-        else:
-            # This is rejected, look for chosen (high stars)
-            opposites = self._backend.get_rated_unpaired_facts(
-                context_key=context_key,
-                category=category,
-                min_stars=self._pairing.high_threshold,
-                max_stars=5,
-                exclude_fact_id=fact_id,
-                limit=1,
-            )
-
-        if not opposites:
+        opposite = self._find_opposite_fact(context_key, category, fact_id, is_high)
+        if not opposite:
             self.agent.lg.debug(
                 "no unpaired opposite found for pairing",
                 extra={"fact_id": fact_id, "category": category, "is_high": is_high},
             )
             return None
 
-        opposite = opposites[0]
         return self._create_preference_pair(
             fact_id, content, stars, opposite, category, is_high, learn_trait
         )
+
+    def _find_opposite_fact(
+        self, context_key: str, category: str, exclude_fact_id: int, is_high: bool
+    ) -> dict[str, Any] | None:
+        """Find an unpaired fact with opposite rating (high->low or low->high)."""
+        assert self._pairing is not None
+        assert self._backend is not None
+
+        if is_high:
+            min_stars, max_stars = 1, self._pairing.low_threshold
+        else:
+            min_stars, max_stars = self._pairing.high_threshold, 5
+
+        opposites = self._backend.get_rated_unpaired_facts(
+            context_key=context_key,
+            category=category,
+            min_stars=min_stars,
+            max_stars=max_stars,
+            exclude_fact_id=exclude_fact_id,
+            limit=1,
+        )
+        return opposites[0] if opposites else None
 
     def _create_preference_pair(
         self,
@@ -539,37 +632,43 @@ class RatingTrait(BaseTrait):
         assert self._backend is not None
         assert self._pairing is not None
 
-        # Determine chosen/rejected based on which one is high-rated
-        if is_high:
-            chosen_content = content
-            rejected_content = opposite["content"]
-        else:
-            chosen_content = opposite["content"]
-            rejected_content = content
-
-        # Build context prompt (can include category placeholder)
-        context_prompt = self._pairing.prompt.format(category=category)
-
-        # Create preference pair via LearnTrait
-        preference_id = learn_trait.record_preference(
-            context=context_prompt,
-            chosen=chosen_content,
-            rejected=rejected_content,
+        chosen = (
+            (content, fact_id, stars)
+            if is_high
+            else (opposite["content"], opposite["id"], opposite["stars"])
+        )
+        rejected = (
+            (opposite["content"], opposite["id"], opposite["stars"])
+            if is_high
+            else (content, fact_id, stars)
         )
 
-        # Mark both facts as paired
-        self._backend.mark_facts_paired(fact_id, opposite["id"], preference_id)
+        preference_id = learn_trait.record_preference(
+            context=self._pairing.prompt.format(category=category),
+            chosen=chosen[0],
+            rejected=rejected[0],
+        )
 
+        self._backend.mark_facts_paired(fact_id, opposite["id"], preference_id)
+        self._log_preference_pair(preference_id, chosen, rejected, category)
+        return preference_id
+
+    def _log_preference_pair(
+        self,
+        preference_id: int,
+        chosen: tuple[str, int, int],
+        rejected: tuple[str, int, int],
+        category: str,
+    ) -> None:
+        """Log creation of preference pair."""
         self.agent.lg.info(
             "created preference pair for DPO training",
             extra={
                 "preference_id": preference_id,
-                "chosen_fact_id": fact_id if is_high else opposite["id"],
-                "chosen_stars": stars if is_high else opposite["stars"],
-                "rejected_fact_id": opposite["id"] if is_high else fact_id,
-                "rejected_stars": opposite["stars"] if is_high else stars,
+                "chosen_fact_id": chosen[1],
+                "chosen_stars": chosen[2],
+                "rejected_fact_id": rejected[1],
+                "rejected_stars": rejected[2],
                 "category": category,
             },
         )
-
-        return preference_id

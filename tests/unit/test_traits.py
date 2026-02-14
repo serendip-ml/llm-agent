@@ -229,6 +229,8 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
+        mock_response.adapter_fallback = False
+        mock_response.adapter_requested = None
         trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="What is the meaning of life?")]
@@ -246,6 +248,8 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
+        mock_response.adapter_fallback = False
+        mock_response.adapter_requested = None
         trait._router.chat_full.return_value = mock_response
 
         messages = [
@@ -270,6 +274,8 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
+        mock_response.adapter_fallback = False
+        mock_response.adapter_requested = None
         trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="Question?")]
@@ -289,6 +295,8 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
+        mock_response.adapter_fallback = False
+        mock_response.adapter_requested = None
         trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="Question?")]
@@ -307,6 +315,8 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
+        mock_response.adapter_fallback = False
+        mock_response.adapter_requested = None
         trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="Question?")]
@@ -322,6 +332,8 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
+        mock_response.adapter_fallback = False
+        mock_response.adapter_requested = None
         trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="Question?")]
@@ -337,6 +349,8 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
+        mock_response.adapter_fallback = False
+        mock_response.adapter_requested = None
         trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="Question?")]
@@ -351,6 +365,8 @@ class TestLLMTraitStructuredOutput:
         mock_response.model = "test-model"
         mock_response.usage = MagicMock(total_tokens=100, prompt_tokens=50, completion_tokens=50)
         mock_response.tool_calls = None
+        mock_response.adapter_fallback = False
+        mock_response.adapter_requested = None
         trait._router.chat_full.return_value = mock_response
 
         messages = [Message(role="user", content="Question?")]

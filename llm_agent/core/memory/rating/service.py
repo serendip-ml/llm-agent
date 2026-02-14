@@ -13,7 +13,7 @@ from appinfra.log import Logger
 
 from llm_agent.core.llm.json_cleaner import JSONCleaner
 
-from .models import Criteria, ProviderType, Request, Result
+from .models import BatchItem, BatchRequest, Criteria, ProviderType, Request, Result
 
 
 if TYPE_CHECKING:
@@ -196,3 +196,128 @@ Respond only with the JSON, no additional text."""
     ) -> tuple[Literal["positive", "negative", "dismiss"], float]:
         """Convert star rating to signal and strength."""
         return stars_to_signal(stars)
+
+    # =========================================================================
+    # Batch rating
+    # =========================================================================
+
+    def rate_batch(self, request: BatchRequest) -> list[Result]:
+        """Rate multiple items in a single LLM call.
+
+        Batches items together to reduce API costs by sharing prompt overhead.
+
+        Args:
+            request: Batch rating request with items and parameters.
+
+        Returns:
+            List of rating results (may be fewer than items if parsing fails).
+        """
+        if not request.items:
+            return []
+
+        prompt = self._build_batch_prompt(request.items, request.prompt_template)
+        response = self._call_llm(prompt, request.model, request.temperature)
+        actual_model = response.model or request.model
+
+        return self._parse_batch_response(
+            request.items, response.content, actual_model, request.provider
+        )
+
+    def _build_batch_prompt(self, items: list[BatchItem], prompt_template: str) -> str:
+        """Build batch rating prompt."""
+        items_text = "\n\n".join(
+            f"ITEM {i + 1} (ID: {item.fact}):\n{item.content}" for i, item in enumerate(items)
+        )
+
+        return f"""{prompt_template}
+
+{items_text}
+
+Rate each item 1-5 stars. Respond with a JSON array:
+```json
+[
+  {{"id": <item_id>, "stars": <1-5>, "reasoning": "<brief explanation>"}},
+  ...
+]
+```
+
+Be strict. Respond only with the JSON array."""
+
+    def _parse_batch_response(
+        self,
+        items: list[BatchItem],
+        response: str,
+        model: str,
+        provider: str,
+    ) -> list[Result]:
+        """Parse batch response into individual results."""
+        results = []
+        item_map = {item.fact: item for item in items}
+
+        try:
+            parsed = self._extract_batch_json(response)
+            for rating_data in parsed:
+                result = self._parse_batch_item(rating_data, item_map, model, provider)
+                if result:
+                    results.append(result)
+        except Exception as e:
+            self._lg.warning(
+                "failed to parse batch response",
+                extra={"exception": e, "response": response[:500]},
+            )
+
+        return results
+
+    def _extract_batch_json(self, response: str) -> list[dict[str, Any]]:
+        """Extract JSON array from batch response."""
+        # Handle markdown code fences
+        json_str = response
+        if "```json" in response:
+            start = response.find("```json") + 7
+            end = response.find("```", start)
+            json_str = response[start:end].strip()
+        elif "```" in response:
+            start = response.find("```") + 3
+            end = response.find("```", start)
+            json_str = response[start:end].strip()
+
+        parsed = json.loads(json_str)
+        if isinstance(parsed, dict):
+            # Single item wrapped in object
+            return [parsed]
+        return cast(list[dict[str, Any]], parsed)
+
+    def _parse_batch_item(
+        self,
+        data: dict[str, Any],
+        item_map: dict[Any, BatchItem],
+        model: str,
+        provider: str,
+    ) -> Result | None:
+        """Parse a single item from batch response."""
+        item_id = data.get("id")
+        stars_raw = data.get("stars")
+        reasoning = data.get("reasoning", "")
+
+        if item_id not in item_map:
+            self._lg.warning("unknown item ID in batch response", extra={"id": item_id})
+            return None
+
+        if not isinstance(stars_raw, int) or not 1 <= stars_raw <= 5:
+            self._lg.warning("invalid stars in batch response", extra={"stars": stars_raw})
+            return None
+
+        stars = max(1, min(5, int(stars_raw)))
+        signal, strength = self._stars_to_signal(stars)
+
+        return Result(
+            fact=item_id,
+            signal=signal,
+            strength=strength,
+            stars=stars,
+            criteria_scores={},
+            reasoning=str(reasoning),
+            provider_type=ProviderType.LLM,
+            model=model,
+            provider=provider,
+        )

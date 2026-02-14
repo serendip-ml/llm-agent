@@ -62,6 +62,10 @@ class Factory:
     # Optional: declare default tools at factory level
     default_tools: ClassVar[dict[str, dict[str, Any]]] = {}
 
+    # Optional: CLI tool class for agent-specific commands
+    # When set, enables: ./llm-agent.py agent <agent-name> <command>
+    cli_tool: ClassVar[type | None] = None
+
     def __init__(self, platform: PlatformContext) -> None:
         """Initialize factory with platform context.
 

@@ -7,7 +7,14 @@ from typing import Any
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from .models import Criteria, CriteriaConfig, PairingConfig, ProviderConfig, ProviderType
+from .models import (
+    BatchConfig,
+    Criteria,
+    CriteriaConfig,
+    PairingConfig,
+    ProviderConfig,
+    ProviderType,
+)
 
 
 class ConfigParser:
@@ -207,4 +214,18 @@ class ConfigParser:
             high_threshold=int(config.get("high_threshold", 4)),
             low_threshold=int(config.get("low_threshold", 2)),
             prompt=str(config.get("prompt", "Generate content for this category.")),
+        )
+
+    def parse_batch(self, batch_size: int | None = None) -> BatchConfig:
+        """Parse batch configuration.
+
+        Args:
+            batch_size: Batch size from config (None = default).
+
+        Returns:
+            BatchConfig with parsed values.
+        """
+        return BatchConfig(
+            enabled=batch_size is not None and batch_size > 1,
+            size=batch_size if batch_size and batch_size > 0 else 5,
         )

@@ -2,25 +2,116 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from appinfra import DotDict
+from appinfra.log import Logger
+
 from ...core.agent import Factory as BaseFactory
 from ...core.traits import TraitName as TN
+from ...core.traits.builtin.directive import DirectiveTrait
+from ...core.traits.builtin.learn import LearnTrait
+from ...core.traits.builtin.llm import LLMTrait
+from ...core.traits.builtin.rating import RatingTrait
+from ...core.traits.builtin.storage import StorageTrait
 from .agent import JokesterAgent
+from .cli import JokesterCLI
+from .generate import JokeGenerator
+from .novelty import NoveltyChecker
+from .rating import InlineRater
+from .schema import ModelUsage, TrainingMetadata
+from .storage import Storage
+
+
+if TYPE_CHECKING:
+    pass
+
+
+@dataclass
+class Components:
+    """Wired components for jokester agent."""
+
+    generator: JokeGenerator
+    storage: Storage
+    rater: InlineRater | None
 
 
 class Factory(BaseFactory):
     """Factory for jokester agent.
 
-    Declares DIRECTIVE, LLM, LEARN, STORAGE, and RATING as required traits.
-    These can be overridden in YAML:
-        traits:
-          required: [directive, llm, learn, storage, rating]
-
-    StorageTrait provides agent-specific tables for tracking model usage and training metadata.
-    RatingTrait enables inline rating of generated jokes if rating.auto: true.
-    No tools needed - agent uses traits directly in code.
+    Handles all component wiring: NoveltyChecker, JokeGenerator, Storage.
+    Agent just uses the pre-configured components.
     """
 
     agent_class = JokesterAgent
-    # IMPORTANT: STORAGE and RATING must come after LEARN - they depend on LearnTrait's database
     required_traits = [TN.DIRECTIVE, TN.LLM, TN.LEARN, TN.STORAGE, TN.RATING]
-    default_tools = {}  # This agent doesn't need tools (uses traits directly in code)
+    default_tools = {}
+    cli_tool = JokesterCLI
+
+    @classmethod
+    def create_components(cls, agent: JokesterAgent) -> Components:
+        """Create and wire all components for the agent.
+
+        Called by agent.start() after traits are started.
+
+        Args:
+            agent: The agent instance with started traits.
+
+        Returns:
+            Components dataclass with generator and storage.
+
+        Raises:
+            RuntimeError: If embedder not configured.
+        """
+        lg = agent._lg
+        config = agent.config
+
+        storage_trait = agent.require_trait(StorageTrait)
+        storage_trait.storage.register_table(ModelUsage)
+        storage_trait.storage.register_table(TrainingMetadata)
+
+        learn_trait = agent.require_trait(LearnTrait)
+        cls._validate_embedder(lg, learn_trait)
+
+        generator = cls._create_generator(agent, lg, config, learn_trait)
+        storage = Storage(lg, storage_trait, learn_trait, agent.name)
+        rater = cls._create_rater(agent, lg, config)
+
+        return Components(generator=generator, storage=storage, rater=rater)
+
+    @classmethod
+    def _validate_embedder(cls, lg: Logger, learn_trait: LearnTrait) -> None:
+        """Validate embedder is configured for novelty checking."""
+        if not learn_trait.has_embedder:
+            lg.error("embedder not configured - required for novelty checking")
+            raise RuntimeError(
+                "Jokester agent requires embedder for guaranteed novelty checking. "
+                "Configure embedder_url in learn section."
+            )
+
+    @classmethod
+    def _create_generator(
+        cls, agent: JokesterAgent, lg: Logger, config: DotDict, learn_trait: LearnTrait
+    ) -> JokeGenerator:
+        """Create JokeGenerator with novelty checker."""
+        llm_trait = agent.require_trait(LLMTrait)
+        directive_trait = agent.get_trait(DirectiveTrait)
+        novelty_checker = NoveltyChecker(lg, learn_trait, config.get("similarity_threshold", 0.85))
+
+        return JokeGenerator(
+            lg=lg,
+            llm_trait=llm_trait,
+            novelty_checker=novelty_checker,
+            directive_trait=directive_trait,
+            max_retries=config.get("max_retries", 3),
+            denylist=config.get("denylist", []),
+        )
+
+    @classmethod
+    def _create_rater(cls, agent: JokesterAgent, lg: Logger, config: DotDict) -> InlineRater | None:
+        """Create InlineRater if auto-rating is enabled."""
+        if not config.get("rating", {}).get("auto", False):
+            return None
+        rating_trait = agent.get_trait(RatingTrait)
+        return InlineRater(lg, rating_trait) if rating_trait else None

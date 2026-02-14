@@ -19,6 +19,12 @@ denylist:
   - participation trophy
   - selfie
 
+# Agent-specific LLM config (merged with global llm.yaml)
+llm:
+  backends:
+    local:
+      adapter_id: jokester-p
+
 # Directive prompt (agent personality)
 directive: |
   You are a joke teller who develops a personal sense of humor over time.
@@ -47,7 +53,7 @@ schedule:
 rating:
   providers:
     - type: llm
-      backend: !include '../llm.yaml#backends.local'
+      backend: !include '../llm.yaml#backends.anthropic'
       enabled: true
   models:
     atomic:
@@ -90,14 +96,14 @@ rating:
             description: "Binary check: If offensive/problematic, set to 0.0. Otherwise 1.0 (don't reward for being safe)"
             weight: 0.2
   batch_size: 5
-  auto: true
+  auto: false
   # Preference pairing for DPO training
-  # When a joke gets 4+ or 2- stars, pair it with an opposite-rated joke
+  # Disabled - pairing done at training time via llm-learn CLI for optimal matching
   pairing:
-    enabled: true
-    high_threshold: 4  # 4+ stars = "chosen"
-    low_threshold: 2   # 2- stars = "rejected"
-    prompt: "Tell me a {category}."  # Context prompt for preference pairs
+    enabled: false
+    # high_threshold: 4  # 4+ stars = "chosen"
+    # low_threshold: 2   # 2- stars = "rejected"
+    # prompt: "Tell me a {category}."  # Context prompt for preference pairs
 
 # No tools needed - programmatic agent uses LearnTrait/LLMTrait directly
 # No conversation config - not using conversation runner

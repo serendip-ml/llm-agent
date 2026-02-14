@@ -44,3 +44,11 @@ class CompletionResult(BaseModel):
     parsed: Any | None = Field(
         default=None, description="Validated object when output_schema is used"
     )
+
+    # Adapter fallback info (when requested adapter wasn't available)
+    adapter_fallback: bool = Field(
+        default=False, description="True if requested adapter wasn't available"
+    )
+    adapter_requested: str | None = Field(
+        default=None, description="Adapter that was requested (if any)"
+    )

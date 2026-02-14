@@ -1,5 +1,6 @@
 """CLI tools for agent management."""
 
+from .agent import AgentTool
 from .ask import AskTool
 from .feedback import FeedbackTool
 from .list import ListTool
@@ -10,6 +11,7 @@ from .stop import StopTool
 
 
 __all__ = [
+    "AgentTool",
     "AskTool",
     "FeedbackTool",
     "ListTool",

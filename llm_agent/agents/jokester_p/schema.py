@@ -133,3 +133,17 @@ class TrainingMetadata(AgentTable):
         nullable=False,
         comment="True if base model without fine-tuning",
     )
+
+    # Adapter fallback tracking
+    adapter_requested: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Adapter that was requested (even if not used due to fallback)",
+    )
+
+    adapter_fallback: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="True if adapter was requested but unavailable (fell back to base)",
+    )

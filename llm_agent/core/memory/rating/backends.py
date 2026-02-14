@@ -248,36 +248,38 @@ class AtomicFactsBackend:
         exclude_fact_id: int | None = None,
         limit: int = 1,
     ) -> list[dict[str, Any]]:
-        """Get rated facts that haven't been paired for DPO training.
+        """Get rated facts that haven't been paired for DPO training."""
+        query, params = self._build_unpaired_facts_query(
+            context_key, category, min_stars, max_stars, exclude_fact_id, limit
+        )
+        with self._db.session() as session:
+            result = session.execute(text(query), params)
+            return [
+                {"id": r[0], "content": r[1], "stars": r[2], "feedback_id": r[3]} for r in result
+            ]
 
-        Args:
-            context_key: Context key to filter facts.
-            category: Category to match (e.g., "joke").
-            min_stars: Minimum star rating (inclusive).
-            max_stars: Maximum star rating (inclusive).
-            exclude_fact_id: Fact ID to exclude from results.
-            limit: Maximum number of facts to return.
-
-        Returns:
-            List of dicts with: id, content, stars, feedback_id.
-        """
+    def _build_unpaired_facts_query(
+        self,
+        context_key: str,
+        category: str,
+        min_stars: int,
+        max_stars: int,
+        exclude_fact_id: int | None,
+        limit: int,
+    ) -> tuple[str, dict[str, Any]]:
+        """Build SQL query and params for unpaired facts lookup."""
         query = """
         SELECT af.id, af.content, (afd.context->>'stars')::int as stars, afd.id as feedback_id
         FROM atomic_facts af
         JOIN atomic_feedback_details afd ON af.id = afd.fact_id
         WHERE af.context_key LIKE :context_pattern ESCAPE '\\'
-          AND af.category = :category
-          AND af.active = true
+          AND af.category = :category AND af.active = true
           AND (afd.context->>'stars')::int >= :min_stars
           AND (afd.context->>'stars')::int <= :max_stars
           AND (afd.context->>'paired_with') IS NULL
         """
         params = self._escape_context_key(context_key)
-        params.update({
-            "category": category,
-            "min_stars": min_stars,
-            "max_stars": max_stars,
-        })
+        params.update({"category": category, "min_stars": min_stars, "max_stars": max_stars})
 
         if exclude_fact_id is not None:
             query += " AND af.id != :exclude_fact_id"
@@ -285,72 +287,24 @@ class AtomicFactsBackend:
 
         query += " ORDER BY af.created_at ASC LIMIT :limit"
         params["limit"] = limit
+        return query, params
 
+    def mark_facts_paired(self, fact_id_1: int, fact_id_2: int, preference_id: int) -> None:
+        """Mark two facts as paired for DPO training."""
+        query = text("""
+            UPDATE atomic_feedback_details
+            SET context = context || :pairing_info
+            WHERE fact_id = :fact_id
+        """)
         with self._db.session() as session:
-            result = session.execute(text(query), params)
-            return [
-                {
-                    "id": row[0],
-                    "content": row[1],
-                    "stars": row[2],
-                    "feedback_id": row[3],
-                }
-                for row in result
-            ]
-
-    def mark_facts_paired(
-        self,
-        fact_id_1: int,
-        fact_id_2: int,
-        preference_id: int,
-    ) -> None:
-        """Mark two facts as paired for DPO training.
-
-        Updates the context JSON in atomic_feedback_details to include:
-        - paired_with: the other fact's ID
-        - preference_id: the preference record ID
-
-        Args:
-            fact_id_1: First fact ID.
-            fact_id_2: Second fact ID.
-            preference_id: ID of the created preference record.
-        """
-        query = """
-        UPDATE atomic_feedback_details
-        SET context = context || :pairing_info
-        WHERE fact_id = :fact_id
-        """
-
-        with self._db.session() as session:
-            # Update first fact
-            session.execute(
-                text(query),
-                {
-                    "fact_id": fact_id_1,
-                    "pairing_info": json.dumps({
-                        "paired_with": fact_id_2,
-                        "preference_id": preference_id,
-                    }),
-                },
-            )
-            # Update second fact
-            session.execute(
-                text(query),
-                {
-                    "fact_id": fact_id_2,
-                    "pairing_info": json.dumps({
-                        "paired_with": fact_id_1,
-                        "preference_id": preference_id,
-                    }),
-                },
-            )
+            for fact_id, paired_with in [(fact_id_1, fact_id_2), (fact_id_2, fact_id_1)]:
+                pairing_info = json.dumps(
+                    {"paired_with": paired_with, "preference_id": preference_id}
+                )
+                session.execute(query, {"fact_id": fact_id, "pairing_info": pairing_info})
             session.commit()
 
         self._lg.debug(
             "marked facts as paired",
-            extra={
-                "fact_id_1": fact_id_1,
-                "fact_id_2": fact_id_2,
-                "preference_id": preference_id,
-            },
+            extra={"fact_id_1": fact_id_1, "fact_id_2": fact_id_2, "preference_id": preference_id},
         )

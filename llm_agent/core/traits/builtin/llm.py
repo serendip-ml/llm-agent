@@ -43,7 +43,7 @@ Supports multi-backend format (see llm-infer LLMClient.from_config):
 def _resolve_llm_defaults(config: LLMConfig) -> dict[str, Any]:
     """Extract default values from LLM config.
 
-    Returns dict with model, temperature, max_tokens from the selected backend.
+    Returns dict with model, temperature, max_tokens, adapter_id from the selected backend.
     """
     backends = config.get("backends", {})
     default_name = config.get("default")
@@ -54,6 +54,7 @@ def _resolve_llm_defaults(config: LLMConfig) -> dict[str, Any]:
             "model": config.get("model", "default"),
             "temperature": config.get("temperature", 0.7),
             "max_tokens": config.get("max_tokens"),
+            "adapter_id": config.get("adapter_id"),
         }
 
     if not default_name:
@@ -64,6 +65,7 @@ def _resolve_llm_defaults(config: LLMConfig) -> dict[str, Any]:
         "model": backend_config.get("model", "default"),
         "temperature": backend_config.get("temperature", 0.7),
         "max_tokens": backend_config.get("max_tokens"),
+        "adapter_id": backend_config.get("adapter_id"),
     }
 
 
@@ -153,6 +155,7 @@ class LLMTrait(BaseTrait):
         tools: list[dict[str, Any]] | None = None,
         output_schema: type[BaseModel] | None = None,
         backend: str | None = None,
+        adapter_id: str | None = None,
     ) -> CompletionResult:
         """Generate a completion.
 
@@ -167,6 +170,7 @@ class LLMTrait(BaseTrait):
                 the LLM is instructed to return JSON matching the schema, and the
                 response is validated. Result.parsed will contain the validated object.
             backend: Backend to route to. If None, uses model-based routing or default.
+            adapter_id: LoRA adapter to use (uses config default if None).
 
         Returns:
             CompletionResult with content and metadata. If output_schema was provided,
@@ -195,6 +199,7 @@ class LLMTrait(BaseTrait):
             max_tokens=max_tokens if max_tokens is not None else self._defaults.get("max_tokens"),
             tools=tools,
             backend=backend,
+            adapter_id=adapter_id or self._defaults.get("adapter_id"),
             extra_body=extra_body,
         )
 
@@ -222,6 +227,7 @@ class LLMTrait(BaseTrait):
         """Convert ChatResponse to CompletionResult."""
         import uuid
 
+        self._check_adapter_fallback(response)
         tokens_used = self._extract_tokens(response)
         tool_calls = self._extract_tool_calls(response)
 
@@ -232,6 +238,8 @@ class LLMTrait(BaseTrait):
             tokens_used=tokens_used,
             latency_ms=0,
             tool_calls=tool_calls,
+            adapter_fallback=getattr(response, "adapter_fallback", False),
+            adapter_requested=getattr(response, "adapter_requested", None),
         )
 
     def _extract_tokens(self, response: ChatResponse) -> int:
@@ -254,6 +262,15 @@ class LLMTrait(BaseTrait):
             }
             for tc in response.tool_calls
         ]
+
+    def _check_adapter_fallback(self, response: ChatResponse) -> None:
+        """Log warning if adapter fallback occurred."""
+        if getattr(response, "adapter_fallback", False):
+            adapter_requested = getattr(response, "adapter_requested", None)
+            self.agent.lg.warning(
+                "adapter not available, using base model",
+                extra={"adapter_requested": adapter_requested},
+            )
 
     def _build_schema_prompt(self, schema: type[BaseModel]) -> str:
         """Generate prompt instructing LLM to output JSON matching schema."""
@@ -344,6 +361,7 @@ class LLMTraitBackend:
         temperature: float | None = None,
         max_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
+        adapter_id: str | None = None,
     ) -> CompletionResult:
         """Delegate to LLMTrait.complete()."""
         return self._trait.complete(
@@ -352,6 +370,7 @@ class LLMTraitBackend:
             temperature=temperature,
             max_tokens=max_tokens,
             tools=tools,
+            adapter_id=adapter_id,
         )
 
     def load_adapter(self, adapter_path: str) -> None:
