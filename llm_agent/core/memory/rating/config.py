@@ -7,7 +7,14 @@ from typing import Any
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from .models import Criteria, CriteriaConfig, ProviderConfig, ProviderType
+from .models import (
+    BatchConfig,
+    Criteria,
+    CriteriaConfig,
+    PairingConfig,
+    ProviderConfig,
+    ProviderType,
+)
 
 
 class ConfigParser:
@@ -21,17 +28,26 @@ class ConfigParser:
         """
         self._lg = lg
 
-    def parse_providers(self, providers_config: list[Any]) -> list[ProviderConfig]:
+    def parse_providers(self, providers_config: list[Any] | dict[str, Any]) -> list[ProviderConfig]:
         """Parse provider configurations from config.
 
-        Format:
+        Supports both list and dict formats:
+
+          # List format (legacy)
           providers:
             - type: llm
               backend: ${llm.backends.local}
               enabled: true
 
+          # Dict format (preferred - gives providers names)
+          providers:
+            anthropic:
+              type: llm
+              backend: ${llm.backends.anthropic}
+              enabled: true
+
         Args:
-            providers_config: List of provider configurations.
+            providers_config: List or dict of provider configurations.
 
         Returns:
             List of parsed ProviderConfig objects.
@@ -39,6 +55,16 @@ class ConfigParser:
         if not providers_config:
             return []
 
+        # Handle dict format (name -> config)
+        if isinstance(providers_config, dict):
+            providers = []
+            for name, cfg in providers_config.items():
+                provider = self._parse_provider(cfg, name=name)
+                if provider:
+                    providers.append(provider)
+            return providers
+
+        # Handle list format (legacy)
         providers = []
         for provider_cfg in providers_config:
             provider = self._parse_provider(provider_cfg)
@@ -47,11 +73,14 @@ class ConfigParser:
 
         return providers
 
-    def _parse_provider(self, config: dict[str, Any] | DotDict) -> ProviderConfig | None:
+    def _parse_provider(
+        self, config: dict[str, Any] | DotDict, name: str | None = None
+    ) -> ProviderConfig | None:
         """Parse a single provider configuration.
 
         Args:
             config: Provider config with type, backend, enabled.
+            name: Optional provider name (from dict key).
 
         Returns:
             ProviderConfig or None if invalid.
@@ -62,7 +91,10 @@ class ConfigParser:
         # Extract backend config (from ${llm.backends.local} expansion)
         backend = config.get("backend")
         if not backend:
-            self._lg.warning("provider missing backend config, skipping")
+            self._lg.warning(
+                "provider missing backend config, skipping",
+                extra={"name": name} if name else {},
+            )
             return None
 
         backend = self._ensure_dotdict(backend)
@@ -180,3 +212,45 @@ class ConfigParser:
                     )
                 )
         return criteria
+
+    def parse_pairing(self, pairing_config: dict[str, Any] | None) -> PairingConfig:
+        """Parse preference pairing configuration.
+
+        Format:
+          pairing:
+            enabled: true
+            high_threshold: 4
+            low_threshold: 2
+            prompt: "Tell me a joke about {category}."
+
+        Args:
+            pairing_config: Pairing configuration dict (None = defaults).
+
+        Returns:
+            PairingConfig with parsed or default values.
+        """
+        if not pairing_config:
+            return PairingConfig()
+
+        config = self._ensure_dotdict(pairing_config)
+
+        return PairingConfig(
+            enabled=config.get("enabled", True),
+            high_threshold=int(config.get("high_threshold", 4)),
+            low_threshold=int(config.get("low_threshold", 2)),
+            prompt=str(config.get("prompt", "Generate content for this category.")),
+        )
+
+    def parse_batch(self, batch_size: int | None = None) -> BatchConfig:
+        """Parse batch configuration.
+
+        Args:
+            batch_size: Batch size from config (None = default).
+
+        Returns:
+            BatchConfig with parsed values.
+        """
+        return BatchConfig(
+            enabled=batch_size is not None and batch_size > 1,
+            size=batch_size if batch_size and batch_size > 0 else 5,
+        )

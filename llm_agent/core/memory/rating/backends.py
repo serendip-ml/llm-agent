@@ -182,7 +182,7 @@ class AtomicFactsBackend:
         FROM atomic_facts af
         LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
         WHERE afd.id IS NULL
-          AND af.context_key LIKE :context_pattern ESCAPE '\\\\'
+          AND af.context_key LIKE :context_pattern ESCAPE '\\'
           AND af.active = true
         """
 
@@ -234,3 +234,117 @@ class AtomicFactsBackend:
             "criteria_scores": result.criteria_scores,
             "reasoning": result.reasoning,
         }
+
+    # =========================================================================
+    # Preference pairing support
+    # =========================================================================
+
+    def get_rated_unpaired_facts(
+        self,
+        context_key: str,
+        category: str,
+        min_stars: int,
+        max_stars: int,
+        exclude_fact_id: int | None = None,
+        limit: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Get rated facts that haven't been paired for DPO training."""
+        query, params = self._build_unpaired_facts_query(
+            context_key, category, min_stars, max_stars, exclude_fact_id, limit
+        )
+        with self._db.session() as session:
+            result = session.execute(text(query), params)
+            return [
+                {"id": r[0], "content": r[1], "stars": r[2], "feedback_id": r[3]} for r in result
+            ]
+
+    def _build_unpaired_facts_query(
+        self,
+        context_key: str,
+        category: str,
+        min_stars: int,
+        max_stars: int,
+        exclude_fact_id: int | None,
+        limit: int,
+    ) -> tuple[str, dict[str, Any]]:
+        """Build SQL query and params for unpaired facts lookup.
+
+        Uses a lateral subquery to get only the latest feedback row per fact,
+        ensuring consistency with mark_facts_paired and get_fact_rating.
+        """
+        query = """
+        SELECT af.id, af.content, (afd_latest.context->>'stars')::int as stars,
+               afd_latest.id as feedback_id
+        FROM atomic_facts af
+        JOIN LATERAL (
+            SELECT afd.id, afd.context
+            FROM atomic_feedback_details afd
+            WHERE afd.fact_id = af.id
+            ORDER BY afd.id DESC
+            LIMIT 1
+        ) afd_latest ON true
+        WHERE af.context_key LIKE :context_pattern ESCAPE '\\'
+          AND af.category = :category AND af.active = true
+          AND (afd_latest.context->>'stars')::int >= :min_stars
+          AND (afd_latest.context->>'stars')::int <= :max_stars
+          AND (afd_latest.context->>'paired_with') IS NULL
+        """
+        params = self._escape_context_key(context_key)
+        params.update({"category": category, "min_stars": min_stars, "max_stars": max_stars})
+
+        if exclude_fact_id is not None:
+            query += " AND af.id != :exclude_fact_id"
+            params["exclude_fact_id"] = exclude_fact_id
+
+        query += " ORDER BY af.created_at ASC LIMIT :limit"
+        params["limit"] = limit
+        return query, params
+
+    def get_fact_rating(self, fact_id: int) -> int | None:
+        """Get the star rating for a specific fact.
+
+        Args:
+            fact_id: ID of the fact to get rating for.
+
+        Returns:
+            Star rating (1-5) if rated, None if unrated.
+        """
+        query = text("""
+            SELECT (context->>'stars')::int as stars
+            FROM atomic_feedback_details
+            WHERE fact_id = :fact_id
+            ORDER BY id DESC
+            LIMIT 1
+        """)
+        with self._db.session() as session:
+            result = session.execute(query, {"fact_id": fact_id})
+            row = result.fetchone()
+            return row[0] if row else None
+
+    def mark_facts_paired(self, fact_id_1: int, fact_id_2: int, preference_id: int) -> None:
+        """Mark two facts as paired for DPO training.
+
+        Only updates the latest feedback row for each fact to avoid polluting
+        stale ratings.
+        """
+        query = text("""
+            UPDATE atomic_feedback_details
+            SET context = context || CAST(:pairing_info AS jsonb)
+            WHERE id = (
+                SELECT id FROM atomic_feedback_details
+                WHERE fact_id = :fact_id
+                ORDER BY id DESC LIMIT 1
+            )
+        """)
+        with self._db.session() as session:
+            for fact_id, paired_with in [(fact_id_1, fact_id_2), (fact_id_2, fact_id_1)]:
+                pairing_info = json.dumps(
+                    {"paired_with": paired_with, "preference_id": preference_id}
+                )
+                session.execute(query, {"fact_id": fact_id, "pairing_info": pairing_info})
+            session.commit()
+
+        self._lg.debug(
+            "marked facts as paired",
+            extra={"fact_id_1": fact_id_1, "fact_id_2": fact_id_2, "preference_id": preference_id},
+        )

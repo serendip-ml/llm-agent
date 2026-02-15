@@ -32,14 +32,18 @@ class JSONCleaner:
         Returns:
             Cleaned JSON string ready for json.loads().
         """
+        cleaned = self._basic_clean(content)
+
+        # If multiple objects (e.g., LLM echoed schema), extract last one
+        cleaned = self._extract_last_object(cleaned)
+
+        return cleaned
+
+    def _basic_clean(self, content: str) -> str:
+        """Basic cleaning without multi-object handling."""
         cleaned = content.strip()
-
-        # Remove markdown code fences
         cleaned = self._strip_code_fences(cleaned)
-
-        # Auto-close unclosed braces/brackets
         cleaned = self._auto_close_json(cleaned)
-
         return cleaned
 
     def _strip_code_fences(self, content: str) -> str:
@@ -134,7 +138,7 @@ class JSONCleaner:
         Returns:
             String containing only the first JSON object.
         """
-        cleaned = self.clean(content)
+        cleaned = self._basic_clean(content)
         if not cleaned:
             return cleaned
 
@@ -146,3 +150,39 @@ class JSONCleaner:
         except json.JSONDecodeError:
             # If parsing fails, return the cleaned content for downstream error handling
             return cleaned
+
+    def _extract_last_object(self, content: str) -> str:
+        """Extract only the last JSON object from content.
+
+        Useful when LLM echoes schema definition before actual data.
+        Skips objects that look like JSON schema definitions.
+        """
+        if not content:
+            return content
+
+        # Find all JSON objects using raw_decode
+        decoder = json.JSONDecoder()
+        idx = 0
+        last_obj = content
+
+        try:
+            while idx < len(content):
+                obj, end_idx = decoder.raw_decode(content[idx:])
+                candidate = content[idx : idx + end_idx]
+                # Skip JSON schema definitions
+                if not self._looks_like_schema(obj):
+                    last_obj = candidate
+                idx += end_idx
+                # Skip whitespace and commas between objects
+                while idx < len(content) and content[idx] in " \t\n,":
+                    idx += 1
+        except json.JSONDecodeError:
+            pass
+
+        return last_obj
+
+    def _looks_like_schema(self, obj: object) -> bool:
+        """Check if parsed object looks like a JSON schema definition."""
+        if not isinstance(obj, dict):
+            return False
+        return "properties" in obj and obj.get("type") == "object"

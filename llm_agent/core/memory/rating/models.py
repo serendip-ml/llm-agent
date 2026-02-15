@@ -35,6 +35,7 @@ class Request:
     criteria: list[Criteria]
     model: str
     provider: str
+    backend: str | None = None  # LLM backend (e.g., "anthropic", "local")
     temperature: float = 0.3
 
 
@@ -70,3 +71,46 @@ class CriteriaConfig:
     fact_type: str  # e.g., "solution", "prediction", "feedback"
     prompt: str  # Type-specific base prompt
     criteria: list[Criteria]
+
+
+@dataclass
+class PairingConfig:
+    """Configuration for preference pairing (DPO training).
+
+    When a rating qualifies (4+ stars or 2- stars), the system looks for
+    an unpaired opposite in the same category and creates a preference pair.
+    """
+
+    enabled: bool = True
+    high_threshold: int = 4  # Minimum stars for "chosen" (4+)
+    low_threshold: int = 2  # Maximum stars for "rejected" (2-)
+    prompt: str = "Generate content for this category."  # Context prompt for preference
+
+
+@dataclass
+class BatchItem:
+    """A single item in a batch rating request."""
+
+    fact: Any  # Backend-specific identifier (e.g., fact_id)
+    content: str
+
+
+@dataclass
+class BatchRequest:
+    """Request to rate multiple items in a single LLM call."""
+
+    items: list[BatchItem]
+    prompt_template: str  # Base prompt describing what to rate and scale
+    model: str
+    provider: str
+    criteria: list[Criteria] | None = None  # Structured criteria for consistent rating
+    backend: str | None = None  # LLM backend (e.g., "anthropic", "local")
+    temperature: float = 0.3
+
+
+@dataclass
+class BatchConfig:
+    """Configuration for batch rating."""
+
+    enabled: bool = True
+    size: int = 5  # Number of items per batch

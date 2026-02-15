@@ -1,5 +1,11 @@
 default: local  # Options: local, anthropic, openai
 
+rate_limit:
+  per_minute: 60
+  backoff:
+    base: 1.0
+    max: 60.0
+
 backends:
   local:
     enabled: true
@@ -10,10 +16,15 @@ backends:
     # No API key needed for local
 
   anthropic:
-    enabled: false
+    enabled: true
     type: anthropic
-    model: "claude-sonnet-4-20250514"
+    model: "claude-haiku-4-5"
+    models:
+      - "claude-sonnet-4-20250514"
+      - "claude-haiku-4-5"
     # API key via ANTHROPIC_API_KEY environment variable
+    rate_limit:
+      per_minute: 12
 
   openai:
     enabled: false

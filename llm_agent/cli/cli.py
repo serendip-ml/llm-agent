@@ -12,7 +12,16 @@ Provides commands to:
 
 from appinfra.app import AppBuilder
 
-from .tools import AskTool, FeedbackTool, ListTool, RateTool, ServeTool, StartTool, StopTool
+from .tools import (
+    AgentTool,
+    AskTool,
+    FeedbackTool,
+    ListTool,
+    RateTool,
+    ServeTool,
+    StartTool,
+    StopTool,
+)
 
 
 def main() -> int:
@@ -28,6 +37,7 @@ def main() -> int:
         .with_tool(AskTool())
         .with_tool(FeedbackTool())
         .with_tool(RateTool())
+        .with_tool(AgentTool())
         .done()
         .build()
     )

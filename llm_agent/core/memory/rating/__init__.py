@@ -2,19 +2,34 @@
 
 from .backends import AtomicFactsBackend
 from .config import ConfigParser
-from .models import Criteria, CriteriaConfig, ProviderConfig, ProviderType, Request, Result
+from .models import (
+    BatchConfig,
+    BatchItem,
+    BatchRequest,
+    Criteria,
+    CriteriaConfig,
+    PairingConfig,
+    ProviderConfig,
+    ProviderType,
+    Request,
+    Result,
+)
 from .service import Service, stars_to_signal
 
 
 __all__ = [
-    "Service",
+    "AtomicFactsBackend",
+    "BatchConfig",
+    "BatchItem",
+    "BatchRequest",
+    "ConfigParser",
     "Criteria",
     "CriteriaConfig",
-    "ConfigParser",
+    "PairingConfig",
     "ProviderConfig",
+    "ProviderType",
     "Request",
     "Result",
-    "ProviderType",
-    "AtomicFactsBackend",
+    "Service",
     "stars_to_signal",
 ]
