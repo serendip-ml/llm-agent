@@ -254,7 +254,11 @@ class PairingService:
             chosen = chosen_pool[chosen_idx % len(chosen_pool)]
 
             for rejected in rejected_pool:
-                if rejected.id not in used_rejected and chosen.stars - rejected.stars >= min_gap:
+                if (
+                    rejected.id not in used_rejected
+                    and rejected.id != chosen.id
+                    and chosen.stars - rejected.stars >= min_gap
+                ):
                     pairs.append(PreferencePair(chosen=chosen, rejected=rejected))
                     used_rejected.add(rejected.id)
                     break
