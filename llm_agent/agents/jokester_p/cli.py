@@ -400,7 +400,11 @@ class JokesterCLI(Tool):
             return None
 
     def _get_rating_stats(self) -> dict[str, Any]:
-        """Get rating statistics."""
+        """Get rating statistics.
+
+        Uses lateral subquery to get only the latest feedback per fact,
+        avoiding duplicate counting when a joke has multiple ratings.
+        """
         assert self._pg is not None
         context_key = self._get_context_key()
         sql = text("""
@@ -410,7 +414,13 @@ class JokesterCLI(Tool):
                 COUNT(*) FILTER (WHERE afd.id IS NULL) as unrated,
                 AVG((afd.context->>'stars')::int) as avg_stars
             FROM atomic_facts af
-            LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            LEFT JOIN LATERAL (
+                SELECT afd2.id, afd2.context
+                FROM atomic_feedback_details afd2
+                WHERE afd2.fact_id = af.id
+                ORDER BY afd2.id DESC
+                LIMIT 1
+            ) afd ON true
             WHERE af.context_key = :context_key
               AND af.type = 'solution'
         """)
@@ -424,19 +434,29 @@ class JokesterCLI(Tool):
         }
 
     def _get_rating_distribution(self) -> list[dict[str, Any]]:
-        """Get rating distribution."""
+        """Get rating distribution.
+
+        Uses DISTINCT ON to count only the latest rating per fact,
+        avoiding inflated counts when jokes have multiple ratings.
+        """
         assert self._pg is not None
         context_key = self._get_context_key()
         sql = text("""
+            WITH latest_ratings AS (
+                SELECT DISTINCT ON (af.id)
+                    (afd.context->>'stars')::int as stars
+                FROM atomic_facts af
+                JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+                WHERE af.context_key = :context_key
+                  AND af.type = 'solution'
+                ORDER BY af.id, afd.id DESC
+            )
             SELECT
-                (context->>'stars')::int as stars,
+                stars,
                 COUNT(*) as count,
                 ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) as pct
-            FROM atomic_feedback_details afd
-            JOIN atomic_facts af ON af.id = afd.fact_id
-            WHERE af.context_key = :context_key
-              AND af.type = 'solution'
-            GROUP BY (context->>'stars')::int
+            FROM latest_ratings
+            GROUP BY stars
             ORDER BY stars DESC
         """)
         with self._pg.connect() as conn:

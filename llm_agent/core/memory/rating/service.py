@@ -204,6 +204,9 @@ Respond only with the JSON, no additional text."""
         Accepts int or float (e.g., 3.0) that represents a valid integer in range 1-5.
         Returns None if invalid.
         """
+        # Guard against bool (True/False are subclasses of int in Python)
+        if isinstance(stars_raw, bool):
+            return None
         if isinstance(stars_raw, int):
             if 1 <= stars_raw <= 5:
                 return stars_raw
@@ -213,6 +216,29 @@ Respond only with the JSON, no additional text."""
             if stars_raw == int(stars_raw) and 1 <= stars_raw <= 5:
                 return int(stars_raw)
             return None
+        return None
+
+    def _resolve_item_id(self, item_id: Any, item_map: dict[Any, BatchItem]) -> Any | None:
+        """Resolve item_id with type normalization.
+
+        LLM may return "123" (string) when we expect 123 (int) or vice versa.
+        """
+        # Direct match
+        if item_id in item_map:
+            return item_id
+        # Try string conversion if int-like
+        if isinstance(item_id, int):
+            str_id = str(item_id)
+            if str_id in item_map:
+                return str_id
+        # Try int conversion if numeric string
+        if isinstance(item_id, str):
+            try:
+                int_id = int(item_id)
+                if int_id in item_map:
+                    return int_id
+            except ValueError:
+                pass
         return None
 
     def _truncate(self, text: str, max_len: int = 200) -> str:
@@ -357,19 +383,11 @@ Be strict. Respond only with the JSON array."""
         provider: str,
     ) -> Result | None:
         """Parse a single item from batch response."""
-        item_id = data.get("id")
-        stars_raw = data.get("stars")
-        reasoning = data.get("reasoning", "")
-
-        if item_id not in item_map:
-            self._lg.warning("unknown item ID in batch response", extra={"id": item_id})
+        validated = self._validate_batch_item_data(data, item_map)
+        if validated is None:
             return None
 
-        # Accept int or float (e.g., 3.0) that represents a valid integer in range 1-5
-        stars = self._validate_stars(stars_raw)
-        if stars is None:
-            self._lg.warning("invalid stars in batch response", extra={"stars": stars_raw})
-            return None
+        item_id, stars, reasoning = validated
         signal, strength = self._stars_to_signal(stars)
 
         return Result(
@@ -378,8 +396,33 @@ Be strict. Respond only with the JSON array."""
             strength=strength,
             stars=stars,
             criteria_scores={},
-            reasoning=str(reasoning),
+            reasoning=reasoning,
             provider_type=ProviderType.LLM,
             model=model,
             provider=provider,
         )
+
+    def _validate_batch_item_data(
+        self, data: dict[str, Any], item_map: dict[Any, BatchItem]
+    ) -> tuple[Any, int, str] | None:
+        """Validate and extract batch item data. Returns (item_id, stars, reasoning) or None."""
+        item_id = data.get("id")
+        stars_raw = data.get("stars")
+        reasoning = str(data.get("reasoning", ""))
+
+        # Resolve item_id with type normalization (LLM may return "123" vs 123)
+        resolved_id = self._resolve_item_id(item_id, item_map)
+        if resolved_id is None:
+            self._lg.warning(
+                "unknown item ID in batch response",
+                extra={"id": item_id, "id_type": type(item_id).__name__},
+            )
+            return None
+
+        # Accept int or float (e.g., 3.0) that represents a valid integer in range 1-5
+        stars = self._validate_stars(stars_raw)
+        if stars is None:
+            self._lg.warning("invalid stars in batch response", extra={"stars": stars_raw})
+            return None
+
+        return (resolved_id, stars, reasoning)

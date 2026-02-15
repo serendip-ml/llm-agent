@@ -214,9 +214,23 @@ class PairingService:
         return pairs
 
     def _pair_threshold(self, rated: list[RatedJoke], high: int, low: int) -> list[PreferencePair]:
-        """Pair based on fixed thresholds."""
+        """Pair based on fixed thresholds.
+
+        Args:
+            rated: List of rated jokes.
+            high: Minimum stars for chosen pool (must be > low).
+            low: Maximum stars for rejected pool.
+
+        Raises:
+            ValueError: If high <= low (would allow same joke in both pools).
+        """
+        if high <= low:
+            raise ValueError(f"high threshold ({high}) must be greater than low ({low})")
+
         chosen_pool = [j for j in rated if j.stars >= high]
-        rejected_pool = [j for j in rated if j.stars <= low]
+        chosen_ids = {j.id for j in chosen_pool}
+        # Exclude jokes already in chosen pool to prevent same joke as both
+        rejected_pool = [j for j in rated if j.stars <= low and j.id not in chosen_ids]
 
         pairs = []
         for c, r in zip(chosen_pool, rejected_pool, strict=False):
