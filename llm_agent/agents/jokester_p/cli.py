@@ -331,7 +331,8 @@ class JokesterCLI(Tool):
         print(f"Min gap:        {min_gap} stars")
         print(f"Total pairs:    {total_pairs}")
         if new_pairs > 0:
-            print(f"(includes {new_pairs} newly created)")
+            verb = "would be" if dry_run else "newly"
+            print(f"(includes {new_pairs} {verb} created)")
         if dry_run:
             print("(Dry run - training run not created)")
         print()
@@ -411,6 +412,7 @@ class JokesterCLI(Tool):
             FROM atomic_facts af
             LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
             WHERE af.context_key = :context_key
+              AND af.type = 'solution'
         """)
         with self._pg.connect() as conn:
             result = conn.execute(sql, {"context_key": context_key}).fetchone()

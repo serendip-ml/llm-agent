@@ -142,11 +142,11 @@ class PairingService:
 
         return created
 
-    def _create_pair_atomic(self, pair: PreferencePair) -> int:
+    def _create_pair_atomic(self, pair: PreferencePair, context: str = "Tell me a joke.") -> int:
         """Create preference fact and details in a single transaction."""
         with self._pg.connect() as conn:
             fact_id = self._insert_preference_fact(conn)
-            self._insert_preference_details(conn, fact_id, pair)
+            self._insert_preference_details(conn, fact_id, pair, context)
             conn.commit()
         return fact_id
 
@@ -163,7 +163,9 @@ class PairingService:
         ).fetchone()
         return int(result[0])
 
-    def _insert_preference_details(self, conn: Any, fact_id: int, pair: PreferencePair) -> None:
+    def _insert_preference_details(
+        self, conn: Any, fact_id: int, pair: PreferencePair, context: str
+    ) -> None:
         """Insert atomic_preference_details row."""
         metadata = json.dumps(
             {
@@ -181,7 +183,7 @@ class PairingService:
             sql,
             {
                 "fact_id": fact_id,
-                "context": "Tell me a joke.",
+                "context": context,
                 "chosen": pair.chosen.content,
                 "rejected": pair.rejected.content,
                 "margin": pair.margin,

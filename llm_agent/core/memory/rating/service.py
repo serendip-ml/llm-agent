@@ -198,6 +198,23 @@ Respond only with the JSON, no additional text."""
         """Convert star rating to signal and strength."""
         return stars_to_signal(stars)
 
+    def _validate_stars(self, stars_raw: Any) -> int | None:
+        """Validate and normalize star rating from LLM response.
+
+        Accepts int or float (e.g., 3.0) that represents a valid integer in range 1-5.
+        Returns None if invalid.
+        """
+        if isinstance(stars_raw, int):
+            if 1 <= stars_raw <= 5:
+                return stars_raw
+            return None
+        if isinstance(stars_raw, float):
+            # Accept floats like 3.0 that have no fractional part
+            if stars_raw == int(stars_raw) and 1 <= stars_raw <= 5:
+                return int(stars_raw)
+            return None
+        return None
+
     def _truncate(self, text: str, max_len: int = 200) -> str:
         """Truncate text with '... (N more chars)' suffix."""
         if len(text) <= max_len:
@@ -348,11 +365,11 @@ Be strict. Respond only with the JSON array."""
             self._lg.warning("unknown item ID in batch response", extra={"id": item_id})
             return None
 
-        if not isinstance(stars_raw, int) or not 1 <= stars_raw <= 5:
+        # Accept int or float (e.g., 3.0) that represents a valid integer in range 1-5
+        stars = self._validate_stars(stars_raw)
+        if stars is None:
             self._lg.warning("invalid stars in batch response", extra={"stars": stars_raw})
             return None
-
-        stars = stars_raw  # Already validated as int in range 1-5
         signal, strength = self._stars_to_signal(stars)
 
         return Result(

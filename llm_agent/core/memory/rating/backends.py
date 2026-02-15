@@ -267,16 +267,27 @@ class AtomicFactsBackend:
         exclude_fact_id: int | None,
         limit: int,
     ) -> tuple[str, dict[str, Any]]:
-        """Build SQL query and params for unpaired facts lookup."""
+        """Build SQL query and params for unpaired facts lookup.
+
+        Uses a lateral subquery to get only the latest feedback row per fact,
+        ensuring consistency with mark_facts_paired and get_fact_rating.
+        """
         query = """
-        SELECT af.id, af.content, (afd.context->>'stars')::int as stars, afd.id as feedback_id
+        SELECT af.id, af.content, (afd_latest.context->>'stars')::int as stars,
+               afd_latest.id as feedback_id
         FROM atomic_facts af
-        JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+        JOIN LATERAL (
+            SELECT afd.id, afd.context
+            FROM atomic_feedback_details afd
+            WHERE afd.fact_id = af.id
+            ORDER BY afd.id DESC
+            LIMIT 1
+        ) afd_latest ON true
         WHERE af.context_key LIKE :context_pattern ESCAPE '\\'
           AND af.category = :category AND af.active = true
-          AND (afd.context->>'stars')::int >= :min_stars
-          AND (afd.context->>'stars')::int <= :max_stars
-          AND (afd.context->>'paired_with') IS NULL
+          AND (afd_latest.context->>'stars')::int >= :min_stars
+          AND (afd_latest.context->>'stars')::int <= :max_stars
+          AND (afd_latest.context->>'paired_with') IS NULL
         """
         params = self._escape_context_key(context_key)
         params.update({"category": category, "min_stars": min_stars, "max_stars": max_stars})
