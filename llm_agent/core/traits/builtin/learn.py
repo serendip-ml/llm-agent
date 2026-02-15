@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from appinfra.db.pg import PG
-from llm_infer.client import ChatResponse, LLMRouter
+from llm_infer.client import ChatClient, ChatResponse
 from llm_infer.client import Factory as LLMClientFactory
 from llm_learn import LearnClient
 from llm_learn.core import Database
@@ -43,7 +43,7 @@ Expected fields:
 class LearnTrait(BaseTrait):
     """Learn capability trait for memory, feedback, and learned completions.
 
-    Wraps llm_learn.LearnClient, LLMRouter, and Embedder to provide
+    Wraps llm_learn.LearnClient, ChatClient, and Embedder to provide
     learning-enabled completions with memory and feedback.
 
     Capabilities:
@@ -73,8 +73,8 @@ class LearnTrait(BaseTrait):
         agent.get_trait(LearnTrait).remember("User prefers concise answers")
 
     Lifecycle:
-        - on_start(): Creates LearnClient, LLMRouter, Embedder, ContextBuilder
-        - on_stop(): Closes LLMRouter and Embedder
+        - on_start(): Creates LearnClient, ChatClient, Embedder, ContextBuilder
+        - on_stop(): Closes ChatClient and Embedder
     """
 
     def __init__(self, agent: Agent, config: LearnConfig) -> None:
@@ -90,11 +90,11 @@ class LearnTrait(BaseTrait):
         self._learn: LearnClient | None = None
         self._embedder: Embedder | None = None
         self._context: ContextBuilder | None = None
-        self._client: LLMRouter | None = None
+        self._client: ChatClient | None = None
         self._llm_defaults: dict[str, Any] = {}
 
     def _create_learn_client(
-        self, database: Database, embedder: Embedder | None, llm_client: LLMRouter | None
+        self, database: Database, embedder: Embedder | None, llm_client: ChatClient | None
     ) -> LearnClient:
         """Create learn client from config using identity or legacy path.
 
@@ -121,7 +121,7 @@ class LearnTrait(BaseTrait):
             database=database,
             context=context,
             embedder=embedder,
-            llm_client=llm_client,  # type: ignore[arg-type]  # LLMRouter is API-compatible
+            llm_client=llm_client,
             ensure_schema=True,
         )
 
@@ -193,7 +193,7 @@ class LearnTrait(BaseTrait):
         return self._embedder is not None
 
     @property
-    def client(self) -> LLMRouter:
+    def client(self) -> ChatClient:
         """Access the LLM router.
 
         Raises:
@@ -237,7 +237,7 @@ class LearnTrait(BaseTrait):
             system_prompt, query, include_facts, rag, rag_top_k, rag_min_similarity
         )
 
-        response = self.client.chat_full(
+        response = self.client.chat(
             messages=[{"role": "user", "content": query}],
             system=prompt if prompt else None,
             model=self._llm_defaults.get("model"),

@@ -1,8 +1,8 @@
 """Framework-level LLM wrapper with logging and dry-run support.
 
 Sits between llm-infer client and the rest of the framework:
-    llm-infer/LLMRouter -> llm-agent/LLMCaller -> llm-agent/LLMTrait (agents)
-                                               -> RatingService (CLI)
+    llm-infer/ChatClient -> llm-agent/LLMCaller -> llm-agent/LLMTrait (agents)
+                                                -> RatingService (CLI)
 
 Provides:
 - Trace logging of full request/response
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from appinfra.log import Logger
-    from llm_infer.client import ChatResponse, LLMRouter
+    from llm_infer.client import ChatClient, ChatResponse
 
 
 @dataclass
@@ -37,7 +37,7 @@ class CallResult:
 class LLMCaller:
     """Framework wrapper for LLM calls with logging and dry-run.
 
-    Wraps llm-infer's LLMRouter to add framework-level concerns:
+    Wraps llm-infer's ChatClient to add framework-level concerns:
     - Trace logging of full request/response (for debugging)
     - Dry-run mode (log what would be sent without calling LLM)
     - Consistent interface for both agent and CLI contexts
@@ -59,7 +59,7 @@ class LLMCaller:
     def __init__(
         self,
         lg: Logger,
-        router: LLMRouter,
+        router: ChatClient,
         dry_run: bool = False,
     ) -> None:
         """Initialize LLM caller.
@@ -74,7 +74,7 @@ class LLMCaller:
         self._dry_run = dry_run
 
     @property
-    def router(self) -> LLMRouter:
+    def router(self) -> ChatClient:
         """Access underlying router (for compatibility)."""
         return self._router
 
@@ -109,21 +109,24 @@ class LLMCaller:
         Returns:
             CallResult with response content and metadata.
         """
-        resolved = self._router.resolve(model=model, backend=backend)
-        self._log_request(messages, resolved, temperature, max_tokens, adapter_id, tools)
+        self._log_request(messages, model, backend, temperature, max_tokens, adapter_id, tools)
 
         if self._dry_run:
             return self._dry_run_result(model)
 
-        response = self._router.chat_full(
+        # Build kwargs for optional parameters
+        kwargs: dict[str, Any] = {}
+        if backend is not None:
+            kwargs["backend"] = backend
+
+        response = self._router.chat(
             messages=messages,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             tools=tools,
-            backend=backend,
-            adapter_id=adapter_id,
-            extra_body=extra_body,
+            adapter=adapter_id,
+            **kwargs,
         )
 
         self._log_response(response)
@@ -164,7 +167,8 @@ class LLMCaller:
     def _log_request(
         self,
         messages: list[dict[str, Any]],
-        resolved: Any,
+        model: str | None,
+        backend: str | None,
         temperature: float,
         max_tokens: int | None,
         adapter_id: str | None,
@@ -174,8 +178,8 @@ class LLMCaller:
         self._lg.trace(
             "llm request",
             extra={
-                "backend": resolved.backend,
-                "model": resolved.model,
+                "backend": backend,
+                "model": model,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "adapter_id": adapter_id,

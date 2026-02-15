@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from llm_infer.client import ChatResponse, LLMRouter
+from llm_infer.client import ChatClient, ChatResponse
 from llm_infer.client import Factory as LLMClientFactory
 from pydantic import BaseModel, ValidationError
 
@@ -73,7 +72,7 @@ def _resolve_llm_defaults(config: LLMConfig) -> dict[str, Any]:
 class LLMTrait(BaseTrait):
     """LLM capability trait.
 
-    Wraps llm_infer.client.LLMRouter to provide completion capability
+    Wraps llm_infer.client.ChatClient to provide completion capability
     to agents with multi-backend support. Uses sync API for compatibility
     with current agent architecture.
 
@@ -100,8 +99,8 @@ class LLMTrait(BaseTrait):
         result = llm_trait.complete(messages, model="claude-sonnet-4-20250514")
 
     Lifecycle:
-        - on_start(): Creates LLMRouter
-        - on_stop(): Closes LLMRouter
+        - on_start(): Creates ChatClient
+        - on_stop(): Closes ChatClient
     """
 
     def __init__(self, agent: Agent, config: LLMConfig | None = None) -> None:
@@ -113,7 +112,7 @@ class LLMTrait(BaseTrait):
         """
         super().__init__(agent)
         self.config: LLMConfig = config or DotDict()
-        self._router: LLMRouter | None = None
+        self._router: ChatClient | None = None
         self._defaults: dict[str, Any] = {}
         self._last_adapter_fallback_warning: float = 0.0
 
@@ -129,7 +128,7 @@ class LLMTrait(BaseTrait):
             self._router = None
 
     @property
-    def router(self) -> LLMRouter:
+    def router(self) -> ChatClient:
         """Access the LLM router.
 
         Raises:
@@ -138,15 +137,6 @@ class LLMTrait(BaseTrait):
         if self._router is None:
             raise RuntimeError("LLMTrait not started - ensure agent.start() was called")
         return self._router
-
-    @property
-    def models(self) -> Mapping[str, str]:
-        """Model-to-backend routing table.
-
-        Returns:
-            Mapping of model IDs to backend names.
-        """
-        return self.router.models
 
     def complete(
         self,
@@ -192,14 +182,14 @@ class LLMTrait(BaseTrait):
             api_messages, params["model"], params["temp"], params["max_tokens"], params["adapter"]
         )
 
-        response = self.router.chat_full(
+        response = self.router.chat(
             messages=api_messages,
             model=params["model"],
             temperature=params["temp"],
             max_tokens=params["max_tokens"],
             tools=tools,
             backend=backend,
-            adapter_id=params["adapter"],
+            adapter=params["adapter"],
             extra_body=extra_body,
         )
 
