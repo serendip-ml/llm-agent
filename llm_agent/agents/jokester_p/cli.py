@@ -49,6 +49,7 @@ class JokesterCLI(Tool):
         subparsers.add_parser("stats", help="Show joke rating statistics")
         self._add_rate_args(subparsers)
         self._add_train_args(subparsers)
+        self._add_reset_args(subparsers)
 
     def _add_rate_args(self, subparsers: Any) -> None:
         """Add rate command arguments."""
@@ -77,12 +78,30 @@ class JokesterCLI(Tool):
             help="Minimum star difference for pairing (default: 2 = 3★ vs 1★)",
         )
         p.add_argument(
-            "--limit", type=int, help="Maximum pairs to include (default: all available)"
+            "--min",
+            type=int,
+            dest="min_pairs",
+            help="Minimum pairs to generate (reuses chosen jokes with multiple rejected if needed)",
+        )
+        p.add_argument(
+            "--max",
+            type=int,
+            dest="max_pairs",
+            help="Maximum pairs to include (default: all available)",
         )
         p.add_argument(
             "--dry-run",
             action="store_true",
             help="Show what would be created without saving",
+        )
+
+    def _add_reset_args(self, subparsers: Any) -> None:
+        """Add reset command arguments."""
+        p = subparsers.add_parser("reset", help="Clear preference pairs for re-training")
+        p.add_argument(
+            "--confirm",
+            action="store_true",
+            help="Skip confirmation prompt",
         )
 
     def run(self, **kwargs: Any) -> int:
@@ -94,9 +113,11 @@ class JokesterCLI(Tool):
             return self._cmd_rate()
         elif command == "train":
             return self._cmd_train()
+        elif command == "reset":
+            return self._cmd_reset()
         else:
             print("Usage: agent jokester-p <command>")
-            print("Commands: stats, rate, train")
+            print("Commands: stats, rate, train, reset")
             return 1
 
     def _cmd_stats(self) -> int:
@@ -144,13 +165,12 @@ class JokesterCLI(Tool):
         print()
 
     def _format_star_distribution(self, dist: dict[int, int], total: int) -> str:
-        """Format star distribution as: ★★★★★ 0(0.0%)  ★★★★☆ 1(0.1%)  ★★★☆☆ 10(10.0%)"""
+        """Format star distribution as: 5★:0(0.0%)  4★:18(0.2%)  3★:504(6.3%)  ..."""
         parts = []
-        for stars in (5, 4, 3):
+        for stars in (5, 4, 3, 2, 1):
             count = dist.get(stars, 0)
             pct = count * 100 / total if total else 0
-            symbol = "★" * stars + "☆" * (5 - stars)
-            parts.append(f"{symbol} {count}({pct:.1f}%)")
+            parts.append(f"{stars}★:{count}({pct:.1f}%)")
         return "  ".join(parts)
 
     def _cmd_rate(self) -> int:
@@ -235,14 +255,15 @@ class JokesterCLI(Tool):
 
         min_gap = getattr(self.args, "min_gap", 2)
         dry_run = getattr(self.args, "dry_run", False)
+        min_pairs = getattr(self.args, "min_pairs", None)
+        max_pairs = getattr(self.args, "max_pairs", None)
 
         # Step 1: Create new preference pairs from rated jokes
-        new_pairs = self._create_preference_pairs(min_gap, dry_run)
+        new_pairs = self._create_preference_pairs(min_gap, dry_run, min_pairs, max_pairs)
 
         # Step 2: Get all untrained pairs and create training run
         client = self._create_training_client()
-        limit = getattr(self.args, "limit", None)
-        pairs = client.get_untrained_pairs(min_margin=float(min_gap), limit=limit)
+        pairs = client.get_untrained_pairs(min_margin=float(min_gap), limit=max_pairs)
 
         if not pairs:
             print("\nNo untrained preference pairs available for training.")
@@ -259,16 +280,86 @@ class JokesterCLI(Tool):
         self._execute_training_run(client, pairs, adapter_name)
         return 0
 
-    def _create_preference_pairs(self, min_gap: int, dry_run: bool) -> int:
+    def _cmd_reset(self) -> int:
+        """Clear preference pairs for this agent's context."""
+        assert self._pg is not None
+        context_key = self._get_context_key()
+
+        # Get counts before deletion
+        counts = self._get_reset_counts(context_key)
+        if counts["pairs"] == 0 and counts["facts"] == 0:
+            print("No preference pairs to reset.")
+            return 0
+
+        print(f"\nThis will delete for context '{context_key}':")
+        print(f"  Preference details: {counts['pairs']}")
+        print(f"  Preference facts:   {counts['facts']}")
+
+        if not getattr(self.args, "confirm", False):
+            response = input("\nProceed? [y/N] ").strip().lower()
+            if response != "y":
+                print("Aborted.")
+                return 1
+
+        deleted = self._delete_preference_pairs(context_key)
+        print(f"\n✓ Deleted {deleted['pairs']} pairs, {deleted['facts']} facts")
+        return 0
+
+    def _get_reset_counts(self, context_key: str) -> dict[str, int]:
+        """Get counts of preference data to be deleted."""
+        assert self._pg is not None
+        sql = text("""
+            SELECT
+                (SELECT COUNT(*) FROM atomic_preference_details
+                 WHERE fact_id IN (SELECT id FROM atomic_facts WHERE context_key = :ctx)) as pairs,
+                (SELECT COUNT(*) FROM atomic_facts
+                 WHERE context_key = :ctx AND type = 'preference') as facts
+        """)
+        with self._pg.connect() as conn:
+            row = conn.execute(sql, {"ctx": context_key}).fetchone()
+        return {"pairs": row[0], "facts": row[1]}
+
+    def _delete_preference_pairs(self, context_key: str) -> dict[str, int]:
+        """Delete preference pairs for context. Returns counts deleted."""
+        assert self._pg is not None
+        with self._pg.connect() as conn:
+            # Delete details first (FK constraint)
+            details_sql = text("""
+                DELETE FROM atomic_preference_details
+                WHERE fact_id IN (SELECT id FROM atomic_facts WHERE context_key = :ctx)
+            """)
+            details_result = conn.execute(details_sql, {"ctx": context_key})
+            pairs_deleted = details_result.rowcount
+
+            # Delete preference facts
+            facts_sql = text("""
+                DELETE FROM atomic_facts WHERE context_key = :ctx AND type = 'preference'
+            """)
+            facts_result = conn.execute(facts_sql, {"ctx": context_key})
+            facts_deleted = facts_result.rowcount
+
+            conn.commit()
+
+        return {"pairs": pairs_deleted, "facts": facts_deleted}
+
+    def _create_preference_pairs(
+        self, min_gap: int, dry_run: bool, min_pairs: int | None, max_pairs: int | None
+    ) -> int:
         """Create preference pairs from rated jokes. Returns count created."""
         assert self._pg is not None
 
         service = PairingService(self.lg, self._pg, self._get_context_key())
-        result = service.create_pairs(strategy="relative", min_gap=min_gap)
+        result = service.create_pairs(
+            strategy="relative", min_gap=min_gap, min_pairs=min_pairs, max_pairs=max_pairs
+        )
 
         print("\n=== Pairing ===")
         print(f"Rated jokes:    {result.total_rated}")
         print(f"Min gap:        {min_gap} stars")
+        if min_pairs is not None:
+            print(f"Min pairs:      {min_pairs}")
+        if max_pairs is not None:
+            print(f"Max pairs:      {max_pairs}")
         print(f"New pairs:      {len(result.pairs)}")
 
         if not result.pairs:
@@ -536,12 +627,12 @@ class JokesterCLI(Tool):
     def _get_star_distribution(
         self, conn: Any, where: str, params: dict[str, Any]
     ) -> dict[int, int]:
-        """Get distribution of 3-5 star ratings."""
+        """Get distribution of star ratings (1-5)."""
         sql = text(f"""
             SELECT (afd.context->>'stars')::int as stars, COUNT(*) as cnt
             FROM atomic_facts af
             JOIN atomic_feedback_details afd ON af.id = afd.fact_id
-            WHERE {where} AND (afd.context->>'stars')::int >= 3
+            WHERE {where}
             GROUP BY (afd.context->>'stars')::int
         """)
         rows = conn.execute(sql, params).fetchall()
