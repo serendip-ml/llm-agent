@@ -88,20 +88,21 @@ class Factory:
         """Route to create_llm_trait.
 
         Merges agent-level llm config (from agent YAML) with global llm config.
-        Agent config overrides global config at the backend level.
 
-        Example agent config:
-            llm:
-              backends:
-                local:
-                  adapter_id: my-adapter
+        Agent config formats:
+            llm: anthropic                    # Select backend (simplest)
+            llm: { default: anthropic }       # Explicit default
+            llm: { default: local, backends: { local: { adapter_id: x } } }  # Select + override
         """
         llm_config: DotDict = DotDict(self._platform.llm_config())
 
-        # Merge agent-level llm config into global config
-        agent_llm_config = agent.config.get("llm", {})
+        agent_llm_config = agent.config.get("llm")
         if agent_llm_config:
-            llm_config = self._merge_llm_config(llm_config, agent_llm_config)
+            # String shorthand: "llm: anthropic" -> select that backend
+            if isinstance(agent_llm_config, str):
+                llm_config = DotDict({**dict(llm_config), "default": agent_llm_config})
+            else:
+                llm_config = self._merge_llm_config(llm_config, agent_llm_config)
 
         return self.create_llm_trait(agent, llm_config)
 

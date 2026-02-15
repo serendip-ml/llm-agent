@@ -30,6 +30,30 @@ class TestJSONCleanerBasic:
         result = cleaner.clean('```\n{"key": "value"}\n```')
         assert result == '{"key": "value"}'
 
+    def test_clean_strips_code_fences_with_preamble(self) -> None:
+        """Code fences with preamble text are handled."""
+        cleaner = JSONCleaner()
+        content = """Looking at my previous jokes, I see the wordplay ones got good reactions.
+
+```json
+{"text": "joke here", "style": "pun"}
+```"""
+        result = cleaner.clean(content)
+        assert result == '{"text": "joke here", "style": "pun"}'
+
+    def test_clean_strips_code_fences_with_long_preamble(self) -> None:
+        """Code fences with multi-line preamble are handled."""
+        cleaner = JSONCleaner()
+        content = """I'll analyze the patterns here.
+The puns work well.
+Let me try something new.
+
+```json
+{"text": "test", "style": "observational"}
+```"""
+        result = cleaner.clean(content)
+        assert result == '{"text": "test", "style": "observational"}'
+
 
 class TestJSONCleanerAutoClose:
     """Test auto-closing of unclosed braces/brackets."""
@@ -137,3 +161,70 @@ class TestExtractFirstObject:
         cleaner = JSONCleaner()
         result = cleaner.extract_first_object('```json\n{"key": "value"}\n```')
         assert result == '{"key": "value"}'
+
+
+class TestCleanParsed:
+    """Test post-parse cleaning for nested structure unwrapping."""
+
+    def test_clean_parsed_already_correct(self) -> None:
+        """Data with expected fields passes through unchanged."""
+        cleaner = JSONCleaner()
+        data = {"text": "hello", "style": "greeting"}
+        result = cleaner.clean_parsed(data, {"text", "style"})
+        assert result == {"text": "hello", "style": "greeting"}
+
+    def test_clean_parsed_single_wrapper_key(self) -> None:
+        """Single wrapper key containing expected fields is unwrapped.
+
+        e.g., {"joke": {"text": "...", "style": "..."}} -> {"text": "...", "style": "..."}
+        """
+        cleaner = JSONCleaner()
+        data = {"joke": {"text": "hello", "style": "pun"}}
+        result = cleaner.clean_parsed(data, {"text", "style"})
+        assert result == {"text": "hello", "style": "pun"}
+
+    def test_clean_parsed_field_contains_nested(self) -> None:
+        """Expected field containing nested object with expected fields is unwrapped.
+
+        e.g., {"text": {"text": "...", "style": "..."}} -> {"text": "...", "style": "..."}
+        """
+        cleaner = JSONCleaner()
+        data = {"text": {"text": "hello", "style": "pun"}}
+        result = cleaner.clean_parsed(data, {"text", "style"})
+        assert result == {"text": "hello", "style": "pun"}
+
+    def test_clean_parsed_no_expected_fields_single_wrapper(self) -> None:
+        """Without expected fields, single wrapper key is still unwrapped."""
+        cleaner = JSONCleaner()
+        data = {"wrapper": {"text": "hello", "style": "pun"}}
+        result = cleaner.clean_parsed(data, None)
+        assert result == {"text": "hello", "style": "pun"}
+
+    def test_clean_parsed_no_expected_fields_multiple_keys(self) -> None:
+        """Without expected fields, multiple keys means no unwrapping."""
+        cleaner = JSONCleaner()
+        data = {"text": "hello", "style": "pun"}
+        result = cleaner.clean_parsed(data, None)
+        assert result == {"text": "hello", "style": "pun"}
+
+    def test_clean_parsed_schema_not_unwrapped(self) -> None:
+        """Schema-like structure is not unwrapped without expected fields."""
+        cleaner = JSONCleaner()
+        data = {"schema": {"type": "object", "properties": {"text": {}}}}
+        result = cleaner.clean_parsed(data, None)
+        # Inner is a schema, so don't unwrap
+        assert result == {"schema": {"type": "object", "properties": {"text": {}}}}
+
+    def test_clean_parsed_non_dict_passthrough(self) -> None:
+        """Non-dict data passes through unchanged."""
+        cleaner = JSONCleaner()
+        result = cleaner.clean_parsed(["a", "b"], {"text", "style"})  # type: ignore
+        assert result == ["a", "b"]
+
+    def test_clean_parsed_partial_match_no_unwrap(self) -> None:
+        """If expected fields not all present in nested, don't unwrap."""
+        cleaner = JSONCleaner()
+        data = {"wrapper": {"text": "hello"}}  # Missing "style"
+        result = cleaner.clean_parsed(data, {"text", "style"})
+        # Doesn't have all expected fields, so returns original
+        assert result == {"wrapper": {"text": "hello"}}

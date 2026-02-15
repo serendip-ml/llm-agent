@@ -124,10 +124,10 @@ class JokesterCLI(Tool):
         """Show joke rating statistics."""
         assert self._pg is not None
 
-        stats = self._get_rating_stats()
-        dist = self._get_rating_distribution()
+        stats = self._get_rating_stats(exclude_haiku=True)
+        dist = self._get_rating_distribution(exclude_haiku=True)
 
-        print("\n=== Jokester-p Stats ===\n")
+        print("\n=== Jokester-p Stats (Local Model) ===\n")
         print(f"Total jokes:  {stats['total']}")
         print(f"Rated:        {stats['rated']}")
         print(f"Unrated:      {stats['unrated']}")
@@ -142,6 +142,9 @@ class JokesterCLI(Tool):
 
         # Show per-training-run stats
         self._print_training_run_stats()
+
+        # Show Haiku stats separately
+        self._print_haiku_stats()
 
         return 0
 
@@ -172,6 +175,50 @@ class JokesterCLI(Tool):
             pct = count * 100 / total if total else 0
             parts.append(f"{stars}★:{count}({pct:.1f}%)")
         return "  ".join(parts)
+
+    def _print_haiku_stats(self) -> None:
+        """Print stats for Haiku-generated jokes separately."""
+        assert self._pg is not None
+        context_key = self._get_context_key()
+
+        sql = text("""
+            SELECT
+                COUNT(*) as total,
+                COUNT(afd.id) as rated,
+                AVG((afd.context->>'stars')::int) as avg_stars
+            FROM atomic_facts af
+            JOIN agent_jokester_model_usage u ON u.fact_id = af.id
+            LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            WHERE af.context_key = :context_key
+              AND af.type = 'solution'
+              AND u.model_name LIKE '%haiku%'
+        """)
+        with self._pg.connect() as conn:
+            row = conn.execute(sql, {"context_key": context_key}).fetchone()
+            total, rated, avg_stars = row[0], row[1], row[2]
+
+            if total == 0:
+                return
+
+            # Get distribution
+            dist_sql = text("""
+                SELECT (afd.context->>'stars')::int as stars, COUNT(*) as cnt
+                FROM atomic_facts af
+                JOIN agent_jokester_model_usage u ON u.fact_id = af.id
+                JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+                WHERE af.context_key = :context_key
+                  AND af.type = 'solution'
+                  AND u.model_name LIKE '%haiku%'
+                GROUP BY (afd.context->>'stars')::int
+            """)
+            dist_rows = conn.execute(dist_sql, {"context_key": context_key}).fetchall()
+            dist = {r[0]: r[1] for r in dist_rows}
+
+        print("=== Haiku (Reference) ===\n")
+        avg_str = f"{float(avg_stars):.2f}" if avg_stars else "N/A"
+        stars_str = self._format_star_distribution(dist, rated)
+        print(f"{'haiku':20s}  {total:5d} jokes  avg={avg_str}  {stars_str}")
+        print()
 
     def _cmd_rate(self) -> int:
         """Rate unrated jokes in batches."""
@@ -490,7 +537,7 @@ class JokesterCLI(Tool):
             self.lg.error("failed to create LLM caller", extra={"exception": e})
             return None
 
-    def _get_rating_stats(self) -> dict[str, Any]:
+    def _get_rating_stats(self, exclude_haiku: bool = False) -> dict[str, Any]:
         """Get rating statistics.
 
         Uses lateral subquery to get only the latest feedback per fact,
@@ -498,7 +545,17 @@ class JokesterCLI(Tool):
         """
         assert self._pg is not None
         context_key = self._get_context_key()
-        sql = text("""
+
+        haiku_filter = ""
+        if exclude_haiku:
+            haiku_filter = """
+              AND NOT EXISTS (
+                  SELECT 1 FROM agent_jokester_model_usage u
+                  WHERE u.fact_id = af.id AND u.model_name LIKE '%haiku%'
+              )
+            """
+
+        sql = text(f"""
             SELECT
                 COUNT(*) as total,
                 COUNT(*) FILTER (WHERE afd.id IS NOT NULL) as rated,
@@ -514,6 +571,7 @@ class JokesterCLI(Tool):
             ) afd ON true
             WHERE af.context_key = :context_key
               AND af.type = 'solution'
+              {haiku_filter}
         """)
         with self._pg.connect() as conn:
             result = conn.execute(sql, {"context_key": context_key}).fetchone()
@@ -524,7 +582,7 @@ class JokesterCLI(Tool):
             "avg_stars": float(result[3]) if result[3] else None,
         }
 
-    def _get_rating_distribution(self) -> list[dict[str, Any]]:
+    def _get_rating_distribution(self, exclude_haiku: bool = False) -> list[dict[str, Any]]:
         """Get rating distribution.
 
         Uses DISTINCT ON to count only the latest rating per fact,
@@ -532,7 +590,17 @@ class JokesterCLI(Tool):
         """
         assert self._pg is not None
         context_key = self._get_context_key()
-        sql = text("""
+
+        haiku_filter = ""
+        if exclude_haiku:
+            haiku_filter = """
+              AND NOT EXISTS (
+                  SELECT 1 FROM agent_jokester_model_usage u
+                  WHERE u.fact_id = af.id AND u.model_name LIKE '%haiku%'
+              )
+            """
+
+        sql = text(f"""
             WITH latest_ratings AS (
                 SELECT DISTINCT ON (af.id)
                     (afd.context->>'stars')::int as stars
@@ -540,6 +608,7 @@ class JokesterCLI(Tool):
                 JOIN atomic_feedback_details afd ON af.id = afd.fact_id
                 WHERE af.context_key = :context_key
                   AND af.type = 'solution'
+                  {haiku_filter}
                 ORDER BY af.id, afd.id DESC
             )
             SELECT
@@ -612,7 +681,15 @@ class JokesterCLI(Tool):
         self, context_key: str, start: Any, end: Any
     ) -> tuple[str, dict[str, Any]]:
         """Build WHERE conditions and params for period queries."""
-        conditions = ["af.context_key = :context_key", "af.type = 'solution'"]
+        conditions = [
+            "af.context_key = :context_key",
+            "af.type = 'solution'",
+            # Exclude Haiku jokes from training period stats
+            """NOT EXISTS (
+                SELECT 1 FROM agent_jokester_model_usage u
+                WHERE u.fact_id = af.id AND u.model_name LIKE '%haiku%'
+            )""",
+        ]
         params: dict[str, Any] = {"context_key": context_key}
 
         if start is not None:
