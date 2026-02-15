@@ -226,7 +226,7 @@ class PairingService:
             INSERT INTO atomic_preference_details
                 (fact_id, context, chosen, rejected, margin, metadata)
             VALUES
-                (:fact_id, :context, :chosen, :rejected, :margin, :metadata::jsonb)
+                (:fact_id, :context, :chosen, :rejected, :margin, CAST(:metadata AS jsonb))
         """)
         with self._pg.connect() as conn:
             conn.execute(

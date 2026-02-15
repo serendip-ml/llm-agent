@@ -23,7 +23,7 @@ denylist:
 llm:
   backends:
     local:
-      adapter_id: jokester-p
+      adapter_id: jokester-dpo
 
 # Directive prompt (agent personality)
 directive: |
