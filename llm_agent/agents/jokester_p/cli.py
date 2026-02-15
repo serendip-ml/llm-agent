@@ -356,9 +356,9 @@ class JokesterCLI(Tool):
         print("\n=== Pairing ===")
         print(f"Rated jokes:    {result.total_rated}")
         print(f"Min gap:        {min_gap} stars")
-        if min_pairs:
+        if min_pairs is not None:
             print(f"Min pairs:      {min_pairs}")
-        if max_pairs:
+        if max_pairs is not None:
             print(f"Max pairs:      {max_pairs}")
         print(f"New pairs:      {len(result.pairs)}")
 

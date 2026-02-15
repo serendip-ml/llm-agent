@@ -214,7 +214,7 @@ class PairingService:
         if not chosen_pool or not rejected_pool:
             return []
 
-        target = min_pairs if min_pairs else len(chosen_pool)
+        target = min_pairs if min_pairs is not None else len(chosen_pool)
         return self._generate_pairs(chosen_pool, rejected_pool, min_gap, target)
 
     def _build_pairing_pools(
