@@ -63,17 +63,25 @@ class PairingService:
         self._pg = pg
         self._context_key = context_key
 
-    def get_rated_jokes(self) -> list[RatedJoke]:
+    def get_rated_jokes(self, max_chars: int | None = None) -> list[RatedJoke]:
         """Get all rated jokes sorted by stars (desc)."""
-        sql = text("""
+        chars_join = ""
+        chars_filter = ""
+        if max_chars:
+            chars_join = "JOIN atomic_solution_details asd ON asd.fact_id = af.id"
+            chars_filter = f"AND length(asd.answer_text) < {max_chars}"
+
+        sql = text(f"""
             SELECT DISTINCT ON (af.id)
                 af.id,
                 af.content,
                 (afd.context->>'stars')::int as stars
             FROM atomic_facts af
             JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            {chars_join}
             WHERE af.context_key = :context_key
               AND afd.context->>'stars' IS NOT NULL
+              {chars_filter}
             ORDER BY af.id, afd.id DESC
         """)
         with self._pg.connect() as conn:
@@ -88,6 +96,7 @@ class PairingService:
         low_threshold: int = 2,
         min_pairs: int | None = None,
         max_pairs: int | None = None,
+        max_chars: int | None = None,
     ) -> PairingResult:
         """Create preference pairs from rated jokes.
 
@@ -98,11 +107,12 @@ class PairingService:
             low_threshold: Maximum stars for rejected (threshold strategy)
             min_pairs: Minimum pairs to generate (reuses chosen jokes if needed)
             max_pairs: Maximum pairs to generate (caps output)
+            max_chars: Only include jokes under this character length
 
         Returns:
             PairingResult with pairs and metadata.
         """
-        rated = self.get_rated_jokes()
+        rated = self.get_rated_jokes(max_chars=max_chars)
 
         if strategy == "relative":
             pairs = self._pair_relative(rated, min_gap, min_pairs)

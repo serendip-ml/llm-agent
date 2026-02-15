@@ -72,7 +72,7 @@ class JokesterCLI(Tool):
             "--dry-run", action="store_true", help="Show what would be rated without sending to LLM"
         )
 
-    def _add_train_args(self, subparsers: Any) -> None:
+    def _add_train_args(self, subparsers: Any) -> None:  # cq: max-lines=40
         """Add train command arguments."""
         p = subparsers.add_parser("train", help="Create preference pairs and training run")
         p.add_argument(
@@ -103,6 +103,12 @@ class JokesterCLI(Tool):
             "--dry-run",
             action="store_true",
             help="Show what would be created without saving",
+        )
+        p.add_argument(
+            "--max-chars",
+            type=int,
+            default=200,
+            help="Only include jokes under this character length (default: 200)",
         )
 
     def _add_reset_args(self, subparsers: Any) -> None:
@@ -334,9 +340,10 @@ class JokesterCLI(Tool):
         dry_run = getattr(self.args, "dry_run", False)
         min_pairs = getattr(self.args, "min_pairs", None)
         max_pairs = getattr(self.args, "max_pairs", None)
+        max_chars = getattr(self.args, "max_chars", 200)
 
         # Step 1: Create new preference pairs from rated jokes
-        new_pairs = self._create_preference_pairs(min_gap, dry_run, min_pairs, max_pairs)
+        new_pairs = self._create_preference_pairs(min_gap, dry_run, min_pairs, max_pairs, max_chars)
 
         # Step 2: Get all untrained pairs and create training run
         client = self._create_training_client()
@@ -420,24 +427,24 @@ class JokesterCLI(Tool):
         return {"pairs": pairs_deleted, "facts": facts_deleted}
 
     def _create_preference_pairs(
-        self, min_gap: int, dry_run: bool, min_pairs: int | None, max_pairs: int | None
+        self,
+        min_gap: int,
+        dry_run: bool,
+        min_pairs: int | None,
+        max_pairs: int | None,
+        max_chars: int | None = None,
     ) -> int:
         """Create preference pairs from rated jokes. Returns count created."""
         assert self._pg is not None
-
         service = PairingService(self.lg, self._pg, self._get_context_key())
         result = service.create_pairs(
-            strategy="relative", min_gap=min_gap, min_pairs=min_pairs, max_pairs=max_pairs
+            strategy="relative",
+            min_gap=min_gap,
+            min_pairs=min_pairs,
+            max_pairs=max_pairs,
+            max_chars=max_chars,
         )
-
-        print("\n=== Pairing ===")
-        print(f"Rated jokes:    {result.total_rated}")
-        print(f"Min gap:        {min_gap} stars")
-        if min_pairs is not None:
-            print(f"Min pairs:      {min_pairs}")
-        if max_pairs is not None:
-            print(f"Max pairs:      {max_pairs}")
-        print(f"New pairs:      {len(result.pairs)}")
+        self._print_pairing_summary(result, min_gap, min_pairs, max_pairs, max_chars)
 
         if not result.pairs:
             return 0
@@ -449,6 +456,25 @@ class JokesterCLI(Tool):
         saved = service.save_pairs(result.pairs)
         print(f"Pairs saved:    {saved}")
         return saved
+
+    def _print_pairing_summary(
+        self,
+        result: Any,
+        min_gap: int,
+        min_pairs: int | None,
+        max_pairs: int | None,
+        max_chars: int | None,
+    ) -> None:
+        """Print pairing operation summary."""
+        print("\n=== Pairing ===")
+        print(f"Rated jokes:    {result.total_rated}")
+        print(f"Max chars:      {max_chars or 'unlimited'}")
+        print(f"Min gap:        {min_gap} stars")
+        if min_pairs is not None:
+            print(f"Min pairs:      {min_pairs}")
+        if max_pairs is not None:
+            print(f"Max pairs:      {max_pairs}")
+        print(f"New pairs:      {len(result.pairs)}")
 
     def _create_training_client(self) -> DpoClient:
         """Create DpoClient for agent's context."""
