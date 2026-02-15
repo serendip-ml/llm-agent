@@ -138,6 +138,11 @@ class LLMTrait(BaseTrait):
             raise RuntimeError("LLMTrait not started - ensure agent.start() was called")
         return self._router
 
+    @property
+    def adapter_id(self) -> str | None:
+        """Get the default adapter ID from config, if any."""
+        return self._defaults.get("adapter_id")
+
     def complete(
         self,
         messages: list[Message],

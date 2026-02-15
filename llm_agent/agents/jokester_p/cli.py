@@ -175,6 +175,7 @@ class JokesterCLI(Tool):
                 pg=self._pg,
                 llm_caller=llm_caller,
                 prompt_template=prompt_template,
+                context_key=self._get_context_key(),
                 batch_size=batch_size,
                 provider=provider,
                 model=model,
@@ -262,7 +263,7 @@ class JokesterCLI(Tool):
         """Create preference pairs from rated jokes. Returns count created."""
         assert self._pg is not None
 
-        service = PairingService(self.lg, self._pg)
+        service = PairingService(self.lg, self._pg, self._get_context_key())
         result = service.create_pairs(strategy="relative", min_gap=min_gap)
 
         print("\n=== Pairing ===")
@@ -400,6 +401,7 @@ class JokesterCLI(Tool):
     def _get_rating_stats(self) -> dict[str, Any]:
         """Get rating statistics."""
         assert self._pg is not None
+        context_key = self._get_context_key()
         sql = text("""
             SELECT
                 COUNT(*) as total,
@@ -408,10 +410,10 @@ class JokesterCLI(Tool):
                 AVG((afd.context->>'stars')::int) as avg_stars
             FROM atomic_facts af
             LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
-            WHERE af.context_key = 'jokester-p'
+            WHERE af.context_key = :context_key
         """)
         with self._pg.connect() as conn:
-            result = conn.execute(sql).fetchone()
+            result = conn.execute(sql, {"context_key": context_key}).fetchone()
         return {
             "total": result[0],
             "rated": result[1],
@@ -422,6 +424,7 @@ class JokesterCLI(Tool):
     def _get_rating_distribution(self) -> list[dict[str, Any]]:
         """Get rating distribution."""
         assert self._pg is not None
+        context_key = self._get_context_key()
         sql = text("""
             SELECT
                 (context->>'stars')::int as stars,
@@ -429,12 +432,12 @@ class JokesterCLI(Tool):
                 ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) as pct
             FROM atomic_feedback_details afd
             JOIN atomic_facts af ON af.id = afd.fact_id
-            WHERE af.context_key = 'jokester-p'
+            WHERE af.context_key = :context_key
             GROUP BY (context->>'stars')::int
             ORDER BY stars DESC
         """)
         with self._pg.connect() as conn:
-            rows = conn.execute(sql).fetchall()
+            rows = conn.execute(sql, {"context_key": context_key}).fetchall()
         return [{"stars": r[0], "count": r[1], "pct": float(r[2])} for r in rows]
 
     def _get_training_runs(self) -> list[dict[str, Any]]:

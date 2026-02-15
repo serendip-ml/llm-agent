@@ -351,7 +351,7 @@ Be strict. Respond only with the JSON array."""
             self._lg.warning("invalid stars in batch response", extra={"stars": stars_raw})
             return None
 
-        stars = max(1, min(5, int(stars_raw)))
+        stars = stars_raw  # Already validated as int in range 1-5
         signal, strength = self._stars_to_signal(stars)
 
         return Result(

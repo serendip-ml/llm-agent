@@ -137,7 +137,7 @@ class JokesterAgent(Agent):
         assert self._storage is not None
 
         llm_trait = self.require_trait(LLMTrait)
-        adapter_id = llm_trait._defaults.get("adapter_id")
+        adapter_id = llm_trait.adapter_id
 
         fact_id = self._storage.save_joke(
             joke=attempt.joke,

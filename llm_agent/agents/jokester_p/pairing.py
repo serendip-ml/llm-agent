@@ -5,8 +5,8 @@ Creates preference pairs from rated jokes for DPO training.
 
 from __future__ import annotations
 
-import hashlib
 import json
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -58,11 +58,10 @@ class PairingService:
     - threshold: Pair based on fixed star thresholds
     """
 
-    CONTEXT_KEY = "jokester-p"
-
-    def __init__(self, lg: Logger, pg: PG) -> None:
+    def __init__(self, lg: Logger, pg: PG, context_key: str) -> None:
         self._lg = lg
         self._pg = pg
+        self._context_key = context_key
 
     def get_rated_jokes(self) -> list[RatedJoke]:
         """Get all rated jokes sorted by stars (desc)."""
@@ -78,7 +77,7 @@ class PairingService:
             ORDER BY stars DESC, af.id
         """)
         with self._pg.connect() as conn:
-            rows = conn.execute(sql, {"context_key": self.CONTEXT_KEY}).fetchall()
+            rows = conn.execute(sql, {"context_key": self._context_key}).fetchall()
         return [RatedJoke(id=r[0], content=r[1], stars=r[2]) for r in rows]
 
     def create_pairs(
@@ -194,7 +193,7 @@ class PairingService:
     def _create_preference_fact(self) -> int:
         """Create atomic_fact entry for preference."""
         content = "preference_pair"
-        content_hash = hashlib.sha256(f"{content}:{id(self)}".encode()).hexdigest()[:64]
+        content_hash = uuid.uuid4().hex
 
         sql = text("""
             INSERT INTO atomic_facts
@@ -206,7 +205,11 @@ class PairingService:
         with self._pg.connect() as conn:
             result = conn.execute(
                 sql,
-                {"context_key": self.CONTEXT_KEY, "content": content, "content_hash": content_hash},
+                {
+                    "context_key": self._context_key,
+                    "content": content,
+                    "content_hash": content_hash,
+                },
             ).fetchone()
             conn.commit()
         return int(result[0])

@@ -585,6 +585,19 @@ class RatingTrait(BaseTrait):
 
         self._backend.save_rating(result=result, source="llm_rater")
 
+    def get_fact_rating(self, fact_id: int) -> int | None:
+        """Get the star rating for a specific fact.
+
+        Args:
+            fact_id: ID of the fact to look up.
+
+        Returns:
+            Star rating (1-5) if rated, None if not rated.
+        """
+        if not self._backend:
+            return None
+        return self._backend.get_fact_rating(fact_id)
+
     # =========================================================================
     # Preference pairing for DPO training
     # =========================================================================

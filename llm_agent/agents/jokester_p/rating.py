@@ -162,9 +162,7 @@ class BatchRater:
         )
 
         for fact_id, content in items:
-            stars = (
-                self._rating._backend.get_fact_rating(fact_id) if self._rating._backend else None
-            )
+            stars = self._rating.get_fact_rating(fact_id)
             if stars:
                 stars_visual = "★" * stars + "☆" * (5 - stars)
                 joke_preview = content[:80] + "..." if len(content) > 80 else content
@@ -213,20 +211,20 @@ class RatingService:
     for CLI usage without requiring full agent setup.
     """
 
-    CONTEXT_KEY = "jokester-p"
-
     def __init__(
         self,
         lg: Logger,
         pg: PG,
         llm_caller: LLMCaller,
         prompt_template: str,
+        context_key: str,
         batch_size: int = 5,
         provider: str = "local",
         model: str = "auto",
     ) -> None:
         self._lg = lg
         self._pg = pg
+        self._context_key = context_key
         self._core_service = CoreRatingService(lg, llm_caller)
         self._prompt_template = prompt_template
         self._batch_size = batch_size
@@ -247,7 +245,7 @@ class RatingService:
         """)
         with self._pg.connect() as conn:
             rows = conn.execute(
-                sql, {"context_key": self.CONTEXT_KEY, "limit": limit or 10000}
+                sql, {"context_key": self._context_key, "limit": limit or 10000}
             ).fetchall()
         return [UnratedJoke(id=r[0], content=r[1]) for r in rows]
 
