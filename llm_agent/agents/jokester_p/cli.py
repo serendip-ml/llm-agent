@@ -49,6 +49,7 @@ class JokesterCLI(Tool):
         subparsers.add_parser("stats", help="Show joke rating statistics")
         self._add_rate_args(subparsers)
         self._add_train_args(subparsers)
+        self._add_reset_args(subparsers)
 
     def _add_rate_args(self, subparsers: Any) -> None:
         """Add rate command arguments."""
@@ -85,6 +86,15 @@ class JokesterCLI(Tool):
             help="Show what would be created without saving",
         )
 
+    def _add_reset_args(self, subparsers: Any) -> None:
+        """Add reset command arguments."""
+        p = subparsers.add_parser("reset", help="Clear preference pairs for re-training")
+        p.add_argument(
+            "--confirm",
+            action="store_true",
+            help="Skip confirmation prompt",
+        )
+
     def run(self, **kwargs: Any) -> int:
         command = self.args.command
 
@@ -94,9 +104,11 @@ class JokesterCLI(Tool):
             return self._cmd_rate()
         elif command == "train":
             return self._cmd_train()
+        elif command == "reset":
+            return self._cmd_reset()
         else:
             print("Usage: agent jokester-p <command>")
-            print("Commands: stats, rate, train")
+            print("Commands: stats, rate, train, reset")
             return 1
 
     def _cmd_stats(self) -> int:
@@ -258,6 +270,68 @@ class JokesterCLI(Tool):
 
         self._execute_training_run(client, pairs, adapter_name)
         return 0
+
+    def _cmd_reset(self) -> int:
+        """Clear preference pairs for this agent's context."""
+        assert self._pg is not None
+        context_key = self._get_context_key()
+
+        # Get counts before deletion
+        counts = self._get_reset_counts(context_key)
+        if counts["pairs"] == 0 and counts["facts"] == 0:
+            print("No preference pairs to reset.")
+            return 0
+
+        print(f"\nThis will delete for context '{context_key}':")
+        print(f"  Preference details: {counts['pairs']}")
+        print(f"  Preference facts:   {counts['facts']}")
+
+        if not getattr(self.args, "confirm", False):
+            response = input("\nProceed? [y/N] ").strip().lower()
+            if response != "y":
+                print("Aborted.")
+                return 1
+
+        deleted = self._delete_preference_pairs(context_key)
+        print(f"\n✓ Deleted {deleted['pairs']} pairs, {deleted['facts']} facts")
+        return 0
+
+    def _get_reset_counts(self, context_key: str) -> dict[str, int]:
+        """Get counts of preference data to be deleted."""
+        assert self._pg is not None
+        sql = text("""
+            SELECT
+                (SELECT COUNT(*) FROM atomic_preference_details
+                 WHERE fact_id IN (SELECT id FROM atomic_facts WHERE context_key = :ctx)) as pairs,
+                (SELECT COUNT(*) FROM atomic_facts
+                 WHERE context_key = :ctx AND type = 'preference') as facts
+        """)
+        with self._pg.connect() as conn:
+            row = conn.execute(sql, {"ctx": context_key}).fetchone()
+        return {"pairs": row[0], "facts": row[1]}
+
+    def _delete_preference_pairs(self, context_key: str) -> dict[str, int]:
+        """Delete preference pairs for context. Returns counts deleted."""
+        assert self._pg is not None
+        with self._pg.connect() as conn:
+            # Delete details first (FK constraint)
+            details_sql = text("""
+                DELETE FROM atomic_preference_details
+                WHERE fact_id IN (SELECT id FROM atomic_facts WHERE context_key = :ctx)
+            """)
+            details_result = conn.execute(details_sql, {"ctx": context_key})
+            pairs_deleted = details_result.rowcount
+
+            # Delete preference facts
+            facts_sql = text("""
+                DELETE FROM atomic_facts WHERE context_key = :ctx AND type = 'preference'
+            """)
+            facts_result = conn.execute(facts_sql, {"ctx": context_key})
+            facts_deleted = facts_result.rowcount
+
+            conn.commit()
+
+        return {"pairs": pairs_deleted, "facts": facts_deleted}
 
     def _create_preference_pairs(self, min_gap: int, dry_run: bool) -> int:
         """Create preference pairs from rated jokes. Returns count created."""
