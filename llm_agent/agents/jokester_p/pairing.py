@@ -177,11 +177,15 @@ class PairingService:
         return pairs
 
     def _pair_exists(self, chosen_id: int, rejected_id: int) -> bool:
-        """Check if a preference pair already exists for these facts."""
+        """Check if a preference pair already exists for these facts.
+
+        Checks all combinations to prevent contradictory training signals
+        (e.g., same joke being "chosen" in one pair and "rejected" in another).
+        """
         sql = text("""
             SELECT 1 FROM atomic_preference_details
-            WHERE metadata->>'chosen_fact_id' = :chosen_id
-               OR metadata->>'rejected_fact_id' = :rejected_id
+            WHERE metadata->>'chosen_fact_id' IN (:chosen_id, :rejected_id)
+               OR metadata->>'rejected_fact_id' IN (:chosen_id, :rejected_id)
             LIMIT 1
         """)
         with self._pg.connect() as conn:

@@ -91,7 +91,8 @@ class BatchRater:
         # During generation
         rater.queue(fact_id, joke_text)  # Auto-flushes when batch is full
 
-        # On agent stop (rate partial batch)
+        # CLI context: call flush() explicitly before exit
+        # Agent context: unrated jokes are handled by CLI tools
         rater.flush()
     """
 

@@ -118,6 +118,8 @@ class LLMCaller:
         kwargs: dict[str, Any] = {}
         if backend is not None:
             kwargs["backend"] = backend
+        if extra_body is not None:
+            kwargs["extra_body"] = extra_body
 
         response = self._router.chat(
             messages=messages,
