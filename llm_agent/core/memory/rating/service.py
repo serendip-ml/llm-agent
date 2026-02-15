@@ -273,8 +273,16 @@ Respond only with the JSON, no additional text."""
             for i, item in enumerate(request.items)
         )
 
-        return f"""{request.prompt_template}
+        # Include structured criteria if provided (matches single-item rating behavior)
+        criteria_section = ""
+        if request.criteria:
+            criteria_desc = "\n".join(
+                f"- {c.name}: {c.description} (weight: {c.weight})" for c in request.criteria
+            )
+            criteria_section = f"\nCriteria:\n{criteria_desc}\n"
 
+        return f"""{request.prompt_template}
+{criteria_section}
 {items_text}
 
 Rate each item 1-5 stars. Respond with a JSON array:
@@ -314,16 +322,9 @@ Be strict. Respond only with the JSON array."""
 
     def _extract_batch_json(self, response: str) -> list[dict[str, Any]]:
         """Extract JSON array from batch response."""
-        # Handle markdown code fences
-        json_str = response
-        if "```json" in response:
-            start = response.find("```json") + 7
-            end = response.find("```", start)
-            json_str = response[start:end].strip()
-        elif "```" in response:
-            start = response.find("```") + 3
-            end = response.find("```", start)
-            json_str = response[start:end].strip()
+        # Use JSONCleaner for consistent handling of code fences and edge cases
+        cleaner = JSONCleaner()
+        json_str = cleaner.clean(response)
 
         parsed = json.loads(json_str)
         if isinstance(parsed, dict):

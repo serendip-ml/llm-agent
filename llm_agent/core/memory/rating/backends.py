@@ -311,11 +311,19 @@ class AtomicFactsBackend:
             return row[0] if row else None
 
     def mark_facts_paired(self, fact_id_1: int, fact_id_2: int, preference_id: int) -> None:
-        """Mark two facts as paired for DPO training."""
+        """Mark two facts as paired for DPO training.
+
+        Only updates the latest feedback row for each fact to avoid polluting
+        stale ratings.
+        """
         query = text("""
             UPDATE atomic_feedback_details
-            SET context = context || :pairing_info
-            WHERE fact_id = :fact_id
+            SET context = context || CAST(:pairing_info AS jsonb)
+            WHERE id = (
+                SELECT id FROM atomic_feedback_details
+                WHERE fact_id = :fact_id
+                ORDER BY id DESC LIMIT 1
+            )
         """)
         with self._db.session() as session:
             for fact_id, paired_with in [(fact_id_1, fact_id_2), (fact_id_2, fact_id_1)]:

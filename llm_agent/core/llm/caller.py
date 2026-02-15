@@ -156,10 +156,20 @@ class LLMCaller:
                 for tc in response.tool_calls
             ]
 
+        # Convert usage object to dict to match declared type
+        raw_usage = getattr(response, "usage", None)
+        usage_dict = None
+        if raw_usage is not None:
+            usage_dict = {
+                "prompt_tokens": getattr(raw_usage, "prompt_tokens", 0) or 0,
+                "completion_tokens": getattr(raw_usage, "completion_tokens", 0) or 0,
+                "total_tokens": getattr(raw_usage, "total_tokens", 0) or 0,
+            }
+
         return CallResult(
             content=response.content or "",
             model=getattr(response, "model", None) or "unknown",
-            usage=getattr(response, "usage", None),
+            usage=usage_dict,
             tool_calls=tool_calls,
             adapter_fallback=getattr(response, "adapter_fallback", False),
             dry_run=False,

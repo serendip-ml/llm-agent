@@ -193,7 +193,10 @@ class JokeGenerator:
     def _is_incomplete(self, text: str) -> bool:
         """Check if joke is incomplete (question without punchline)."""
         text = text.strip()
-        # Incomplete if ends with ? and has no content after the question
+        # Incomplete if ends with ? and has no content after the question.
+        # Note: This heuristic has false positives for jokes where the question mark
+        # IS the punchline (e.g., "She looked surprised?"). Accept this tradeoff
+        # since incomplete jokes (setup only) are more common failure modes.
         if not text.endswith("?"):
             return False
         # Check if there's any text after the last question mark (punchline)

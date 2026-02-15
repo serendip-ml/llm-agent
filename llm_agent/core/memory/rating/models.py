@@ -103,6 +103,7 @@ class BatchRequest:
     prompt_template: str  # Base prompt describing what to rate and scale
     model: str
     provider: str
+    criteria: list[Criteria] | None = None  # Structured criteria for consistent rating
     backend: str | None = None  # LLM backend (e.g., "anthropic", "local")
     temperature: float = 0.3
 

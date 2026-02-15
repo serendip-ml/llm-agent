@@ -312,13 +312,14 @@ class RatingService:
         """Save a rating to the database."""
         sql = text("""
             INSERT INTO atomic_feedback_details
-                (fact_id, signal, strength, context, provider)
-            VALUES (:fact_id, :signal, :strength, CAST(:context AS jsonb), :provider)
+                (fact_id, signal, strength, provider_type, context, provider)
+            VALUES (:fact_id, :signal, :strength, :provider_type, CAST(:context AS jsonb), :provider)
         """)
         params = {
             "fact_id": result.fact,
             "signal": result.signal,
             "strength": result.strength,
+            "provider_type": result.provider_type.value,
             "context": json.dumps({"stars": result.stars, "reasoning": result.reasoning}),
             "provider": result.provider,
         }

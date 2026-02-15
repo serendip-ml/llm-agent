@@ -433,6 +433,7 @@ class JokesterCLI(Tool):
             FROM atomic_feedback_details afd
             JOIN atomic_facts af ON af.id = afd.fact_id
             WHERE af.context_key = :context_key
+              AND af.type = 'solution'
             GROUP BY (context->>'stars')::int
             ORDER BY stars DESC
         """)

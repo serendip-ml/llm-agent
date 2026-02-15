@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
@@ -66,7 +66,7 @@ class PairingService:
     def get_rated_jokes(self) -> list[RatedJoke]:
         """Get all rated jokes sorted by stars (desc)."""
         sql = text("""
-            SELECT
+            SELECT DISTINCT ON (af.id)
                 af.id,
                 af.content,
                 (afd.context->>'stars')::int as stars
@@ -74,7 +74,7 @@ class PairingService:
             JOIN atomic_feedback_details afd ON af.id = afd.fact_id
             WHERE af.context_key = :context_key
               AND afd.context->>'stars' IS NOT NULL
-            ORDER BY stars DESC, af.id
+            ORDER BY af.id, afd.id DESC
         """)
         with self._pg.connect() as conn:
             rows = conn.execute(sql, {"context_key": self._context_key}).fetchall()
@@ -128,8 +128,7 @@ class PairingService:
                     )
                     continue
 
-                fact_id = self._create_preference_fact()
-                self._create_preference_details(fact_id, pair)
+                self._create_pair_atomic(pair)
                 created += 1
             except Exception as e:
                 self._lg.warning(
@@ -142,6 +141,53 @@ class PairingService:
                 )
 
         return created
+
+    def _create_pair_atomic(self, pair: PreferencePair) -> int:
+        """Create preference fact and details in a single transaction."""
+        with self._pg.connect() as conn:
+            fact_id = self._insert_preference_fact(conn)
+            self._insert_preference_details(conn, fact_id, pair)
+            conn.commit()
+        return fact_id
+
+    def _insert_preference_fact(self, conn: Any) -> int:
+        """Insert atomic_facts row for preference pair."""
+        sql = text("""
+            INSERT INTO atomic_facts
+                (context_key, type, content, content_hash, category, source, confidence, active, created_at)
+            VALUES (:context_key, 'preference', 'preference_pair', :hash, 'joke', 'pairs_sync', 1.0, true, NOW())
+            RETURNING id
+        """)
+        result = conn.execute(
+            sql, {"context_key": self._context_key, "hash": uuid.uuid4().hex}
+        ).fetchone()
+        return int(result[0])
+
+    def _insert_preference_details(self, conn: Any, fact_id: int, pair: PreferencePair) -> None:
+        """Insert atomic_preference_details row."""
+        metadata = json.dumps(
+            {
+                "chosen_fact_id": pair.chosen.id,
+                "rejected_fact_id": pair.rejected.id,
+                "chosen_stars": pair.chosen.stars,
+                "rejected_stars": pair.rejected.stars,
+            }
+        )
+        sql = text("""
+            INSERT INTO atomic_preference_details (fact_id, context, chosen, rejected, margin, metadata)
+            VALUES (:fact_id, :context, :chosen, :rejected, :margin, CAST(:metadata AS jsonb))
+        """)
+        conn.execute(
+            sql,
+            {
+                "fact_id": fact_id,
+                "context": "Tell me a joke.",
+                "chosen": pair.chosen.content,
+                "rejected": pair.rejected.content,
+                "margin": pair.margin,
+                "metadata": metadata,
+            },
+        )
 
     def _pair_relative(self, rated: list[RatedJoke], min_gap: int) -> list[PreferencePair]:
         """Pair highest with lowest, respecting min gap."""
@@ -193,58 +239,3 @@ class PairingService:
                 sql, {"chosen_id": str(chosen_id), "rejected_id": str(rejected_id)}
             ).fetchone()
         return result is not None
-
-    def _create_preference_fact(self) -> int:
-        """Create atomic_fact entry for preference."""
-        content = "preference_pair"
-        content_hash = uuid.uuid4().hex
-
-        sql = text("""
-            INSERT INTO atomic_facts
-                (context_key, type, content, content_hash, category, source, confidence, active, created_at)
-            VALUES
-                (:context_key, 'preference', :content, :content_hash, 'joke', 'pairs_sync', 1.0, true, NOW())
-            RETURNING id
-        """)
-        with self._pg.connect() as conn:
-            result = conn.execute(
-                sql,
-                {
-                    "context_key": self._context_key,
-                    "content": content,
-                    "content_hash": content_hash,
-                },
-            ).fetchone()
-            conn.commit()
-        return int(result[0])
-
-    def _create_preference_details(self, fact_id: int, pair: PreferencePair) -> None:
-        """Create atomic_preference_details entry."""
-        metadata = json.dumps(
-            {
-                "chosen_fact_id": pair.chosen.id,
-                "rejected_fact_id": pair.rejected.id,
-                "chosen_stars": pair.chosen.stars,
-                "rejected_stars": pair.rejected.stars,
-            }
-        )
-
-        sql = text("""
-            INSERT INTO atomic_preference_details
-                (fact_id, context, chosen, rejected, margin, metadata)
-            VALUES
-                (:fact_id, :context, :chosen, :rejected, :margin, CAST(:metadata AS jsonb))
-        """)
-        with self._pg.connect() as conn:
-            conn.execute(
-                sql,
-                {
-                    "fact_id": fact_id,
-                    "context": "Tell me a joke.",
-                    "chosen": pair.chosen.content,
-                    "rejected": pair.rejected.content,
-                    "margin": pair.margin,
-                    "metadata": metadata,
-                },
-            )
-            conn.commit()

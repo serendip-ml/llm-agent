@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from appinfra import DotDict
@@ -12,6 +13,7 @@ from llm_agent.core.memory.rating import (
     BatchItem,
     BatchRequest,
     ConfigParser,
+    Criteria,
     CriteriaConfig,
     PairingConfig,
     ProviderConfig,
@@ -50,6 +52,18 @@ Expected fields:
     batch_size: Number of items to rate per batch (default: 10)
     auto: Skip confirmation prompts (default: False)
 """
+
+
+@dataclass
+class _BatchContext:
+    """Context for batch rating operations."""
+
+    context_key: str
+    prompt: str
+    criteria: list[Criteria]
+    model: str
+    provider_id: str
+    backend: AtomicFactsBackend
 
 
 class RatingTrait(BaseTrait):
@@ -267,8 +281,6 @@ class RatingTrait(BaseTrait):
     ) -> tuple[int, int]:
         """Rate unrated facts in batches for efficiency.
 
-        Batches multiple facts per LLM call to reduce API costs.
-
         Args:
             limit: Maximum facts to rate (None = all unrated).
             batch_size: Items per batch (None = use config default).
@@ -279,6 +291,20 @@ class RatingTrait(BaseTrait):
         Returns:
             Tuple of (rated_count, failed_count).
         """
+        ctx = self._prepare_batch_context(fact_type, provider_index)
+        size = batch_size or (self._batch.size if self._batch else 5)
+        max_facts = 10000 if limit is None else limit
+
+        facts = list(ctx.backend.unrated_facts(ctx.context_key, fact_type, category, max_facts))
+        if not facts:
+            return (0, 0)
+
+        return self._rate_facts_in_batches(
+            facts, size, ctx.prompt, ctx.criteria, ctx.model, ctx.provider_id
+        )
+
+    def _prepare_batch_context(self, fact_type: str | None, provider_index: int) -> _BatchContext:
+        """Prepare context for batch rating."""
         from .learn import LearnTrait
 
         if not self._backend or not self._service:
@@ -286,28 +312,19 @@ class RatingTrait(BaseTrait):
 
         provider = self._select_provider(provider_index)
         learn_trait = self.agent.require_trait(LearnTrait)
-        context_key = str(learn_trait.learn.context.context_key)
-
-        # Determine batch size
-        size = batch_size or (self._batch.size if self._batch else 5)
-
-        # Get type-specific criteria for prompt template
         resolved_type = fact_type or "solution"
         type_criteria = self._criteria.get(resolved_type)
         if not type_criteria:
             raise ValueError(f"No criteria configured for fact type: {resolved_type}")
 
-        # Build provider identifier
         backend_type = provider.backend.get("type", "unknown")
-        provider_id = f"llm_{provider.model}_{backend_type}"
-
-        # Collect unrated facts
-        facts = list(self._backend.unrated_facts(context_key, fact_type, category, limit or 10000))
-        if not facts:
-            return (0, 0)
-
-        return self._rate_facts_in_batches(
-            facts, size, type_criteria.prompt, provider.model, provider_id
+        return _BatchContext(
+            context_key=str(learn_trait.learn.context.context_key),
+            prompt=type_criteria.prompt,
+            criteria=type_criteria.criteria,
+            model=provider.model,
+            provider_id=f"llm_{provider.model}_{backend_type}",
+            backend=self._backend,
         )
 
     def _rate_facts_in_batches(
@@ -315,6 +332,7 @@ class RatingTrait(BaseTrait):
         facts: list[dict[str, Any]],
         batch_size: int,
         prompt_template: str,
+        criteria: list[Criteria],
         model: str,
         provider_id: str,
     ) -> tuple[int, int]:
@@ -324,7 +342,9 @@ class RatingTrait(BaseTrait):
 
         for i in range(0, len(facts), batch_size):
             batch_facts = facts[i : i + batch_size]
-            rated, failed = self._process_batch(batch_facts, prompt_template, model, provider_id, i)
+            rated, failed = self._process_batch(
+                batch_facts, prompt_template, criteria, model, provider_id, i
+            )
             total_rated += rated
             total_failed += failed
 
@@ -334,6 +354,7 @@ class RatingTrait(BaseTrait):
         self,
         batch_facts: list[dict[str, Any]],
         prompt_template: str,
+        criteria: list[Criteria],
         model: str,
         provider_id: str,
         batch_start: int,
@@ -342,7 +363,11 @@ class RatingTrait(BaseTrait):
         assert self._service is not None
         items = [BatchItem(fact=f["id"], content=f["content"]) for f in batch_facts]
         request = BatchRequest(
-            items=items, prompt_template=prompt_template, model=model, provider=provider_id
+            items=items,
+            prompt_template=prompt_template,
+            model=model,
+            provider=provider_id,
+            criteria=criteria,
         )
 
         try:
@@ -472,9 +497,6 @@ class RatingTrait(BaseTrait):
     ) -> int:
         """Rate specific items in a batch.
 
-        Primary method for batch auto-rating. Takes a list of (fact_id, content)
-        tuples and rates them together in a single LLM call for efficiency.
-
         Args:
             items: List of (fact_id, content) tuples to rate.
             fact_type: Type of facts (default: "solution").
@@ -486,25 +508,12 @@ class RatingTrait(BaseTrait):
         if not items:
             return 0
 
-        if not self._service:
-            raise RuntimeError("Rating service not initialized - call on_start() first")
-
-        provider = self._select_provider(0)
-        type_criteria = self._criteria.get(fact_type)
-        if not type_criteria:
-            raise ValueError(f"No criteria configured for fact type: {fact_type}")
-
-        backend_type = provider.backend.get("type", "unknown")
-        provider_id = f"llm_{provider.model}_{backend_type}"
-
-        # Convert tuples to dict format expected by _process_batch
-        batch_facts = [{"id": fact_id, "content": content} for fact_id, content in items]
-
+        ctx = self._prepare_batch_context(fact_type, provider_index=0)
+        batch_facts = [{"id": fid, "content": content} for fid, content in items]
         rated, _ = self._process_batch(
-            batch_facts, type_criteria.prompt, provider.model, provider_id, 0
+            batch_facts, ctx.prompt, ctx.criteria, ctx.model, ctx.provider_id, 0
         )
 
-        # Attempt preference pairing for each rated item
         if category and self._pairing and self._pairing.enabled:
             self._try_pair_batch_items(items, category)
 
