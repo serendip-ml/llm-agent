@@ -78,7 +78,16 @@ class JokesterCLI(Tool):
             help="Minimum star difference for pairing (default: 2 = 3★ vs 1★)",
         )
         p.add_argument(
-            "--limit", type=int, help="Maximum pairs to include (default: all available)"
+            "--min",
+            type=int,
+            dest="min_pairs",
+            help="Minimum pairs to generate (reuses chosen jokes with multiple rejected if needed)",
+        )
+        p.add_argument(
+            "--max",
+            type=int,
+            dest="max_pairs",
+            help="Maximum pairs to include (default: all available)",
         )
         p.add_argument(
             "--dry-run",
@@ -156,13 +165,12 @@ class JokesterCLI(Tool):
         print()
 
     def _format_star_distribution(self, dist: dict[int, int], total: int) -> str:
-        """Format star distribution as: ★★★★★ 0(0.0%)  ★★★★☆ 1(0.1%)  ★★★☆☆ 10(10.0%)"""
+        """Format star distribution as: 5★:0(0.0%)  4★:18(0.2%)  3★:504(6.3%)  ..."""
         parts = []
-        for stars in (5, 4, 3):
+        for stars in (5, 4, 3, 2, 1):
             count = dist.get(stars, 0)
             pct = count * 100 / total if total else 0
-            symbol = "★" * stars + "☆" * (5 - stars)
-            parts.append(f"{symbol} {count}({pct:.1f}%)")
+            parts.append(f"{stars}★:{count}({pct:.1f}%)")
         return "  ".join(parts)
 
     def _cmd_rate(self) -> int:
@@ -247,14 +255,15 @@ class JokesterCLI(Tool):
 
         min_gap = getattr(self.args, "min_gap", 2)
         dry_run = getattr(self.args, "dry_run", False)
+        min_pairs = getattr(self.args, "min_pairs", None)
+        max_pairs = getattr(self.args, "max_pairs", None)
 
         # Step 1: Create new preference pairs from rated jokes
-        new_pairs = self._create_preference_pairs(min_gap, dry_run)
+        new_pairs = self._create_preference_pairs(min_gap, dry_run, min_pairs, max_pairs)
 
         # Step 2: Get all untrained pairs and create training run
         client = self._create_training_client()
-        limit = getattr(self.args, "limit", None)
-        pairs = client.get_untrained_pairs(min_margin=float(min_gap), limit=limit)
+        pairs = client.get_untrained_pairs(min_margin=float(min_gap), limit=max_pairs)
 
         if not pairs:
             print("\nNo untrained preference pairs available for training.")
@@ -333,16 +342,24 @@ class JokesterCLI(Tool):
 
         return {"pairs": pairs_deleted, "facts": facts_deleted}
 
-    def _create_preference_pairs(self, min_gap: int, dry_run: bool) -> int:
+    def _create_preference_pairs(
+        self, min_gap: int, dry_run: bool, min_pairs: int | None, max_pairs: int | None
+    ) -> int:
         """Create preference pairs from rated jokes. Returns count created."""
         assert self._pg is not None
 
         service = PairingService(self.lg, self._pg, self._get_context_key())
-        result = service.create_pairs(strategy="relative", min_gap=min_gap)
+        result = service.create_pairs(
+            strategy="relative", min_gap=min_gap, min_pairs=min_pairs, max_pairs=max_pairs
+        )
 
         print("\n=== Pairing ===")
         print(f"Rated jokes:    {result.total_rated}")
         print(f"Min gap:        {min_gap} stars")
+        if min_pairs:
+            print(f"Min pairs:      {min_pairs}")
+        if max_pairs:
+            print(f"Max pairs:      {max_pairs}")
         print(f"New pairs:      {len(result.pairs)}")
 
         if not result.pairs:
@@ -610,12 +627,12 @@ class JokesterCLI(Tool):
     def _get_star_distribution(
         self, conn: Any, where: str, params: dict[str, Any]
     ) -> dict[int, int]:
-        """Get distribution of 3-5 star ratings."""
+        """Get distribution of star ratings (1-5)."""
         sql = text(f"""
             SELECT (afd.context->>'stars')::int as stars, COUNT(*) as cnt
             FROM atomic_facts af
             JOIN atomic_feedback_details afd ON af.id = afd.fact_id
-            WHERE {where} AND (afd.context->>'stars')::int >= 3
+            WHERE {where}
             GROUP BY (afd.context->>'stars')::int
         """)
         rows = conn.execute(sql, params).fetchall()
