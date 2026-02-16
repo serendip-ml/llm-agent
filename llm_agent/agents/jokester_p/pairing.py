@@ -201,9 +201,9 @@ class PairingService:
                     "rejected_stars": pair.rejected.stars,
                 }
             )
-            # Escape single quotes in content
-            chosen = pair.chosen.content.replace("'", "''")
-            rejected = pair.rejected.content.replace("'", "''")
+            # Escape for PostgreSQL string literals (backslashes then single quotes)
+            chosen = pair.chosen.content.replace("\\", "\\\\").replace("'", "''")
+            rejected = pair.rejected.content.replace("\\", "\\\\").replace("'", "''")
             values_list.append(
                 f"({fact_id}, '{context}', '{chosen}', '{rejected}', {pair.margin}, '{metadata}'::jsonb)"
             )
