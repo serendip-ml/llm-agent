@@ -144,29 +144,36 @@ class JokesterCLI(Tool):
         stats = self._get_rating_stats(exclude_haiku=True, max_chars=max_chars)
         dist = self._get_rating_distribution(exclude_haiku=True, max_chars=max_chars)
 
-        print(f"\n=== Jokester-p Stats (Local Model, <{max_chars} chars) ===\n")
+        self._print_stats_header(max_chars)
+        self._print_rating_summary(stats, dist)
+        self._print_training_run_stats(max_chars=max_chars)
+        self._print_haiku_stats(max_chars=max_chars)
+
+        return 0
+
+    def _print_stats_header(self, max_chars: int) -> None:
+        """Print stats header with model and adapter info."""
+        context_key = self._get_context_key()
+        model = self._get_latest_model(context_key) or "unknown"
+        adapter = self._get_latest_adapter(context_key)
+        print("\n=== Jokester-p Stats ===\n")
+        print(f"Model:   {model}, <{max_chars} chars")
+        if adapter:
+            print(f"Adapter: {adapter['name']} (md5: {adapter['md5']}, mtime: {adapter['mtime']})")
+        print()
+
+    def _print_rating_summary(self, stats: dict[str, Any], dist: list[dict[str, Any]]) -> None:
+        """Print rating counts and distribution."""
         print(f"Total jokes:  {stats['total']}")
         print(f"Rated:        {stats['rated']}")
         print(f"Unrated:      {stats['unrated']}")
-        print(
-            f"Avg stars:    {stats['avg_stars']:.2f}" if stats["avg_stars"] else "Avg stars:    N/A"
-        )
+        avg = f"{stats['avg_stars']:.2f}" if stats["avg_stars"] else "N/A"
+        print(f"Avg stars:    {avg}")
         print()
         print("Rating Distribution:")
         for row in dist:
             stars_visual = "★" * row["stars"] + "☆" * (5 - row["stars"])
             print(f"  {stars_visual}  {row['count']:4d}  ({row['pct']:.1f}%)")
-
-        # Show per-training-run stats
-        self._print_training_run_stats(max_chars=max_chars)
-
-        # Show Haiku stats separately
-        self._print_haiku_stats(max_chars=max_chars)
-
-        # Show current adapter info
-        self._print_adapter_status()
-
-        return 0
 
     def _print_training_run_stats(self, max_chars: int | None = None) -> None:
         """Print stats broken down by training runs."""
@@ -211,22 +218,6 @@ class JokesterCLI(Tool):
         print(f"{'haiku':20s}  {stats['total']:5d} jokes  avg={avg_str}  {stars_str}")
         print()
 
-    def _print_adapter_status(self) -> None:
-        """Print current adapter status from latest DPO run."""
-        assert self._pg is not None
-        context_key = self._get_context_key()
-
-        adapter = self._get_latest_adapter(context_key)
-        if adapter is None:
-            return
-
-        print("=== Adapter Status ===\n")
-        print(f"  Name:  {adapter['name']}")
-        print(f"  MD5:   {adapter['md5']}")
-        print(f"  Mtime: {adapter['mtime']}")
-        print(f"  Run:   #{adapter['run_id']} ({adapter['completed_at']})")
-        print()
-
     def _get_latest_adapter(self, context_key: str) -> dict[str, Any] | None:
         """Get latest adapter info from completed DPO run."""
         assert self._pg is not None
@@ -249,6 +240,21 @@ class JokesterCLI(Tool):
             "mtime": row[3],
             "completed_at": row[4].strftime("%Y-%m-%d %H:%M") if row[4] else "N/A",
         }
+
+    def _get_latest_model(self, context_key: str) -> str | None:
+        """Get base model name from most recent joke."""
+        assert self._pg is not None
+        sql = text("""
+            SELECT t.base_model
+            FROM agent_jokester_training t
+            JOIN atomic_facts af ON t.fact_id = af.id
+            WHERE af.context_key = :context_key
+            ORDER BY af.id DESC
+            LIMIT 1
+        """)
+        with self._pg.connect() as conn:
+            row = conn.execute(sql, {"context_key": context_key}).fetchone()
+        return row[0] if row else None
 
     def _query_haiku_stats(self, max_chars: int | None = None) -> dict[str, Any]:
         """Query stats for Haiku-generated jokes."""
