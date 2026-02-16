@@ -46,10 +46,20 @@ class JokesterCLI(Tool):
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
         subparsers = parser.add_subparsers(dest="command", help="Command to run")
-        subparsers.add_parser("stats", help="Show joke rating statistics")
+        self._add_stats_args(subparsers)
         self._add_rate_args(subparsers)
         self._add_train_args(subparsers)
         self._add_reset_args(subparsers)
+
+    def _add_stats_args(self, subparsers: Any) -> None:
+        """Add stats command arguments."""
+        p = subparsers.add_parser("stats", help="Show joke rating statistics")
+        p.add_argument(
+            "--max-chars",
+            type=int,
+            default=200,
+            help="Only count jokes under this character length (default: 200)",
+        )
 
     def _add_rate_args(self, subparsers: Any) -> None:
         """Add rate command arguments."""
@@ -62,7 +72,7 @@ class JokesterCLI(Tool):
             "--dry-run", action="store_true", help="Show what would be rated without sending to LLM"
         )
 
-    def _add_train_args(self, subparsers: Any) -> None:
+    def _add_train_args(self, subparsers: Any) -> None:  # cq: max-lines=45
         """Add train command arguments."""
         p = subparsers.add_parser("train", help="Create preference pairs and training run")
         p.add_argument(
@@ -74,8 +84,8 @@ class JokesterCLI(Tool):
         p.add_argument(
             "--min-gap",
             type=int,
-            default=2,
-            help="Minimum star difference for pairing (default: 2 = 3★ vs 1★)",
+            default=None,
+            help="Minimum star difference for pairing (default: from config, typically 3)",
         )
         p.add_argument(
             "--min",
@@ -93,6 +103,17 @@ class JokesterCLI(Tool):
             "--dry-run",
             action="store_true",
             help="Show what would be created without saving",
+        )
+        p.add_argument(
+            "--max-chars",
+            type=int,
+            default=200,
+            help="Only include jokes under this character length (default: 200)",
+        )
+        p.add_argument(
+            "--no-reuse",
+            action="store_true",
+            help="Each chosen joke used at most once (1:1 pairing, no reuse)",
         )
 
     def _add_reset_args(self, subparsers: Any) -> None:
@@ -124,35 +145,49 @@ class JokesterCLI(Tool):
         """Show joke rating statistics."""
         assert self._pg is not None
 
-        stats = self._get_rating_stats()
-        dist = self._get_rating_distribution()
+        max_chars = getattr(self.args, "max_chars", 200)
+        stats = self._get_rating_stats(exclude_haiku=True, max_chars=max_chars)
+        dist = self._get_rating_distribution(exclude_haiku=True, max_chars=max_chars)
 
+        self._print_stats_header(max_chars)
+        self._print_rating_summary(stats, dist)
+        self._print_training_run_stats(max_chars=max_chars)
+        self._print_haiku_stats(max_chars=max_chars)
+
+        return 0
+
+    def _print_stats_header(self, max_chars: int) -> None:
+        """Print stats header with model and adapter info."""
+        context_key = self._get_context_key()
+        model = self._get_latest_model(context_key) or "unknown"
+        adapter = self._get_latest_adapter(context_key)
         print("\n=== Jokester-p Stats ===\n")
+        print(f"Model:   {model}, <{max_chars} chars")
+        if adapter:
+            print(f"Adapter: {adapter['name']} (md5: {adapter['md5']}, mtime: {adapter['mtime']})")
+        print()
+
+    def _print_rating_summary(self, stats: dict[str, Any], dist: list[dict[str, Any]]) -> None:
+        """Print rating counts and distribution."""
         print(f"Total jokes:  {stats['total']}")
         print(f"Rated:        {stats['rated']}")
         print(f"Unrated:      {stats['unrated']}")
-        print(
-            f"Avg stars:    {stats['avg_stars']:.2f}" if stats["avg_stars"] else "Avg stars:    N/A"
-        )
+        avg = f"{stats['avg_stars']:.2f}" if stats["avg_stars"] else "N/A"
+        print(f"Avg stars:    {avg}")
         print()
         print("Rating Distribution:")
         for row in dist:
             stars_visual = "★" * row["stars"] + "☆" * (5 - row["stars"])
             print(f"  {stars_visual}  {row['count']:4d}  ({row['pct']:.1f}%)")
 
-        # Show per-training-run stats
-        self._print_training_run_stats()
-
-        return 0
-
-    def _print_training_run_stats(self) -> None:
+    def _print_training_run_stats(self, max_chars: int | None = None) -> None:
         """Print stats broken down by training runs."""
         runs = self._get_training_runs()
         if not runs:
             return
 
         print("\n=== By Training Run ===\n")
-        period_stats = self._get_stats_by_training_period(runs)
+        period_stats = self._get_stats_by_training_period(runs, max_chars=max_chars)
 
         for period in period_stats:
             if period["count"] == 0:
@@ -172,6 +207,107 @@ class JokesterCLI(Tool):
             pct = count * 100 / total if total else 0
             parts.append(f"{stars}★:{count}({pct:.1f}%)")
         return "  ".join(parts)
+
+    def _print_haiku_stats(self, max_chars: int | None = None) -> None:
+        """Print stats for Haiku-generated jokes separately."""
+        assert self._pg is not None
+
+        stats = self._query_haiku_stats(max_chars)
+        if stats["total"] == 0:
+            return
+
+        chars_label = f", <{max_chars} chars" if max_chars else ""
+        print(f"=== Haiku (Reference{chars_label}) ===\n")
+        avg_str = f"{float(stats['avg_stars']):.2f}" if stats["avg_stars"] else "N/A"
+        stars_str = self._format_star_distribution(stats["dist"], stats["rated"])
+        print(f"{'haiku':20s}  {stats['total']:5d} jokes  avg={avg_str}  {stars_str}")
+        print()
+
+    def _get_latest_adapter(self, context_key: str) -> dict[str, Any] | None:
+        """Get latest adapter info from completed DPO run."""
+        assert self._pg is not None
+        sql = text("""
+            SELECT id, adapter_name, metrics->'adapter'->>'md5' as md5,
+                   metrics->'adapter'->>'mtime' as mtime, completed_at
+            FROM dpo_runs
+            WHERE context_key = :context_key AND status = 'completed'
+            ORDER BY completed_at DESC
+            LIMIT 1
+        """)
+        with self._pg.connect() as conn:
+            row = conn.execute(sql, {"context_key": context_key}).fetchone()
+        if row is None:
+            return None
+        return {
+            "run_id": row[0],
+            "name": row[1],
+            "md5": row[2],
+            "mtime": row[3],
+            "completed_at": row[4].strftime("%Y-%m-%d %H:%M") if row[4] else "N/A",
+        }
+
+    def _get_latest_model(self, context_key: str) -> str | None:
+        """Get base model name from most recent joke."""
+        assert self._pg is not None
+        sql = text("""
+            SELECT t.base_model
+            FROM agent_jokester_training t
+            JOIN atomic_facts af ON t.fact_id = af.id
+            WHERE af.context_key = :context_key
+            ORDER BY af.id DESC
+            LIMIT 1
+        """)
+        with self._pg.connect() as conn:
+            row = conn.execute(sql, {"context_key": context_key}).fetchone()
+        return row[0] if row else None
+
+    def _query_haiku_stats(self, max_chars: int | None = None) -> dict[str, Any]:
+        """Query stats for Haiku-generated jokes."""
+        assert self._pg is not None
+        context_key = self._get_context_key()
+        chars_join, chars_filter = self._build_chars_filter(max_chars)
+
+        sql = text(f"""
+            SELECT COUNT(*) as total, COUNT(afd.id) as rated,
+                   AVG((afd.context->>'stars')::int) as avg_stars
+            FROM atomic_facts af
+            JOIN agent_jokester_model_usage u ON u.fact_id = af.id
+            {chars_join}
+            LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            WHERE af.context_key = :context_key AND af.type = 'solution'
+              AND u.model_name LIKE '%haiku%' {chars_filter}
+        """)
+        with self._pg.connect() as conn:
+            row = conn.execute(sql, {"context_key": context_key}).fetchone()
+            total, rated, avg_stars = row[0], row[1], row[2]
+            dist = self._query_haiku_distribution(conn, context_key, chars_join, chars_filter)
+
+        return {"total": total, "rated": rated, "avg_stars": avg_stars, "dist": dist}
+
+    def _query_haiku_distribution(
+        self, conn: Any, context_key: str, chars_join: str, chars_filter: str
+    ) -> dict[int, int]:
+        """Query star distribution for Haiku jokes."""
+        sql = text(f"""
+            SELECT (afd.context->>'stars')::int as stars, COUNT(*) as cnt
+            FROM atomic_facts af
+            JOIN agent_jokester_model_usage u ON u.fact_id = af.id
+            {chars_join}
+            JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            WHERE af.context_key = :context_key AND af.type = 'solution'
+              AND u.model_name LIKE '%haiku%' {chars_filter}
+            GROUP BY (afd.context->>'stars')::int
+        """)
+        rows = conn.execute(sql, {"context_key": context_key}).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    def _build_chars_filter(self, max_chars: int | None) -> tuple[str, str]:
+        """Build JOIN and WHERE clause for character length filtering."""
+        if not max_chars:
+            return "", ""
+        chars_join = "JOIN atomic_solution_details asd ON asd.fact_id = af.id"
+        chars_filter = f"AND length(asd.answer_text) < {max_chars}"
+        return chars_join, chars_filter
 
     def _cmd_rate(self) -> int:
         """Rate unrated jokes in batches."""
@@ -252,33 +388,55 @@ class JokesterCLI(Tool):
     def _cmd_train(self) -> int:
         """Create preference pairs from rated jokes and set up training run."""
         assert self._pg is not None
+        opts = self._get_train_options()
 
-        min_gap = getattr(self.args, "min_gap", 2)
-        dry_run = getattr(self.args, "dry_run", False)
-        min_pairs = getattr(self.args, "min_pairs", None)
-        max_pairs = getattr(self.args, "max_pairs", None)
+        new_pairs = self._create_preference_pairs(
+            opts["min_gap"],
+            opts["dry_run"],
+            opts["min_pairs"],
+            opts["max_pairs"],
+            opts["max_chars"],
+            opts["no_reuse"],
+        )
 
-        # Step 1: Create new preference pairs from rated jokes
-        new_pairs = self._create_preference_pairs(min_gap, dry_run, min_pairs, max_pairs)
-
-        # Step 2: Get all untrained pairs and create training run
         client = self._create_training_client()
-        pairs = client.get_untrained_pairs(min_margin=float(min_gap), limit=max_pairs)
-
+        pairs = client.get_untrained_pairs(
+            min_margin=float(opts["min_gap"]), limit=opts["max_pairs"]
+        )
         if not pairs:
             print("\nNo untrained preference pairs available for training.")
             return 0
 
-        adapter_name = getattr(self.args, "adapter_name", "jokester-dpo")
-        self._print_train_summary(len(pairs), new_pairs, adapter_name, min_gap, dry_run)
+        return self._finalize_training(client, pairs, new_pairs, opts)
+
+    def _finalize_training(
+        self, client: DpoClient, pairs: list[tuple[Any, Any]], new_pairs: int, opts: dict[str, Any]
+    ) -> int:
+        """Print summary and execute training run."""
+        self._print_train_summary(
+            len(pairs), new_pairs, opts["adapter_name"], opts["min_gap"], opts["dry_run"]
+        )
         self._print_pairs_sample(pairs)
 
-        if dry_run:
+        if opts["dry_run"]:
             print("Dry run complete. Use without --dry-run to create training run.")
             return 0
 
-        self._execute_training_run(client, pairs, adapter_name)
+        self._execute_training_run(client, pairs, opts["adapter_name"])
         return 0
+
+    def _get_train_options(self) -> dict[str, Any]:
+        """Extract train command options from args."""
+        config_min_gap = self._get_pairing_config().get("min_gap", 2)
+        return {
+            "min_gap": getattr(self.args, "min_gap", None) or config_min_gap,
+            "dry_run": getattr(self.args, "dry_run", False),
+            "min_pairs": getattr(self.args, "min_pairs", None),
+            "max_pairs": getattr(self.args, "max_pairs", None),
+            "max_chars": getattr(self.args, "max_chars", 200),
+            "no_reuse": getattr(self.args, "no_reuse", False),
+            "adapter_name": getattr(self.args, "adapter_name", "jokester-dpo"),
+        }
 
     def _cmd_reset(self) -> int:
         """Clear preference pairs for this agent's context."""
@@ -343,24 +501,26 @@ class JokesterCLI(Tool):
         return {"pairs": pairs_deleted, "facts": facts_deleted}
 
     def _create_preference_pairs(
-        self, min_gap: int, dry_run: bool, min_pairs: int | None, max_pairs: int | None
+        self,
+        min_gap: int,
+        dry_run: bool,
+        min_pairs: int | None,
+        max_pairs: int | None,
+        max_chars: int | None = None,
+        no_reuse: bool = False,
     ) -> int:
         """Create preference pairs from rated jokes. Returns count created."""
         assert self._pg is not None
-
         service = PairingService(self.lg, self._pg, self._get_context_key())
         result = service.create_pairs(
-            strategy="relative", min_gap=min_gap, min_pairs=min_pairs, max_pairs=max_pairs
+            strategy="relative",
+            min_gap=min_gap,
+            min_pairs=min_pairs,
+            max_pairs=max_pairs,
+            max_chars=max_chars,
+            no_reuse=no_reuse,
         )
-
-        print("\n=== Pairing ===")
-        print(f"Rated jokes:    {result.total_rated}")
-        print(f"Min gap:        {min_gap} stars")
-        if min_pairs is not None:
-            print(f"Min pairs:      {min_pairs}")
-        if max_pairs is not None:
-            print(f"Max pairs:      {max_pairs}")
-        print(f"New pairs:      {len(result.pairs)}")
+        self._print_pairing_summary(result, min_gap, min_pairs, max_pairs, max_chars, no_reuse)
 
         if not result.pairs:
             return 0
@@ -372,6 +532,28 @@ class JokesterCLI(Tool):
         saved = service.save_pairs(result.pairs)
         print(f"Pairs saved:    {saved}")
         return saved
+
+    def _print_pairing_summary(
+        self,
+        result: Any,
+        min_gap: int,
+        min_pairs: int | None,
+        max_pairs: int | None,
+        max_chars: int | None,
+        no_reuse: bool = False,
+    ) -> None:
+        """Print pairing operation summary."""
+        print("\n=== Pairing ===")
+        print(f"Rated jokes:    {result.total_rated}")
+        print(f"Max chars:      {max_chars or 'unlimited'}")
+        print(f"Min gap:        {min_gap} stars")
+        if min_pairs is not None:
+            print(f"Min pairs:      {min_pairs}")
+        if max_pairs is not None:
+            print(f"Max pairs:      {max_pairs}")
+        if no_reuse:
+            print("No reuse:       yes (1:1 pairing)")
+        print(f"New pairs:      {len(result.pairs)}")
 
     def _create_training_client(self) -> DpoClient:
         """Create DpoClient for agent's context."""
@@ -450,6 +632,14 @@ class JokesterCLI(Tool):
         config = self.app.config.agents.get("jokester-p")
         return dict(config) if config else None
 
+    def _get_pairing_config(self) -> dict[str, Any]:
+        """Get pairing config from agent config."""
+        agent_config = self._get_agent_config()
+        if agent_config is None:
+            return {}
+        rating_config = agent_config.get("rating", {})
+        return dict(rating_config.get("pairing", {}))
+
     def _get_prompt_template(self, rating_config: dict[str, Any]) -> str:
         """Extract prompt template from rating config."""
         models = rating_config.get("models", {})
@@ -490,30 +680,28 @@ class JokesterCLI(Tool):
             self.lg.error("failed to create LLM caller", extra={"exception": e})
             return None
 
-    def _get_rating_stats(self) -> dict[str, Any]:
-        """Get rating statistics.
-
-        Uses lateral subquery to get only the latest feedback per fact,
-        avoiding duplicate counting when a joke has multiple ratings.
-        """
+    def _get_rating_stats(
+        self, exclude_haiku: bool = False, max_chars: int | None = None
+    ) -> dict[str, Any]:
+        """Get rating statistics using lateral subquery for latest feedback per fact."""
         assert self._pg is not None
         context_key = self._get_context_key()
-        sql = text("""
-            SELECT
-                COUNT(*) as total,
-                COUNT(*) FILTER (WHERE afd.id IS NOT NULL) as rated,
-                COUNT(*) FILTER (WHERE afd.id IS NULL) as unrated,
-                AVG((afd.context->>'stars')::int) as avg_stars
+        haiku_filter = self._build_haiku_filter(exclude_haiku)
+        chars_join, chars_filter = self._build_chars_filter(max_chars)
+
+        sql = text(f"""
+            SELECT COUNT(*) as total,
+                   COUNT(*) FILTER (WHERE afd.id IS NOT NULL) as rated,
+                   COUNT(*) FILTER (WHERE afd.id IS NULL) as unrated,
+                   AVG((afd.context->>'stars')::int) as avg_stars
             FROM atomic_facts af
+            {chars_join}
             LEFT JOIN LATERAL (
-                SELECT afd2.id, afd2.context
-                FROM atomic_feedback_details afd2
-                WHERE afd2.fact_id = af.id
-                ORDER BY afd2.id DESC
-                LIMIT 1
+                SELECT afd2.id, afd2.context FROM atomic_feedback_details afd2
+                WHERE afd2.fact_id = af.id ORDER BY afd2.id DESC LIMIT 1
             ) afd ON true
-            WHERE af.context_key = :context_key
-              AND af.type = 'solution'
+            WHERE af.context_key = :context_key AND af.type = 'solution'
+              {haiku_filter} {chars_filter}
         """)
         with self._pg.connect() as conn:
             result = conn.execute(sql, {"context_key": context_key}).fetchone()
@@ -524,31 +712,37 @@ class JokesterCLI(Tool):
             "avg_stars": float(result[3]) if result[3] else None,
         }
 
-    def _get_rating_distribution(self) -> list[dict[str, Any]]:
-        """Get rating distribution.
+    def _build_haiku_filter(self, exclude_haiku: bool) -> str:
+        """Build WHERE clause to exclude Haiku jokes."""
+        if not exclude_haiku:
+            return ""
+        return """AND NOT EXISTS (
+            SELECT 1 FROM agent_jokester_model_usage u
+            WHERE u.fact_id = af.id AND u.model_name LIKE '%haiku%'
+        )"""
 
-        Uses DISTINCT ON to count only the latest rating per fact,
-        avoiding inflated counts when jokes have multiple ratings.
-        """
+    def _get_rating_distribution(
+        self, exclude_haiku: bool = False, max_chars: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Get rating distribution using DISTINCT ON for latest rating per fact."""
         assert self._pg is not None
         context_key = self._get_context_key()
-        sql = text("""
+        haiku_filter = self._build_haiku_filter(exclude_haiku)
+        chars_join, chars_filter = self._build_chars_filter(max_chars)
+
+        sql = text(f"""
             WITH latest_ratings AS (
-                SELECT DISTINCT ON (af.id)
-                    (afd.context->>'stars')::int as stars
+                SELECT DISTINCT ON (af.id) (afd.context->>'stars')::int as stars
                 FROM atomic_facts af
                 JOIN atomic_feedback_details afd ON af.id = afd.fact_id
-                WHERE af.context_key = :context_key
-                  AND af.type = 'solution'
+                {chars_join}
+                WHERE af.context_key = :context_key AND af.type = 'solution'
+                  {haiku_filter} {chars_filter}
                 ORDER BY af.id, afd.id DESC
             )
-            SELECT
-                stars,
-                COUNT(*) as count,
-                ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) as pct
-            FROM latest_ratings
-            GROUP BY stars
-            ORDER BY stars DESC
+            SELECT stars, COUNT(*) as count,
+                   ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) as pct
+            FROM latest_ratings GROUP BY stars ORDER BY stars DESC
         """)
         with self._pg.connect() as conn:
             rows = conn.execute(sql, {"context_key": context_key}).fetchall()
@@ -568,7 +762,9 @@ class JokesterCLI(Tool):
             rows = conn.execute(sql, {"context_key": context_key}).fetchall()
         return [{"id": r[0], "adapter_name": r[1], "completed_at": r[2]} for r in rows]
 
-    def _get_stats_by_training_period(self, runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _get_stats_by_training_period(
+        self, runs: list[dict[str, Any]], max_chars: int | None = None
+    ) -> list[dict[str, Any]]:
         """Get rating stats for each training period."""
         assert self._pg is not None
         context_key = self._get_context_key()
@@ -583,37 +779,51 @@ class JokesterCLI(Tool):
 
             period_name = "pre-training" if i == 0 else f"after run #{runs[i - 1]['id']}"
 
-            stats = self._get_period_stats(context_key, start, end)
+            stats = self._get_period_stats(context_key, start, end, max_chars=max_chars)
             stats["period"] = period_name
             periods.append(stats)
 
         return periods
 
-    def _get_period_stats(self, context_key: str, start: Any, end: Any) -> dict[str, Any]:
+    def _get_period_stats(
+        self, context_key: str, start: Any, end: Any, max_chars: int | None = None
+    ) -> dict[str, Any]:
         """Get stats for jokes created between start and end times."""
         assert self._pg is not None
 
-        where, params = self._build_period_conditions(context_key, start, end)
+        where, params, extra_join = self._build_period_conditions(
+            context_key, start, end, max_chars=max_chars
+        )
         sql = text(f"""
             SELECT COUNT(*) as count, AVG((afd.context->>'stars')::int) as avg_stars
             FROM atomic_facts af
             JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            {extra_join}
             WHERE {where}
         """)
 
         with self._pg.connect() as conn:
             row = conn.execute(sql, params).fetchone()
             count, avg_stars = row[0], float(row[1]) if row[1] else None
-            distribution = self._get_star_distribution(conn, where, params)
+            distribution = self._get_star_distribution(conn, where, params, extra_join)
 
         return {"count": count, "avg_stars": avg_stars, "distribution": distribution}
 
     def _build_period_conditions(
-        self, context_key: str, start: Any, end: Any
-    ) -> tuple[str, dict[str, Any]]:
-        """Build WHERE conditions and params for period queries."""
-        conditions = ["af.context_key = :context_key", "af.type = 'solution'"]
+        self, context_key: str, start: Any, end: Any, max_chars: int | None = None
+    ) -> tuple[str, dict[str, Any], str]:
+        """Build WHERE conditions, params, and extra JOIN for period queries."""
+        conditions = [
+            "af.context_key = :context_key",
+            "af.type = 'solution'",
+            # Exclude Haiku jokes from training period stats
+            """NOT EXISTS (
+                SELECT 1 FROM agent_jokester_model_usage u
+                WHERE u.fact_id = af.id AND u.model_name LIKE '%haiku%'
+            )""",
+        ]
         params: dict[str, Any] = {"context_key": context_key}
+        extra_join = ""
 
         if start is not None:
             conditions.append("af.created_at >= :start")
@@ -621,17 +831,21 @@ class JokesterCLI(Tool):
         if end is not None:
             conditions.append("af.created_at < :end")
             params["end"] = end
+        if max_chars is not None:
+            extra_join = "JOIN atomic_solution_details asd ON asd.fact_id = af.id"
+            conditions.append(f"length(asd.answer_text) < {max_chars}")
 
-        return " AND ".join(conditions), params
+        return " AND ".join(conditions), params, extra_join
 
     def _get_star_distribution(
-        self, conn: Any, where: str, params: dict[str, Any]
+        self, conn: Any, where: str, params: dict[str, Any], extra_join: str = ""
     ) -> dict[int, int]:
         """Get distribution of star ratings (1-5)."""
         sql = text(f"""
             SELECT (afd.context->>'stars')::int as stars, COUNT(*) as cnt
             FROM atomic_facts af
             JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            {extra_join}
             WHERE {where}
             GROUP BY (afd.context->>'stars')::int
         """)

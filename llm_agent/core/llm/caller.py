@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from llm_infer.client.types import AdapterInfo
+
 
 if TYPE_CHECKING:
     from appinfra.log import Logger
@@ -29,7 +31,7 @@ class CallResult:
     model: str
     usage: dict[str, int] | None
     tool_calls: list[dict[str, Any]] | None
-    adapter_fallback: bool
+    adapter: AdapterInfo | None  # LoRA adapter info (None if not requested)
     dry_run: bool  # True if this was a dry-run (no actual LLM call)
     raw_response: ChatResponse | None  # None in dry-run mode
 
@@ -142,7 +144,7 @@ class LLMCaller:
             model=model or "dry-run",
             usage=None,
             tool_calls=None,
-            adapter_fallback=False,
+            adapter=None,
             dry_run=True,
             raw_response=None,
         )
@@ -168,10 +170,10 @@ class LLMCaller:
 
         return CallResult(
             content=response.content or "",
-            model=getattr(response, "model", None) or "unknown",
+            model=response.model or "unknown",
             usage=usage_dict,
             tool_calls=tool_calls,
-            adapter_fallback=getattr(response, "adapter_fallback", False),
+            adapter=response.adapter,
             dry_run=False,
             raw_response=response,
         )
@@ -207,13 +209,13 @@ class LLMCaller:
             "llm response",
             extra={
                 "content": response.content,
-                "model": getattr(response, "model", None),
-                "usage": getattr(response, "usage", None),
+                "model": response.model,
+                "usage": response.usage,
                 "tool_calls": [
                     {"name": tc.function.name, "arguments": tc.function.arguments}
                     for tc in (response.tool_calls or [])
                 ],
-                "adapter_fallback": getattr(response, "adapter_fallback", False),
+                "adapter": response.adapter,
             },
         )
 

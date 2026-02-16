@@ -63,17 +63,25 @@ class PairingService:
         self._pg = pg
         self._context_key = context_key
 
-    def get_rated_jokes(self) -> list[RatedJoke]:
+    def get_rated_jokes(self, max_chars: int | None = None) -> list[RatedJoke]:
         """Get all rated jokes sorted by stars (desc)."""
-        sql = text("""
+        chars_join = ""
+        chars_filter = ""
+        if max_chars:
+            chars_join = "JOIN atomic_solution_details asd ON asd.fact_id = af.id"
+            chars_filter = f"AND length(asd.answer_text) < {max_chars}"
+
+        sql = text(f"""
             SELECT DISTINCT ON (af.id)
                 af.id,
                 af.content,
                 (afd.context->>'stars')::int as stars
             FROM atomic_facts af
             JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            {chars_join}
             WHERE af.context_key = :context_key
               AND afd.context->>'stars' IS NOT NULL
+              {chars_filter}
             ORDER BY af.id, afd.id DESC
         """)
         with self._pg.connect() as conn:
@@ -88,6 +96,8 @@ class PairingService:
         low_threshold: int = 2,
         min_pairs: int | None = None,
         max_pairs: int | None = None,
+        max_chars: int | None = None,
+        no_reuse: bool = False,
     ) -> PairingResult:
         """Create preference pairs from rated jokes.
 
@@ -98,14 +108,16 @@ class PairingService:
             low_threshold: Maximum stars for rejected (threshold strategy)
             min_pairs: Minimum pairs to generate (reuses chosen jokes if needed)
             max_pairs: Maximum pairs to generate (caps output)
+            max_chars: Only include jokes under this character length
+            no_reuse: If True, each chosen joke is used at most once (1:1 pairing)
 
         Returns:
             PairingResult with pairs and metadata.
         """
-        rated = self.get_rated_jokes()
+        rated = self.get_rated_jokes(max_chars=max_chars)
 
         if strategy == "relative":
-            pairs = self._pair_relative(rated, min_gap, min_pairs)
+            pairs = self._pair_relative(rated, min_gap, min_pairs, no_reuse)
         else:
             pairs = self._pair_threshold(rated, high_threshold, low_threshold)
 
@@ -121,34 +133,89 @@ class PairingService:
         )
 
     def save_pairs(self, pairs: list[PreferencePair]) -> int:
-        """Save preference pairs to database.
+        """Save preference pairs to database in batch.
 
         Returns:
             Number of pairs created.
         """
-        created = 0
-        for pair in pairs:
-            try:
-                if self._pair_exists(pair.chosen.id, pair.rejected.id):
-                    self._lg.debug(
-                        "pair already exists",
-                        extra={"chosen_id": pair.chosen.id, "rejected_id": pair.rejected.id},
-                    )
-                    continue
+        existing = self._load_existing_pairs()
+        new_pairs = [
+            p
+            for p in pairs
+            if (p.chosen.id, p.rejected.id) not in existing
+            and (p.rejected.id, p.chosen.id) not in existing
+        ]
+        if not new_pairs:
+            return 0
 
-                self._create_pair_atomic(pair)
-                created += 1
-            except Exception as e:
-                self._lg.warning(
-                    "failed to create pair",
-                    extra={
-                        "exception": e,
-                        "chosen_id": pair.chosen.id,
-                        "rejected_id": pair.rejected.id,
-                    },
-                )
+        return self._batch_insert_pairs(new_pairs)
 
-        return created
+    def _load_existing_pairs(self) -> set[tuple[int, int]]:
+        """Load all existing pair IDs into a set for O(1) lookup."""
+        sql = text("""
+            SELECT metadata->>'chosen_fact_id', metadata->>'rejected_fact_id'
+            FROM atomic_preference_details
+            WHERE fact_id IN (SELECT id FROM atomic_facts WHERE context_key = :context_key)
+        """)
+        with self._pg.connect() as conn:
+            rows = conn.execute(sql, {"context_key": self._context_key}).fetchall()
+        return {(int(r[0]), int(r[1])) for r in rows if r[0] and r[1]}
+
+    def _batch_insert_pairs(self, pairs: list[PreferencePair]) -> int:
+        """Batch insert pairs in 2 queries: facts then details."""
+        with self._pg.connect() as conn:
+            # Batch insert facts, get IDs
+            fact_ids = self._batch_insert_facts(conn, len(pairs))
+            # Batch insert details
+            self._batch_insert_details(conn, fact_ids, pairs)
+            conn.commit()
+        return len(pairs)
+
+    def _batch_insert_facts(self, conn: Any, count: int) -> list[int]:
+        """Batch insert atomic_facts rows, return IDs."""
+        values = ", ".join(
+            f"(:ctx, 'preference', 'preference_pair', '{uuid.uuid4().hex}', 'joke', 'pairs_sync', 1.0, true, NOW())"
+            for _ in range(count)
+        )
+        sql = text(f"""
+            INSERT INTO atomic_facts
+                (context_key, type, content, content_hash, category, source, confidence, active, created_at)
+            VALUES {values}
+            RETURNING id
+        """)
+        rows = conn.execute(sql, {"ctx": self._context_key}).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def _batch_insert_details(
+        self, conn: Any, fact_ids: list[int], pairs: list[PreferencePair]
+    ) -> None:
+        """Batch insert atomic_preference_details rows using parameterized query."""
+        context = "Tell me a joke."
+        rows = []
+        for fact_id, pair in zip(fact_ids, pairs, strict=True):
+            metadata = json.dumps(
+                {
+                    "chosen_fact_id": pair.chosen.id,
+                    "rejected_fact_id": pair.rejected.id,
+                    "chosen_stars": pair.chosen.stars,
+                    "rejected_stars": pair.rejected.stars,
+                }
+            )
+            rows.append(
+                {
+                    "fact_id": fact_id,
+                    "context": context,
+                    "chosen": pair.chosen.content,
+                    "rejected": pair.rejected.content,
+                    "margin": pair.margin,
+                    "metadata": metadata,
+                }
+            )
+        sql = text("""
+            INSERT INTO atomic_preference_details (fact_id, context, chosen, rejected, margin, metadata)
+            VALUES (:fact_id, :context, :chosen, :rejected, :margin, CAST(:metadata AS jsonb))
+        """)
+        conn.execute(sql, rows)
 
     def _create_pair_atomic(self, pair: PreferencePair, context: str = "Tell me a joke.") -> int:
         """Create preference fact and details in a single transaction."""
@@ -200,13 +267,19 @@ class PairingService:
         )
 
     def _pair_relative(
-        self, rated: list[RatedJoke], min_gap: int, min_pairs: int | None = None
+        self,
+        rated: list[RatedJoke],
+        min_gap: int,
+        min_pairs: int | None = None,
+        no_reuse: bool = False,
     ) -> list[PreferencePair]:
         """Pair highest with lowest, respecting min gap.
 
         If min_pairs is set and 1:1 pairing yields fewer, reuses chosen jokes
         with multiple rejected jokes until min_pairs is reached or rejected
         pool is exhausted.
+
+        If no_reuse is True, each chosen joke is used at most once (1:1 pairing).
         """
         sorted_jokes = sorted(rated, key=lambda x: (-x.stars, x.id))
         chosen_pool, rejected_pool = self._build_pairing_pools(sorted_jokes, min_gap)
@@ -215,7 +288,7 @@ class PairingService:
             return []
 
         target = min_pairs if min_pairs is not None else len(chosen_pool)
-        return self._generate_pairs(chosen_pool, rejected_pool, min_gap, target)
+        return self._generate_pairs(chosen_pool, rejected_pool, min_gap, target, no_reuse)
 
     def _build_pairing_pools(
         self, sorted_jokes: list[RatedJoke], min_gap: int
@@ -243,31 +316,48 @@ class PairingService:
         rejected_pool: list[RatedJoke],
         min_gap: int,
         target: int,
+        no_reuse: bool = False,
     ) -> list[PreferencePair]:
         """Generate pairs by cycling through chosen pool until target or exhausted."""
         pairs: list[PreferencePair] = []
         used_rejected: set[int] = set()
+        used_chosen: set[int] = set()
         chosen_idx = 0
         max_iterations = len(chosen_pool) * len(rejected_pool)
 
         while len(pairs) < target and len(used_rejected) < len(rejected_pool):
             chosen = chosen_pool[chosen_idx % len(chosen_pool)]
-
-            for rejected in rejected_pool:
-                if (
-                    rejected.id not in used_rejected
-                    and rejected.id != chosen.id
-                    and chosen.stars - rejected.stars >= min_gap
-                ):
-                    pairs.append(PreferencePair(chosen=chosen, rejected=rejected))
-                    used_rejected.add(rejected.id)
-                    break
-
             chosen_idx += 1
+
+            if no_reuse and chosen.id in used_chosen:
+                if chosen_idx >= max_iterations:
+                    break
+                continue
+
+            match = self._find_rejected_match(chosen, rejected_pool, used_rejected, min_gap)
+            if match:
+                pairs.append(PreferencePair(chosen=chosen, rejected=match))
+                used_rejected.add(match.id)
+                used_chosen.add(chosen.id)
+
             if chosen_idx >= max_iterations:
                 break
 
         return pairs
+
+    def _find_rejected_match(
+        self, chosen: RatedJoke, pool: list[RatedJoke], used: set[int], min_gap: int
+    ) -> RatedJoke | None:
+        """Find first unused rejected joke that meets gap requirement."""
+        for rejected in pool:
+            is_valid = (
+                rejected.id not in used
+                and rejected.id != chosen.id
+                and chosen.stars - rejected.stars >= min_gap
+            )
+            if is_valid:
+                return rejected
+        return None
 
     def _pair_threshold(self, rated: list[RatedJoke], high: int, low: int) -> list[PreferencePair]:
         """Pair based on fixed thresholds.

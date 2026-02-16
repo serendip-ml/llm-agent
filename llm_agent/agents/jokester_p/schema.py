@@ -5,7 +5,7 @@ Tracks model usage and training metadata for joke generation.
 
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Boolean, Date, Float, Integer, String
+from sqlalchemy import JSON, BigInteger, Boolean, Date, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from llm_agent.storage import AgentTable
@@ -146,4 +146,11 @@ class TrainingMetadata(AgentTable):
         default=False,
         nullable=False,
         comment="True if adapter was requested but unavailable (fell back to base)",
+    )
+
+    # Full adapter info as JSON (md5, mtime, actual, etc.)
+    adapter_info: Mapped[dict[str, object] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="Full AdapterInfo from LLM response (md5, mtime, actual, requested, fallback)",
     )

@@ -10,6 +10,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from llm_infer.client.types import AdapterInfo
 from pydantic import BaseModel
 
 from .novelty import NoveltyCheck, NoveltyChecker
@@ -30,6 +31,15 @@ class Joke(BaseModel):
 
 
 @dataclass
+class ExpectedAdapter:
+    """Expected adapter info from latest DPO training run."""
+
+    name: str
+    md5: str
+    mtime: str
+
+
+@dataclass
 class GenerationAttempt:
     """Result of a joke generation cycle with all metadata."""
 
@@ -37,13 +47,18 @@ class GenerationAttempt:
     run_attempts: int
     cumulative_attempts: int
     model_name: str
-    adapter_fallback: bool
+    adapter: AdapterInfo | None  # Full adapter info from LLM response
     novelty: NoveltyCheck | None = None
 
     @property
     def success(self) -> bool:
         """Whether a novel joke was generated."""
         return self.joke is not None
+
+    @property
+    def adapter_fallback(self) -> bool:
+        """Whether adapter fell back to base model."""
+        return self.adapter.fallback if self.adapter else False
 
     @property
     def max_similarity(self) -> float:
@@ -75,6 +90,7 @@ class JokeGenerator:
         directive_trait: DirectiveTrait | None = None,
         max_retries: int = 3,
         denylist: list[str] | None = None,
+        expected_adapter: ExpectedAdapter | None = None,
     ) -> None:
         """Initialize joke generator.
 
@@ -85,6 +101,7 @@ class JokeGenerator:
             directive_trait: Optional directive trait for system prompt.
             max_retries: Maximum retry attempts (default: 3).
             denylist: Words/phrases to filter (case-insensitive).
+            expected_adapter: Expected adapter from latest DPO run (for verification).
         """
         self._lg = lg
         self._llm = llm_trait
@@ -92,7 +109,9 @@ class JokeGenerator:
         self._directive = directive_trait
         self._max_retries = max_retries
         self._denylist = [term.lower() for term in (denylist or [])]
+        self._expected_adapter = expected_adapter
         self._cumulative_attempts = 0
+        self._adapter_verified = False  # Log verification only once per session
         # Track (generated_joke, similar_existing_joke) pairs for smarter retries
         self._recent_failed: deque[tuple[str, str | None]] = deque(maxlen=10)
 
@@ -121,11 +140,16 @@ class JokeGenerator:
             run_attempts=max_attempts,
             cumulative_attempts=self._cumulative_attempts,
             model_name="unknown",
-            adapter_fallback=False,
+            adapter=None,
         )
 
     def _success_attempt(
-        self, attempt: int, joke: Joke, model: str, fallback: bool, novelty: NoveltyCheck | None
+        self,
+        attempt: int,
+        joke: Joke,
+        model: str,
+        adapter: AdapterInfo | None,
+        novelty: NoveltyCheck | None,
     ) -> GenerationAttempt:
         """Build successful generation attempt and reset state."""
         self._recent_failed.clear()
@@ -136,25 +160,66 @@ class JokeGenerator:
             run_attempts=attempt,
             cumulative_attempts=cumulative,
             model_name=model,
-            adapter_fallback=fallback,
+            adapter=adapter,
             novelty=novelty,
         )
 
     def _try_single_attempt(
         self, context: list[str], attempt: int
-    ) -> tuple[Joke, str, bool, NoveltyCheck | None] | None:
+    ) -> tuple[Joke, str, AdapterInfo | None, NoveltyCheck | None] | None:
         """Try to generate a single novel joke."""
         self._cumulative_attempts += 1
         retry_feedback = "" if attempt == 1 else "Try a completely different style."
 
-        joke, model_name, adapter_fallback = self._call_llm(context, retry_feedback)
+        joke, model_name, adapter = self._call_llm(context, retry_feedback)
+        self._verify_adapter(adapter)
+
         if joke is None:
             self._lg.warning("LLM failed to generate joke", extra={"attempt": attempt})
             return None
 
-        return self._validate(joke, model_name, adapter_fallback, attempt)
+        return self._validate(joke, model_name, adapter, attempt)
 
-    def _call_llm(self, context: list[str], retry_feedback: str) -> tuple[Joke | None, str, bool]:
+    def _verify_adapter(self, adapter: AdapterInfo | None) -> None:
+        """Verify adapter matches expected from latest DPO run (logs once per session)."""
+        if self._adapter_verified:
+            return
+        self._adapter_verified = True
+
+        expected = self._expected_adapter
+        if expected is None:
+            self._lg.debug("no expected adapter configured, skipping verification")
+            return
+
+        failure = self._check_adapter_failure(adapter, expected)
+        if failure:
+            self._lg.warning(f"adapter verification failed: {failure[0]}", extra=failure[1])
+        else:
+            self._lg.info(
+                "adapter verified",
+                extra={"adapter": expected.name, "md5": expected.md5, "mtime": expected.mtime},
+            )
+
+    def _check_adapter_failure(
+        self, adapter: AdapterInfo | None, expected: ExpectedAdapter
+    ) -> tuple[str, dict[str, object]] | None:
+        """Check for adapter verification failure. Returns (reason, extra) or None if OK."""
+        if adapter is None:
+            return "no adapter info in response", {"expected": expected}
+        if adapter.fallback:
+            return "fell back to base model", {"expected": expected, "actual": adapter}
+        if adapter.md5 != expected.md5:
+            return "md5 mismatch", {
+                "expected_md5": expected.md5,
+                "actual_md5": adapter.md5,
+                "expected_mtime": expected.mtime,
+                "actual_mtime": adapter.mtime,
+            }
+        return None
+
+    def _call_llm(
+        self, context: list[str], retry_feedback: str
+    ) -> tuple[Joke | None, str, AdapterInfo | None]:
         """Generate joke via LLM with structured output."""
         from ...core.llm.types import Message
 
@@ -163,13 +228,13 @@ class JokeGenerator:
 
         if result.parsed is None:
             self._lg.warning("LLM failed to generate structured joke")
-            return None, result.model, result.adapter_fallback
+            return None, result.model, result.adapter
 
-        return result.parsed, result.model, result.adapter_fallback
+        return result.parsed, result.model, result.adapter
 
     def _validate(
-        self, joke: Joke, model_name: str, adapter_fallback: bool, attempt: int
-    ) -> tuple[Joke, str, bool, NoveltyCheck | None] | None:
+        self, joke: Joke, model_name: str, adapter: AdapterInfo | None, attempt: int
+    ) -> tuple[Joke, str, AdapterInfo | None, NoveltyCheck | None] | None:
         """Validate joke against denylist, completeness, and novelty checks."""
         if self._is_incomplete(joke.text):
             self._lg.debug(
@@ -188,7 +253,7 @@ class JokeGenerator:
             self._recent_failed.append((joke.text, novelty.similar_joke))
             return None
 
-        return joke, model_name, adapter_fallback, novelty
+        return joke, model_name, adapter, novelty
 
     def _is_incomplete(self, text: str) -> bool:
         """Check if joke is incomplete (question without punchline)."""

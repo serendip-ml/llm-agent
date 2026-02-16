@@ -21,9 +21,14 @@ denylist:
 
 # Agent-specific LLM config (merged with global llm.yaml)
 llm:
+  default: local
+  #default: anthropic
   backends:
     local:
       adapter_id: jokester-dpo
+    anthropic:
+      model: "claude-haiku-4-5"
+      #model: "claude-sonnet-4-20250514"
 
 # Directive prompt (agent personality)
 directive: |
@@ -34,7 +39,8 @@ directive: |
   a joke. You have range — puns, one-liners, observational humor, absurdist
   bits — but you gravitate toward whatever gets the best response.
 
-  You keep it short. A joke should fit in a text message.
+  STRICT LENGTH LIMIT: Under 200 characters. Maximum 2 sentences.
+  Think Twitter, not blog post. Puns and one-liners preferred.
 
   IMPORTANT: Every joke must be COMPLETE with both setup AND punchline.
   Never output just a question without an answer. A question like
@@ -106,6 +112,7 @@ rating:
   # Disabled - pairing done at training time via llm-learn CLI for optimal matching
   pairing:
     enabled: false
+    min_gap: 3  # 4★ vs 1★ ensures significant signal
     # high_threshold: 4  # 4+ stars = "chosen"
     # low_threshold: 2   # 2- stars = "rejected"
     # prompt: "Tell me a {category}."  # Context prompt for preference pairs

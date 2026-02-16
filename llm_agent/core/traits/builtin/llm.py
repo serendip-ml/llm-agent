@@ -263,8 +263,7 @@ class LLMTrait(BaseTrait):
             tokens_used=tokens_used,
             latency_ms=0,
             tool_calls=tool_calls,
-            adapter_fallback=getattr(response, "adapter_fallback", False),
-            adapter_requested=getattr(response, "adapter_requested", None),
+            adapter=response.adapter,
         )
 
     def _extract_tokens(self, response: ChatResponse) -> int:
@@ -290,11 +289,10 @@ class LLMTrait(BaseTrait):
 
     def _check_adapter_fallback(self, response: ChatResponse) -> None:
         """Log if adapter fallback occurred (warning every 10 min, else debug)."""
-        if not getattr(response, "adapter_fallback", False):
+        if not response.adapter or not response.adapter.fallback:
             return
 
-        adapter_requested = getattr(response, "adapter_requested", None)
-        extra = {"adapter_requested": adapter_requested}
+        extra = {"adapter": response.adapter}
 
         now = time.monotonic()
         if now - self._last_adapter_fallback_warning >= 600:
@@ -329,13 +327,13 @@ class LLMTrait(BaseTrait):
             "llm response",
             extra={
                 "content": response.content,
-                "model": getattr(response, "model", None),
-                "usage": getattr(response, "usage", None),
+                "model": response.model,
+                "usage": response.usage,
                 "tool_calls": [
                     {"name": tc.function.name, "arguments": tc.function.arguments}
                     for tc in (response.tool_calls or [])
                 ],
-                "adapter_fallback": getattr(response, "adapter_fallback", False),
+                "adapter": response.adapter,
             },
         )
 
@@ -389,10 +387,24 @@ class LLMTrait(BaseTrait):
         Raises:
             StructuredOutputError: If JSON is invalid or doesn't match schema.
         """
-        from ...llm.json_cleaner import JSONCleaner
+        data = self._clean_and_parse_json(content, schema)
 
         try:
-            cleaner = JSONCleaner()
+            return schema.model_validate(data)
+        except ValidationError as e:
+            self._agent._lg.debug(
+                "schema validation failed",
+                extra={"parsed_data": data, "expected_fields": list(schema.model_fields.keys())},
+            )
+            raise StructuredOutputError(f"Response doesn't match schema: {e}") from e
+
+    def _clean_and_parse_json(self, content: str, schema: type[BaseModel]) -> object:
+        """Clean and parse JSON content, handling LLM quirks."""
+        from ...llm.json_cleaner import JSONCleaner
+
+        cleaner = JSONCleaner()
+
+        try:
             cleaned = cleaner.clean(content)
             data = json.loads(cleaned)
         except json.JSONDecodeError as e:
@@ -402,10 +414,21 @@ class LLMTrait(BaseTrait):
             )
             raise StructuredOutputError(f"Invalid JSON in response: {e}") from e
 
-        try:
-            return schema.model_validate(data)
-        except ValidationError as e:
-            raise StructuredOutputError(f"Response doesn't match schema: {e}") from e
+        if isinstance(data, dict):
+            self._reject_if_schema(data, cleaner, content)
+            data = cleaner.clean_parsed(data, set(schema.model_fields.keys()))
+        return data
+
+    def _reject_if_schema(self, data: dict[str, Any], cleaner: Any, content: str) -> None:
+        """Raise error if LLM returned schema definition instead of data."""
+        if cleaner._looks_like_schema(data):
+            self._agent._lg.warning(
+                "LLM returned schema definition instead of data", extra={"raw_content": content}
+            )
+            raise StructuredOutputError(
+                "LLM returned JSON schema definition instead of actual data. "
+                "The model may not understand the structured output instruction."
+            )
 
 
 class LLMTraitBackend:

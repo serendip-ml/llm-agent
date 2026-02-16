@@ -345,16 +345,21 @@ Be strict. Respond only with the JSON array."""
         model: str,
         provider: str,
     ) -> list[Result]:
-        """Parse batch response into individual results."""
-        results = []
+        """Parse batch response into individual results.
+
+        Deduplicates by fact_id - if LLM returns same ID twice, only first is kept.
+        """
+        results: list[Result] = []
+        seen_facts: set[Any] = set()
         item_map = {item.fact: item for item in items}
 
         try:
             parsed = self._extract_batch_json(response)
             for rating_data in parsed:
                 result = self._parse_batch_item(rating_data, item_map, model, provider)
-                if result:
+                if result and result.fact not in seen_facts:
                     results.append(result)
+                    seen_facts.add(result.fact)
         except Exception as e:
             self._lg.warning(
                 "failed to parse batch response",

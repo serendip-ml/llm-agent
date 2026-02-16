@@ -47,32 +47,37 @@ class JSONCleaner:
         return cleaned
 
     def _strip_code_fences(self, content: str) -> str:
-        """Remove markdown code fences from JSON.
+        """Extract JSON from markdown code fences.
 
         Handles patterns like:
             ```json
             {"key": "value"}
             ```
 
-        Or:
-            ```
+        Also handles preamble text before the code fence:
+            Some thinking text...
+            ```json
             {"key": "value"}
             ```
         """
-        if not content.startswith("```"):
+        # Find code fence anywhere in content
+        fence_start = content.find("```")
+        if fence_start == -1:
             return content
 
-        lines = content.split("\n")
+        # Find end of opening fence line
+        newline_after_fence = content.find("\n", fence_start)
+        if newline_after_fence == -1:
+            return content
 
-        # Remove opening fence (```json or ```)
-        if lines[0].startswith("```"):
-            lines = lines[1:]
+        # Find closing fence
+        fence_end = content.find("```", newline_after_fence)
+        if fence_end == -1:
+            # No closing fence - extract from opening fence to end
+            return content[newline_after_fence + 1 :].strip()
 
-        # Remove closing fence
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-
-        return "\n".join(lines).strip()
+        # Extract content between fences
+        return content[newline_after_fence + 1 : fence_end].strip()
 
     def _auto_close_json(self, content: str) -> str:
         """Auto-close unclosed braces and brackets in JSON.
@@ -186,3 +191,81 @@ class JSONCleaner:
         if not isinstance(obj, dict):
             return False
         return "properties" in obj and obj.get("type") == "object"
+
+    def clean_parsed(
+        self, data: dict[str, object], expected_fields: set[str] | None = None
+    ) -> dict[str, object]:
+        """Clean parsed JSON dict by unwrapping nested structures.
+
+        LLMs sometimes nest the actual data inside wrapper keys. This method
+        attempts to extract the real data when the structure doesn't match
+        expected fields.
+
+        Handles patterns:
+        - Single wrapper key: {"joke": {"text": "...", "style": "..."}}
+          → {"text": "...", "style": "..."}
+        - Field containing nested object: {"text": {"text": "...", "style": "..."}}
+          → {"text": "...", "style": "..."}
+
+        Args:
+            data: Parsed JSON dict from LLM.
+            expected_fields: Set of field names we expect. If None, attempts
+                heuristic unwrapping based on structure patterns.
+
+        Returns:
+            Cleaned dict, possibly unwrapped from nested structure.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        # If expected fields provided, try targeted unwrapping
+        if expected_fields:
+            return self._unwrap_with_expected(data, expected_fields)
+
+        # Heuristic: single-key dict with nested dict value → unwrap
+        return self._unwrap_single_wrapper(data)
+
+    def _unwrap_with_expected(
+        self, data: dict[str, object], expected: set[str]
+    ) -> dict[str, object]:
+        """Unwrap nested structure using expected field names as guide.
+
+        Tries to find and extract a nested dict that contains the expected fields.
+        """
+        # Already has expected fields → return as-is
+        if expected.issubset(data.keys()):
+            return data
+
+        # Case 1: {"text": {"text": "...", "style": "..."}} - field contains nested obj
+        for field in expected:
+            if field in data and isinstance(data[field], dict):
+                inner = data[field]
+                if isinstance(inner, dict) and expected.issubset(inner.keys()):
+                    return inner
+
+        # Case 2: {"joke": {"text": "...", "style": "..."}} - single wrapper key
+        if len(data) == 1:
+            inner = next(iter(data.values()))
+            if isinstance(inner, dict) and expected.issubset(inner.keys()):
+                return inner
+
+        return data
+
+    def _unwrap_single_wrapper(self, data: dict[str, object]) -> dict[str, object]:
+        """Heuristically unwrap single-key wrapper dicts.
+
+        If dict has exactly one key and the value is a dict, unwrap it.
+        Skip if the inner dict looks like a schema definition.
+        """
+        if len(data) != 1:
+            return data
+
+        inner = next(iter(data.values()))
+        if not isinstance(inner, dict):
+            return data
+
+        # Don't unwrap schema definitions
+        if self._looks_like_schema(inner):
+            return data
+
+        return inner
