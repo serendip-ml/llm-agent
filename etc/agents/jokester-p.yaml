@@ -112,6 +112,7 @@ rating:
   # Disabled - pairing done at training time via llm-learn CLI for optimal matching
   pairing:
     enabled: false
+    min_gap: 3  # 4★ vs 1★ ensures significant signal
     # high_threshold: 4  # 4+ stars = "chosen"
     # low_threshold: 2   # 2- stars = "rejected"
     # prompt: "Tell me a {category}."  # Context prompt for preference pairs

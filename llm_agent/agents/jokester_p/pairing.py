@@ -131,34 +131,86 @@ class PairingService:
         )
 
     def save_pairs(self, pairs: list[PreferencePair]) -> int:
-        """Save preference pairs to database.
+        """Save preference pairs to database in batch.
 
         Returns:
             Number of pairs created.
         """
-        created = 0
-        for pair in pairs:
-            try:
-                if self._pair_exists(pair.chosen.id, pair.rejected.id):
-                    self._lg.debug(
-                        "pair already exists",
-                        extra={"chosen_id": pair.chosen.id, "rejected_id": pair.rejected.id},
-                    )
-                    continue
+        existing = self._load_existing_pairs()
+        new_pairs = [
+            p
+            for p in pairs
+            if (p.chosen.id, p.rejected.id) not in existing
+            and (p.rejected.id, p.chosen.id) not in existing
+        ]
+        if not new_pairs:
+            return 0
 
-                self._create_pair_atomic(pair)
-                created += 1
-            except Exception as e:
-                self._lg.warning(
-                    "failed to create pair",
-                    extra={
-                        "exception": e,
-                        "chosen_id": pair.chosen.id,
-                        "rejected_id": pair.rejected.id,
-                    },
-                )
+        return self._batch_insert_pairs(new_pairs)
 
-        return created
+    def _load_existing_pairs(self) -> set[tuple[int, int]]:
+        """Load all existing pair IDs into a set for O(1) lookup."""
+        sql = text("""
+            SELECT metadata->>'chosen_fact_id', metadata->>'rejected_fact_id'
+            FROM atomic_preference_details
+            WHERE fact_id IN (SELECT id FROM atomic_facts WHERE context_key = :context_key)
+        """)
+        with self._pg.connect() as conn:
+            rows = conn.execute(sql, {"context_key": self._context_key}).fetchall()
+        return {(int(r[0]), int(r[1])) for r in rows if r[0] and r[1]}
+
+    def _batch_insert_pairs(self, pairs: list[PreferencePair]) -> int:
+        """Batch insert pairs in 2 queries: facts then details."""
+        with self._pg.connect() as conn:
+            # Batch insert facts, get IDs
+            fact_ids = self._batch_insert_facts(conn, len(pairs))
+            # Batch insert details
+            self._batch_insert_details(conn, fact_ids, pairs)
+            conn.commit()
+        return len(pairs)
+
+    def _batch_insert_facts(self, conn: Any, count: int) -> list[int]:
+        """Batch insert atomic_facts rows, return IDs."""
+        values = ", ".join(
+            f"(:ctx, 'preference', 'preference_pair', '{uuid.uuid4().hex}', 'joke', 'pairs_sync', 1.0, true, NOW())"
+            for _ in range(count)
+        )
+        sql = text(f"""
+            INSERT INTO atomic_facts
+                (context_key, type, content, content_hash, category, source, confidence, active, created_at)
+            VALUES {values}
+            RETURNING id
+        """)
+        rows = conn.execute(sql, {"ctx": self._context_key}).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def _batch_insert_details(
+        self, conn: Any, fact_ids: list[int], pairs: list[PreferencePair]
+    ) -> None:
+        """Batch insert atomic_preference_details rows."""
+        context = "Tell me a joke."
+        values_list = []
+        for fact_id, pair in zip(fact_ids, pairs, strict=True):
+            metadata = json.dumps(
+                {
+                    "chosen_fact_id": pair.chosen.id,
+                    "rejected_fact_id": pair.rejected.id,
+                    "chosen_stars": pair.chosen.stars,
+                    "rejected_stars": pair.rejected.stars,
+                }
+            )
+            # Escape single quotes in content
+            chosen = pair.chosen.content.replace("'", "''")
+            rejected = pair.rejected.content.replace("'", "''")
+            values_list.append(
+                f"({fact_id}, '{context}', '{chosen}', '{rejected}', {pair.margin}, '{metadata}'::jsonb)"
+            )
+        values = ", ".join(values_list)
+        sql = text(f"""
+            INSERT INTO atomic_preference_details (fact_id, context, chosen, rejected, margin, metadata)
+            VALUES {values}
+        """)
+        conn.execute(sql)
 
     def _create_pair_atomic(self, pair: PreferencePair, context: str = "Tell me a joke.") -> int:
         """Create preference fact and details in a single transaction."""
