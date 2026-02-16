@@ -97,6 +97,7 @@ class PairingService:
         min_pairs: int | None = None,
         max_pairs: int | None = None,
         max_chars: int | None = None,
+        no_reuse: bool = False,
     ) -> PairingResult:
         """Create preference pairs from rated jokes.
 
@@ -108,6 +109,7 @@ class PairingService:
             min_pairs: Minimum pairs to generate (reuses chosen jokes if needed)
             max_pairs: Maximum pairs to generate (caps output)
             max_chars: Only include jokes under this character length
+            no_reuse: If True, each chosen joke is used at most once (1:1 pairing)
 
         Returns:
             PairingResult with pairs and metadata.
@@ -115,7 +117,7 @@ class PairingService:
         rated = self.get_rated_jokes(max_chars=max_chars)
 
         if strategy == "relative":
-            pairs = self._pair_relative(rated, min_gap, min_pairs)
+            pairs = self._pair_relative(rated, min_gap, min_pairs, no_reuse)
         else:
             pairs = self._pair_threshold(rated, high_threshold, low_threshold)
 
@@ -262,13 +264,19 @@ class PairingService:
         )
 
     def _pair_relative(
-        self, rated: list[RatedJoke], min_gap: int, min_pairs: int | None = None
+        self,
+        rated: list[RatedJoke],
+        min_gap: int,
+        min_pairs: int | None = None,
+        no_reuse: bool = False,
     ) -> list[PreferencePair]:
         """Pair highest with lowest, respecting min gap.
 
         If min_pairs is set and 1:1 pairing yields fewer, reuses chosen jokes
         with multiple rejected jokes until min_pairs is reached or rejected
         pool is exhausted.
+
+        If no_reuse is True, each chosen joke is used at most once (1:1 pairing).
         """
         sorted_jokes = sorted(rated, key=lambda x: (-x.stars, x.id))
         chosen_pool, rejected_pool = self._build_pairing_pools(sorted_jokes, min_gap)
@@ -277,7 +285,7 @@ class PairingService:
             return []
 
         target = min_pairs if min_pairs is not None else len(chosen_pool)
-        return self._generate_pairs(chosen_pool, rejected_pool, min_gap, target)
+        return self._generate_pairs(chosen_pool, rejected_pool, min_gap, target, no_reuse)
 
     def _build_pairing_pools(
         self, sorted_jokes: list[RatedJoke], min_gap: int
@@ -305,31 +313,48 @@ class PairingService:
         rejected_pool: list[RatedJoke],
         min_gap: int,
         target: int,
+        no_reuse: bool = False,
     ) -> list[PreferencePair]:
         """Generate pairs by cycling through chosen pool until target or exhausted."""
         pairs: list[PreferencePair] = []
         used_rejected: set[int] = set()
+        used_chosen: set[int] = set()
         chosen_idx = 0
         max_iterations = len(chosen_pool) * len(rejected_pool)
 
         while len(pairs) < target and len(used_rejected) < len(rejected_pool):
             chosen = chosen_pool[chosen_idx % len(chosen_pool)]
-
-            for rejected in rejected_pool:
-                if (
-                    rejected.id not in used_rejected
-                    and rejected.id != chosen.id
-                    and chosen.stars - rejected.stars >= min_gap
-                ):
-                    pairs.append(PreferencePair(chosen=chosen, rejected=rejected))
-                    used_rejected.add(rejected.id)
-                    break
-
             chosen_idx += 1
+
+            if no_reuse and chosen.id in used_chosen:
+                if chosen_idx >= max_iterations:
+                    break
+                continue
+
+            match = self._find_rejected_match(chosen, rejected_pool, used_rejected, min_gap)
+            if match:
+                pairs.append(PreferencePair(chosen=chosen, rejected=match))
+                used_rejected.add(match.id)
+                used_chosen.add(chosen.id)
+
             if chosen_idx >= max_iterations:
                 break
 
         return pairs
+
+    def _find_rejected_match(
+        self, chosen: RatedJoke, pool: list[RatedJoke], used: set[int], min_gap: int
+    ) -> RatedJoke | None:
+        """Find first unused rejected joke that meets gap requirement."""
+        for rejected in pool:
+            is_valid = (
+                rejected.id not in used
+                and rejected.id != chosen.id
+                and chosen.stars - rejected.stars >= min_gap
+            )
+            if is_valid:
+                return rejected
+        return None
 
     def _pair_threshold(self, rated: list[RatedJoke], high: int, low: int) -> list[PreferencePair]:
         """Pair based on fixed thresholds.

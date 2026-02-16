@@ -72,7 +72,7 @@ class JokesterCLI(Tool):
             "--dry-run", action="store_true", help="Show what would be rated without sending to LLM"
         )
 
-    def _add_train_args(self, subparsers: Any) -> None:  # cq: max-lines=40
+    def _add_train_args(self, subparsers: Any) -> None:  # cq: max-lines=45
         """Add train command arguments."""
         p = subparsers.add_parser("train", help="Create preference pairs and training run")
         p.add_argument(
@@ -109,6 +109,11 @@ class JokesterCLI(Tool):
             type=int,
             default=200,
             help="Only include jokes under this character length (default: 200)",
+        )
+        p.add_argument(
+            "--no-reuse",
+            action="store_true",
+            help="Each chosen joke used at most once (1:1 pairing, no reuse)",
         )
 
     def _add_reset_args(self, subparsers: Any) -> None:
@@ -383,35 +388,55 @@ class JokesterCLI(Tool):
     def _cmd_train(self) -> int:
         """Create preference pairs from rated jokes and set up training run."""
         assert self._pg is not None
+        opts = self._get_train_options()
 
-        config_min_gap = self._get_pairing_config().get("min_gap", 2)
-        min_gap = getattr(self.args, "min_gap", None) or config_min_gap
-        dry_run = getattr(self.args, "dry_run", False)
-        min_pairs = getattr(self.args, "min_pairs", None)
-        max_pairs = getattr(self.args, "max_pairs", None)
-        max_chars = getattr(self.args, "max_chars", 200)
+        new_pairs = self._create_preference_pairs(
+            opts["min_gap"],
+            opts["dry_run"],
+            opts["min_pairs"],
+            opts["max_pairs"],
+            opts["max_chars"],
+            opts["no_reuse"],
+        )
 
-        # Step 1: Create new preference pairs from rated jokes
-        new_pairs = self._create_preference_pairs(min_gap, dry_run, min_pairs, max_pairs, max_chars)
-
-        # Step 2: Get all untrained pairs and create training run
         client = self._create_training_client()
-        pairs = client.get_untrained_pairs(min_margin=float(min_gap), limit=max_pairs)
-
+        pairs = client.get_untrained_pairs(
+            min_margin=float(opts["min_gap"]), limit=opts["max_pairs"]
+        )
         if not pairs:
             print("\nNo untrained preference pairs available for training.")
             return 0
 
-        adapter_name = getattr(self.args, "adapter_name", "jokester-dpo")
-        self._print_train_summary(len(pairs), new_pairs, adapter_name, min_gap, dry_run)
+        return self._finalize_training(client, pairs, new_pairs, opts)
+
+    def _finalize_training(
+        self, client: DpoClient, pairs: list[tuple[Any, Any]], new_pairs: int, opts: dict[str, Any]
+    ) -> int:
+        """Print summary and execute training run."""
+        self._print_train_summary(
+            len(pairs), new_pairs, opts["adapter_name"], opts["min_gap"], opts["dry_run"]
+        )
         self._print_pairs_sample(pairs)
 
-        if dry_run:
+        if opts["dry_run"]:
             print("Dry run complete. Use without --dry-run to create training run.")
             return 0
 
-        self._execute_training_run(client, pairs, adapter_name)
+        self._execute_training_run(client, pairs, opts["adapter_name"])
         return 0
+
+    def _get_train_options(self) -> dict[str, Any]:
+        """Extract train command options from args."""
+        config_min_gap = self._get_pairing_config().get("min_gap", 2)
+        return {
+            "min_gap": getattr(self.args, "min_gap", None) or config_min_gap,
+            "dry_run": getattr(self.args, "dry_run", False),
+            "min_pairs": getattr(self.args, "min_pairs", None),
+            "max_pairs": getattr(self.args, "max_pairs", None),
+            "max_chars": getattr(self.args, "max_chars", 200),
+            "no_reuse": getattr(self.args, "no_reuse", False),
+            "adapter_name": getattr(self.args, "adapter_name", "jokester-dpo"),
+        }
 
     def _cmd_reset(self) -> int:
         """Clear preference pairs for this agent's context."""
@@ -482,6 +507,7 @@ class JokesterCLI(Tool):
         min_pairs: int | None,
         max_pairs: int | None,
         max_chars: int | None = None,
+        no_reuse: bool = False,
     ) -> int:
         """Create preference pairs from rated jokes. Returns count created."""
         assert self._pg is not None
@@ -492,8 +518,9 @@ class JokesterCLI(Tool):
             min_pairs=min_pairs,
             max_pairs=max_pairs,
             max_chars=max_chars,
+            no_reuse=no_reuse,
         )
-        self._print_pairing_summary(result, min_gap, min_pairs, max_pairs, max_chars)
+        self._print_pairing_summary(result, min_gap, min_pairs, max_pairs, max_chars, no_reuse)
 
         if not result.pairs:
             return 0
@@ -513,6 +540,7 @@ class JokesterCLI(Tool):
         min_pairs: int | None,
         max_pairs: int | None,
         max_chars: int | None,
+        no_reuse: bool = False,
     ) -> None:
         """Print pairing operation summary."""
         print("\n=== Pairing ===")
@@ -523,6 +551,8 @@ class JokesterCLI(Tool):
             print(f"Min pairs:      {min_pairs}")
         if max_pairs is not None:
             print(f"Max pairs:      {max_pairs}")
+        if no_reuse:
+            print("No reuse:       yes (1:1 pairing)")
         print(f"New pairs:      {len(result.pairs)}")
 
     def _create_training_client(self) -> DpoClient:

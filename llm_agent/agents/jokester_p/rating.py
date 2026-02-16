@@ -314,6 +314,7 @@ class RatingService:
             INSERT INTO atomic_feedback_details
                 (fact_id, signal, strength, provider_type, context, provider)
             VALUES (:fact_id, :signal, :strength, :provider_type, CAST(:context AS jsonb), :provider)
+            ON CONFLICT (fact_id) DO NOTHING
         """)
         params = {
             "fact_id": result.fact,
