@@ -1378,9 +1378,17 @@ class TestRecallTool:
         mock_fact.content = "Uses vim"
         mock_fact.category = "tools"
 
+        # Build mock chain avoiding 'assertions' conflict with MagicMock
+        mock_assertions = MagicMock()
+        mock_assertions.list.return_value = [mock_fact]
+        mock_atomic = MagicMock()
+        mock_atomic.assertions = mock_assertions
+        mock_learn = MagicMock()
+        mock_learn.atomic = mock_atomic
+
         mock_learn_trait = MagicMock()
         mock_learn_trait.has_embedder = False
-        mock_learn_trait.learn.facts.list.return_value = [mock_fact]
+        mock_learn_trait.learn = mock_learn
 
         tool = RecallTool(mock_learn_trait)
         result = tool.execute(query="editor")

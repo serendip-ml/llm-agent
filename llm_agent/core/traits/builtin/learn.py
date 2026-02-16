@@ -157,7 +157,7 @@ class LearnTrait(BaseTrait):
 
         # Create learn client with embedder and llm_client already available
         self._learn = self._create_learn_client(self._database, self._embedder, self._client)
-        self._context = ContextBuilder(self._learn.facts)
+        self._context = ContextBuilder(self._learn.atomic.assertions)
 
     def on_stop(self) -> None:
         """Close LLM client and embedder on agent stop."""
@@ -319,14 +319,14 @@ class LearnTrait(BaseTrait):
         Returns:
             Fact ID.
         """
-        fact_id = self.learn.facts.add(
+        fact_id = self.learn.atomic.assertions.add(
             fact, category=category, source=source, confidence=confidence
         )
 
         # Embed for semantic search if embedder available
         if self._embedder is not None:
             embedding = self._embedder.embed(fact)
-            self.learn.embeddings.set_embedding(
+            self.learn.atomic.embeddings.set_embedding(
                 fact_id=fact_id,
                 embedding=embedding.embedding,
                 model_name=self._embedder.model,
@@ -340,7 +340,7 @@ class LearnTrait(BaseTrait):
         Args:
             fact_id: ID of the fact to remove.
         """
-        self.learn.facts.delete(fact_id)
+        self.learn.atomic.assertions.delete(fact_id)
 
     def recall(
         self,
@@ -367,7 +367,7 @@ class LearnTrait(BaseTrait):
             raise ValueError("recall() requires embedder - configure embedder_url in LearnConfig")
 
         embedding = self._embedder.embed(query)
-        return self.learn.embeddings.search_similar(
+        return self.learn.atomic.embeddings.search_similar(
             query=embedding.embedding,
             model_name=self._embedder.model,
             top_k=top_k,
@@ -458,7 +458,7 @@ class LearnTrait(BaseTrait):
         Returns:
             Feedback ID.
         """
-        return self.learn.feedback.record(
+        return self.learn.atomic.feedback.record(
             signal=signal,
             comment=content,
             context=context,
@@ -480,7 +480,7 @@ class LearnTrait(BaseTrait):
         Returns:
             Preference ID.
         """
-        return self.learn.preferences.record(
+        return self.learn.atomic.preferences.record(
             context=context,
             chosen=chosen,
             rejected=rejected,
@@ -505,7 +505,7 @@ class LearnTrait(BaseTrait):
             result: The execution result with outcome details.
             summary: Human-readable summary of the solution.
         """
-        self.learn.solutions.record(
+        self.learn.atomic.solutions.record(
             agent_name=agent_name,
             problem=problem,
             problem_context={

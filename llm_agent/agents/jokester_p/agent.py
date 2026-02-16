@@ -180,7 +180,7 @@ class JokesterAgent(Agent):
     def _get_recent_jokes(self, learn_trait: LearnTrait, limit: int) -> list[str]:
         """Fetch recent jokes chronologically for style inspiration."""
         try:
-            facts = learn_trait.learn.solutions.list_by_category("joke", limit=limit)
+            facts = learn_trait.learn.atomic.solutions.list_by_category("joke", limit=limit)
             return [f.content for f in facts if f.content]
         except Exception as e:
             self._lg.debug("failed to fetch recent jokes", extra={"exception": e})
