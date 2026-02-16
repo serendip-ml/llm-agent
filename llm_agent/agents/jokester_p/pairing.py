@@ -189,9 +189,9 @@ class PairingService:
     def _batch_insert_details(
         self, conn: Any, fact_ids: list[int], pairs: list[PreferencePair]
     ) -> None:
-        """Batch insert atomic_preference_details rows."""
+        """Batch insert atomic_preference_details rows using parameterized query."""
         context = "Tell me a joke."
-        values_list = []
+        rows = []
         for fact_id, pair in zip(fact_ids, pairs, strict=True):
             metadata = json.dumps(
                 {
@@ -201,18 +201,21 @@ class PairingService:
                     "rejected_stars": pair.rejected.stars,
                 }
             )
-            # Escape for PostgreSQL string literals (backslashes then single quotes)
-            chosen = pair.chosen.content.replace("\\", "\\\\").replace("'", "''")
-            rejected = pair.rejected.content.replace("\\", "\\\\").replace("'", "''")
-            values_list.append(
-                f"({fact_id}, '{context}', '{chosen}', '{rejected}', {pair.margin}, '{metadata}'::jsonb)"
+            rows.append(
+                {
+                    "fact_id": fact_id,
+                    "context": context,
+                    "chosen": pair.chosen.content,
+                    "rejected": pair.rejected.content,
+                    "margin": pair.margin,
+                    "metadata": metadata,
+                }
             )
-        values = ", ".join(values_list)
-        sql = text(f"""
+        sql = text("""
             INSERT INTO atomic_preference_details (fact_id, context, chosen, rejected, margin, metadata)
-            VALUES {values}
+            VALUES (:fact_id, :context, :chosen, :rejected, :margin, CAST(:metadata AS jsonb))
         """)
-        conn.execute(sql)
+        conn.execute(sql, rows)
 
     def _create_pair_atomic(self, pair: PreferencePair, context: str = "Tell me a joke.") -> int:
         """Create preference fact and details in a single transaction."""
