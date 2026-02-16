@@ -228,3 +228,14 @@ class TestCleanParsed:
         result = cleaner.clean_parsed(data, {"text", "style"})
         # Doesn't have all expected fields, so returns original
         assert result == {"wrapper": {"text": "hello"}}
+
+    def test_clean_parsed_expected_field_wraps_aliased_content(self) -> None:
+        """Expected field containing aliased fields is unwrapped for Pydantic aliases.
+
+        e.g., {"text": {"joke": "...", "style": "..."}} -> {"joke": "...", "style": "..."}
+        This lets Pydantic's AliasChoices handle the field name mapping.
+        """
+        cleaner = JSONCleaner()
+        data = {"text": {"joke": "hello", "style": "pun"}}
+        result = cleaner.clean_parsed(data, {"text", "style"})
+        assert result == {"joke": "hello", "style": "pun"}
