@@ -84,8 +84,8 @@ class JokesterCLI(Tool):
         p.add_argument(
             "--min-gap",
             type=int,
-            default=2,
-            help="Minimum star difference for pairing (default: 2 = 3★ vs 1★)",
+            default=None,
+            help="Minimum star difference for pairing (default: from config, typically 3)",
         )
         p.add_argument(
             "--min",
@@ -163,6 +163,9 @@ class JokesterCLI(Tool):
         # Show Haiku stats separately
         self._print_haiku_stats(max_chars=max_chars)
 
+        # Show current adapter info
+        self._print_adapter_status()
+
         return 0
 
     def _print_training_run_stats(self, max_chars: int | None = None) -> None:
@@ -207,6 +210,45 @@ class JokesterCLI(Tool):
         stars_str = self._format_star_distribution(stats["dist"], stats["rated"])
         print(f"{'haiku':20s}  {stats['total']:5d} jokes  avg={avg_str}  {stars_str}")
         print()
+
+    def _print_adapter_status(self) -> None:
+        """Print current adapter status from latest DPO run."""
+        assert self._pg is not None
+        context_key = self._get_context_key()
+
+        adapter = self._get_latest_adapter(context_key)
+        if adapter is None:
+            return
+
+        print("=== Adapter Status ===\n")
+        print(f"  Name:  {adapter['name']}")
+        print(f"  MD5:   {adapter['md5']}")
+        print(f"  Mtime: {adapter['mtime']}")
+        print(f"  Run:   #{adapter['run_id']} ({adapter['completed_at']})")
+        print()
+
+    def _get_latest_adapter(self, context_key: str) -> dict[str, Any] | None:
+        """Get latest adapter info from completed DPO run."""
+        assert self._pg is not None
+        sql = text("""
+            SELECT id, adapter_name, metrics->'adapter'->>'md5' as md5,
+                   metrics->'adapter'->>'mtime' as mtime, completed_at
+            FROM dpo_runs
+            WHERE context_key = :context_key AND status = 'completed'
+            ORDER BY completed_at DESC
+            LIMIT 1
+        """)
+        with self._pg.connect() as conn:
+            row = conn.execute(sql, {"context_key": context_key}).fetchone()
+        if row is None:
+            return None
+        return {
+            "run_id": row[0],
+            "name": row[1],
+            "md5": row[2],
+            "mtime": row[3],
+            "completed_at": row[4].strftime("%Y-%m-%d %H:%M") if row[4] else "N/A",
+        }
 
     def _query_haiku_stats(self, max_chars: int | None = None) -> dict[str, Any]:
         """Query stats for Haiku-generated jokes."""
@@ -336,7 +378,8 @@ class JokesterCLI(Tool):
         """Create preference pairs from rated jokes and set up training run."""
         assert self._pg is not None
 
-        min_gap = getattr(self.args, "min_gap", 2)
+        config_min_gap = self._get_pairing_config().get("min_gap", 2)
+        min_gap = getattr(self.args, "min_gap", None) or config_min_gap
         dry_run = getattr(self.args, "dry_run", False)
         min_pairs = getattr(self.args, "min_pairs", None)
         max_pairs = getattr(self.args, "max_pairs", None)
@@ -552,6 +595,14 @@ class JokesterCLI(Tool):
             return None
         config = self.app.config.agents.get("jokester-p")
         return dict(config) if config else None
+
+    def _get_pairing_config(self) -> dict[str, Any]:
+        """Get pairing config from agent config."""
+        agent_config = self._get_agent_config()
+        if agent_config is None:
+            return {}
+        rating_config = agent_config.get("rating", {})
+        return dict(rating_config.get("pairing", {}))
 
     def _get_prompt_template(self, rating_config: dict[str, Any]) -> str:
         """Extract prompt template from rating config."""

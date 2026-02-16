@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from appinfra import DotDict
 from appinfra.log import Logger
+from sqlalchemy import text
 
 from ...core.agent import Factory as BaseFactory
 from ...core.traits import TraitName as TN
@@ -17,7 +18,7 @@ from ...core.traits.builtin.rating import RatingTrait
 from ...core.traits.builtin.storage import StorageTrait
 from .agent import JokesterAgent
 from .cli import JokesterCLI
-from .generate import JokeGenerator
+from .generate import ExpectedAdapter, JokeGenerator
 from .novelty import NoveltyChecker
 from .rating import BatchRater
 from .schema import ModelUsage, TrainingMetadata
@@ -98,6 +99,7 @@ class Factory(BaseFactory):
         llm_trait = agent.require_trait(LLMTrait)
         directive_trait = agent.get_trait(DirectiveTrait)
         novelty_checker = NoveltyChecker(lg, learn_trait, config.get("similarity_threshold", 0.85))
+        expected_adapter = cls._get_expected_adapter(lg, learn_trait, agent.name)
 
         return JokeGenerator(
             lg=lg,
@@ -106,7 +108,44 @@ class Factory(BaseFactory):
             directive_trait=directive_trait,
             max_retries=config.get("max_retries", 3),
             denylist=config.get("denylist", []),
+            expected_adapter=expected_adapter,
         )
+
+    @classmethod
+    def _get_expected_adapter(
+        cls, lg: Logger, learn_trait: LearnTrait, context_key: str
+    ) -> ExpectedAdapter | None:
+        """Query latest completed DPO run for expected adapter info."""
+        try:
+            sql = text("""
+                SELECT adapter_name, metrics->'adapter'->>'md5' as md5,
+                       metrics->'adapter'->>'mtime' as mtime
+                FROM dpo_runs
+                WHERE context_key = :context_key AND status = 'completed'
+                ORDER BY completed_at DESC
+                LIMIT 1
+            """)
+            with learn_trait.learn.database.session() as session:
+                row = session.execute(sql, {"context_key": context_key}).fetchone()
+
+            if row is None:
+                lg.debug("no completed DPO runs found", extra={"context_key": context_key})
+                return None
+
+            name, md5, mtime = row
+            if not md5 or not mtime:
+                lg.debug("DPO run missing adapter md5/mtime", extra={"adapter": name})
+                return None
+
+            lg.debug(
+                "loaded expected adapter from DPO run",
+                extra={"adapter": name, "md5": md5, "mtime": mtime},
+            )
+            return ExpectedAdapter(name=name, md5=md5, mtime=mtime)
+
+        except Exception as e:
+            lg.warning("failed to query expected adapter", extra={"exception": e})
+            return None
 
     @classmethod
     def _create_rater(cls, agent: JokesterAgent, lg: Logger, config: DotDict) -> BatchRater | None:

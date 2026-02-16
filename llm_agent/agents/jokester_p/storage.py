@@ -5,9 +5,11 @@ Handles joke persistence, model usage tracking, and training metadata.
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
+from llm_infer.client.types import AdapterInfo
 
 from .schema import ModelUsage, TrainingMetadata
 
@@ -48,8 +50,7 @@ class Storage:
         joke: Joke,
         model_name: str,
         attempts: int,
-        adapter_id: str | None = None,
-        adapter_fallback: bool = False,
+        adapter: AdapterInfo | None = None,
     ) -> int:
         """Save joke and record metadata.
 
@@ -57,8 +58,7 @@ class Storage:
             joke: Generated joke.
             model_name: Actual model used.
             attempts: Number of generation attempts.
-            adapter_id: LoRA adapter requested (if any).
-            adapter_fallback: True if adapter was requested but not available.
+            adapter: Full adapter info from LLM response.
 
         Returns:
             The fact_id of the saved joke.
@@ -76,7 +76,7 @@ class Storage:
         )
         self._lg.debug("joke saved", extra={"fact_id": fact_id, "style": joke.style})
 
-        self.record_joke_metadata(fact_id, model_name, attempts, adapter_id, adapter_fallback)
+        self.record_joke_metadata(fact_id, model_name, attempts, adapter)
         return fact_id
 
     def record_joke_metadata(
@@ -84,8 +84,7 @@ class Storage:
         fact_id: int,
         model_name: str,
         attempts: int,
-        adapter_id: str | None = None,
-        adapter_fallback: bool = False,
+        adapter: AdapterInfo | None = None,
     ) -> None:
         """Record model usage and training metadata for a joke.
 
@@ -93,19 +92,13 @@ class Storage:
             fact_id: ID of the fact in atomic_facts.
             model_name: Actual model used (from LLM response).
             attempts: Number of generation attempts needed.
-            adapter_id: LoRA adapter requested (if any).
-            adapter_fallback: True if adapter was requested but not available.
+            adapter: Full adapter info from LLM response.
 
         Raises:
             Exception: If metadata recording fails critically (re-raises after logging).
         """
-        # If adapter was requested but fell back, record as base model
-        actual_adapter = None if adapter_fallback else adapter_id
-
         usage_failed = self._try_record_model_usage(fact_id, model_name, attempts)
-        training_failed = self._try_record_training_metadata(
-            fact_id, model_name, actual_adapter, adapter_id, adapter_fallback
-        )
+        training_failed = self._try_record_training_metadata(fact_id, model_name, adapter)
         self._log_metadata_failures(fact_id, usage_failed, training_failed)
 
     def _try_record_model_usage(self, fact_id: int, model_name: str, attempts: int) -> bool:
@@ -129,15 +122,11 @@ class Storage:
         self,
         fact_id: int,
         model_name: str,
-        actual_adapter: str | None,
-        requested_adapter: str | None,
-        adapter_fallback: bool,
+        adapter: AdapterInfo | None,
     ) -> bool:
         """Try to record training metadata, return True if failed."""
         try:
-            self._record_training_metadata(
-                fact_id, model_name, actual_adapter, requested_adapter, adapter_fallback
-            )
+            self._record_training_metadata(fact_id, model_name, adapter)
             return False
         except Exception as e:
             self._lg.warning(
@@ -146,9 +135,7 @@ class Storage:
                     "exception": e,
                     "fact_id": fact_id,
                     "model": model_name,
-                    "actual_adapter": actual_adapter,
-                    "requested_adapter": requested_adapter,
-                    "adapter_fallback": adapter_fallback,
+                    "adapter": adapter,
                 },
             )
             return True
@@ -198,44 +185,27 @@ class Storage:
         self,
         fact_id: int,
         model_name: str,
-        actual_adapter: str | None,
-        requested_adapter: str | None,
-        adapter_fallback: bool,
+        adapter: AdapterInfo | None,
     ) -> None:
         """Record training metadata.
 
         Args:
             fact_id: ID of the fact in atomic_facts.
             model_name: Name of the model used.
-            actual_adapter: LoRA adapter actually used (None if base model or fallback).
-            requested_adapter: LoRA adapter that was requested.
-            adapter_fallback: True if adapter was requested but not available.
+            adapter: Full adapter info from LLM response.
         """
-        if actual_adapter:
-            self._record_finetuned_model_metadata(fact_id, model_name, actual_adapter)
+        if adapter and adapter.actual and not adapter.fallback:
+            self._record_finetuned_model_metadata(fact_id, model_name, adapter)
         else:
-            self._record_base_model_metadata(
-                fact_id, model_name, requested_adapter, adapter_fallback
-            )
+            self._record_base_model_metadata(fact_id, model_name, adapter)
 
     def _record_base_model_metadata(
         self,
         fact_id: int,
         model_name: str,
-        requested_adapter: str | None = None,
-        adapter_fallback: bool = False,
+        adapter: AdapterInfo | None,
     ) -> None:
-        """Record metadata for base (non-fine-tuned) model.
-
-        Args:
-            fact_id: ID of the fact in atomic_facts.
-            model_name: Name of the model used.
-            requested_adapter: Adapter that was requested but not used.
-            adapter_fallback: True if this is a fallback (adapter requested but unavailable).
-
-        Raises:
-            Exception: If database insert fails.
-        """
+        """Record metadata for base (non-fine-tuned) model."""
         self._storage.insert(
             TrainingMetadata,
             fact_id=fact_id,
@@ -245,43 +215,37 @@ class Storage:
             training_date=None,
             training_data_size=None,
             is_base_model=True,
-            adapter_requested=requested_adapter,
-            adapter_fallback=adapter_fallback,
+            # Legacy columns - no longer written, kept for historical data
+            adapter_requested=None,
+            adapter_fallback=False,
+            # New: full adapter info as JSON
+            adapter_info=asdict(adapter) if adapter else None,
         )
-        log_extra = {"fact_id": fact_id, "model": model_name}
-        if adapter_fallback:
-            log_extra["adapter_requested"] = requested_adapter
-            log_extra["fallback"] = True
-        self._lg.debug("training metadata recorded (base model)", extra=log_extra)
+        self._lg.debug(
+            "training metadata recorded (base model)",
+            extra={"fact_id": fact_id, "model": model_name, "adapter": adapter},
+        )
 
     def _record_finetuned_model_metadata(
-        self, fact_id: int, model_name: str, adapter_id: str
+        self, fact_id: int, model_name: str, adapter: AdapterInfo
     ) -> None:
-        """Record metadata for fine-tuned model.
-
-        Args:
-            fact_id: ID of the fact in atomic_facts.
-            model_name: Name of the base model used.
-            adapter_id: LoRA adapter ID.
-
-        Raises:
-            Exception: If database insert fails.
-        """
+        """Record metadata for fine-tuned model."""
         self._storage.insert(
             TrainingMetadata,
             fact_id=fact_id,
             base_model=model_name,
-            adapter_version=adapter_id,
-            training_iteration=None,  # TODO: Get from config
-            training_date=None,  # TODO: Get from adapter metadata
-            training_data_size=None,  # TODO: Get from training logs
+            adapter_version=adapter.actual,
+            training_iteration=None,
+            training_date=None,
+            training_data_size=None,
             is_base_model=False,
+            # Legacy columns - no longer written, kept for historical data
+            adapter_requested=None,
+            adapter_fallback=False,
+            # New: full adapter info as JSON
+            adapter_info=asdict(adapter),
         )
         self._lg.debug(
             "training metadata recorded (fine-tuned)",
-            extra={
-                "fact_id": fact_id,
-                "base_model": model_name,
-                "adapter_id": adapter_id,
-            },
+            extra={"fact_id": fact_id, "model": model_name, "adapter": adapter},
         )

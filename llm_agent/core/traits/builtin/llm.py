@@ -263,8 +263,7 @@ class LLMTrait(BaseTrait):
             tokens_used=tokens_used,
             latency_ms=0,
             tool_calls=tool_calls,
-            adapter_fallback=getattr(response, "adapter_fallback", False),
-            adapter_requested=getattr(response, "adapter_requested", None),
+            adapter=response.adapter,
         )
 
     def _extract_tokens(self, response: ChatResponse) -> int:
@@ -290,11 +289,10 @@ class LLMTrait(BaseTrait):
 
     def _check_adapter_fallback(self, response: ChatResponse) -> None:
         """Log if adapter fallback occurred (warning every 10 min, else debug)."""
-        if not getattr(response, "adapter_fallback", False):
+        if not response.adapter or not response.adapter.fallback:
             return
 
-        adapter_requested = getattr(response, "adapter_requested", None)
-        extra = {"adapter_requested": adapter_requested}
+        extra = {"adapter": response.adapter}
 
         now = time.monotonic()
         if now - self._last_adapter_fallback_warning >= 600:
@@ -329,13 +327,13 @@ class LLMTrait(BaseTrait):
             "llm response",
             extra={
                 "content": response.content,
-                "model": getattr(response, "model", None),
-                "usage": getattr(response, "usage", None),
+                "model": response.model,
+                "usage": response.usage,
                 "tool_calls": [
                     {"name": tc.function.name, "arguments": tc.function.arguments}
                     for tc in (response.tool_calls or [])
                 ],
-                "adapter_fallback": getattr(response, "adapter_fallback", False),
+                "adapter": response.adapter,
             },
         )
 

@@ -22,7 +22,6 @@ from llm_infer.client.exceptions import BackendUnavailableError
 from ...core.agent import Agent, ExecutionResult
 from ...core.llm.backend import StructuredOutputError
 from ...core.traits.builtin.learn import LearnTrait
-from ...core.traits.builtin.llm import LLMTrait
 from .generate import GenerationAttempt, JokeGenerator
 from .rating import BatchRater
 from .storage import Storage
@@ -136,15 +135,11 @@ class JokesterAgent(Agent):
         assert attempt.joke is not None
         assert self._storage is not None
 
-        llm_trait = self.require_trait(LLMTrait)
-        adapter_id = llm_trait.adapter_id
-
         fact_id = self._storage.save_joke(
             joke=attempt.joke,
             model_name=attempt.model_name,
             attempts=attempt.cumulative_attempts,
-            adapter_id=adapter_id,
-            adapter_fallback=attempt.adapter_fallback,
+            adapter=attempt.adapter,
         )
         self._jokes_generated_this_session += 1
 

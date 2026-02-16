@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from llm_infer.client.types import AdapterInfo
 from pydantic import BaseModel, Field
 
 
@@ -45,10 +46,7 @@ class CompletionResult(BaseModel):
         default=None, description="Validated object when output_schema is used"
     )
 
-    # Adapter fallback info (when requested adapter wasn't available)
-    adapter_fallback: bool = Field(
-        default=False, description="True if requested adapter wasn't available"
-    )
-    adapter_requested: str | None = Field(
-        default=None, description="Adapter that was requested (if any)"
+    # LoRA adapter info (None if not requested)
+    adapter: AdapterInfo | None = Field(
+        default=None, description="LoRA adapter info with requested/actual/fallback status"
     )
