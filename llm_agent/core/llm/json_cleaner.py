@@ -249,6 +249,14 @@ class JSONCleaner:
             if isinstance(inner, dict) and expected.issubset(inner.keys()):
                 return inner
 
+        # Case 3: {"text": {"joke": "...", "style": "..."}} - expected field wraps aliased content
+        # Unwrap if single-key and inner is a dict (let Pydantic aliases handle field names)
+        if len(data) == 1:
+            key = next(iter(data.keys()))
+            inner = data[key]
+            if key in expected and isinstance(inner, dict) and len(inner) >= len(expected):
+                return inner
+
         return data
 
     def _unwrap_single_wrapper(self, data: dict[str, object]) -> dict[str, object]:

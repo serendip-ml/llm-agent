@@ -158,7 +158,7 @@ class RecallTool(BaseTool):
 
     def _recall_list(self, limit: int, categories: list[str] | None) -> ToolResult:
         """Recall facts by listing recent entries (no embedder)."""
-        facts = self._learn_trait.learn.facts.list(limit=limit)
+        facts = self._learn_trait.learn.atomic.assertions.list(limit=limit)
         # Filter by category in memory if specified (list() doesn't support category filter)
         if categories:
             facts = [f for f in facts if f.category in categories]

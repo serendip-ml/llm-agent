@@ -118,9 +118,9 @@ class Factory(BaseFactory):
         """Query latest completed DPO run for expected adapter info."""
         try:
             sql = text("""
-                SELECT adapter_name, metrics->'adapter'->>'md5' as md5,
-                       metrics->'adapter'->>'mtime' as mtime
-                FROM dpo_runs
+                SELECT adapter->>'name' as adapter_name, adapter->>'md5' as md5,
+                       adapter->>'mtime' as mtime
+                FROM training_runs
                 WHERE context_key = :context_key AND status = 'completed'
                 ORDER BY completed_at DESC
                 LIMIT 1

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from llm_infer.client.types import AdapterInfo
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 
 from .novelty import NoveltyCheck, NoveltyChecker
 
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 class Joke(BaseModel):
     """Structured joke output."""
 
-    text: str
+    text: str = Field(validation_alias=AliasChoices("text", "joke"))
     style: str  # pun, one-liner, observational, absurdist, wordplay, dark, etc.
 
 
