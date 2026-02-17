@@ -24,7 +24,7 @@ backends:
       - "claude-haiku-4-5"
     # API key via ANTHROPIC_API_KEY environment variable
     rate_limit:
-      per_minute: 12
+      per_minute: 30
 
   openai:
     enabled: false

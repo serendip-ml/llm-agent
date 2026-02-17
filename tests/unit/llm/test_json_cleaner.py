@@ -140,6 +140,21 @@ class TestJSONCleanerMultipleObjects:
         result = cleaner.clean(content)
         assert result == '{"text": "hello"}'
 
+    def test_skip_wrapped_schema(self) -> None:
+        """Schema wrapped in {"schema": ...} is detected and skipped."""
+        cleaner = JSONCleaner()
+        content = '{"schema": {"type": "object", "properties": {"text": {}}}}'
+        result = cleaner.clean(content)
+        # Wrapped schema is skipped, returns original (no valid data found)
+        assert result == content
+
+    def test_skip_wrapped_schema_keep_data(self) -> None:
+        """Wrapped schema followed by data - schema skipped, data kept."""
+        cleaner = JSONCleaner()
+        content = '{"schema": {"type": "object", "properties": {}}}, {"text": "hello"}'
+        result = cleaner.clean(content)
+        assert result == '{"text": "hello"}'
+
 
 class TestExtractFirstObject:
     """Test extract_first_object method."""
@@ -221,13 +236,18 @@ class TestCleanParsed:
         result = cleaner.clean_parsed(["a", "b"], {"text", "style"})  # type: ignore
         assert result == ["a", "b"]
 
-    def test_clean_parsed_partial_match_no_unwrap(self) -> None:
-        """If expected fields not all present in nested, don't unwrap."""
+    def test_clean_parsed_partial_match_unwraps_for_pydantic(self) -> None:
+        """Single-key wrapper is unwrapped even if expected fields are partial.
+
+        The cleaner aggressively unwraps single-key wrappers (unless schema).
+        If inner is missing expected fields, Pydantic will catch it with a
+        clear error rather than us returning a confusing nested structure.
+        """
         cleaner = JSONCleaner()
         data = {"wrapper": {"text": "hello"}}  # Missing "style"
         result = cleaner.clean_parsed(data, {"text", "style"})
-        # Doesn't have all expected fields, so returns original
-        assert result == {"wrapper": {"text": "hello"}}
+        # Unwraps to let Pydantic validate - will fail on missing "style"
+        assert result == {"text": "hello"}
 
     def test_clean_parsed_expected_field_wraps_aliased_content(self) -> None:
         """Expected field containing aliased fields is unwrapped for Pydantic aliases.
@@ -237,5 +257,45 @@ class TestCleanParsed:
         """
         cleaner = JSONCleaner()
         data = {"text": {"joke": "hello", "style": "pun"}}
+        result = cleaner.clean_parsed(data, {"text", "style"})
+        assert result == {"joke": "hello", "style": "pun"}
+
+    def test_clean_parsed_double_nested_unwrap(self) -> None:
+        """Double-nested structure is fully unwrapped.
+
+        Handles confused LLM output like:
+        {"text": {"joke": {"text": "...", "style": "..."}}}
+        """
+        cleaner = JSONCleaner()
+        data = {"text": {"joke": {"text": "hello", "style": "pun"}}}
+        result = cleaner.clean_parsed(data, {"text", "style"})
+        assert result == {"text": "hello", "style": "pun"}
+
+    def test_clean_parsed_triple_nested_unwrap(self) -> None:
+        """Triple-nested structure is fully unwrapped."""
+        cleaner = JSONCleaner()
+        data = {"response": {"data": {"joke": {"text": "hello", "style": "pun"}}}}
+        result = cleaner.clean_parsed(data, {"text", "style"})
+        assert result == {"text": "hello", "style": "pun"}
+
+    def test_clean_parsed_alias_wrapper(self) -> None:
+        """Alias wrapper key (not in expected fields) is unwrapped.
+
+        e.g., {"joke": {"text": "...", "style": "..."}} -> {"text": "...", "style": "..."}
+        where "joke" is a Pydantic alias for "text" but not in expected fields.
+        """
+        cleaner = JSONCleaner()
+        data = {"joke": {"text": "hello", "style": "pun"}}
+        result = cleaner.clean_parsed(data, {"text", "style"})
+        assert result == {"text": "hello", "style": "pun"}
+
+    def test_clean_parsed_alias_wrapper_with_aliased_content(self) -> None:
+        """Alias wrapper with aliased inner content is unwrapped.
+
+        e.g., {"joke": {"joke": "...", "style": "..."}} -> {"joke": "...", "style": "..."}
+        Both wrapper and inner use alias - let Pydantic handle resolution.
+        """
+        cleaner = JSONCleaner()
+        data = {"joke": {"joke": "hello", "style": "pun"}}
         result = cleaner.clean_parsed(data, {"text", "style"})
         assert result == {"joke": "hello", "style": "pun"}
