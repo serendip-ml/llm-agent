@@ -65,36 +65,40 @@ class PairingService:
         self, max_chars: int | None = None, model: str | None = None
     ) -> list[RatedJoke]:
         """Get all rated jokes sorted by stars (desc)."""
-        extra_joins = []
-        extra_filters = []
-
-        if max_chars:
-            extra_joins.append("JOIN atomic_solution_details asd ON asd.fact_id = af.id")
-            extra_filters.append(f"AND length(asd.answer_text) < {max_chars}")
-
-        if model:
-            extra_joins.append("JOIN agent_jokester_model_usage u ON u.fact_id = af.id")
-            extra_filters.append(f"AND u.model_name LIKE '%{model}%'")
-
-        joins_sql = "\n            ".join(extra_joins)
-        filters_sql = " ".join(extra_filters)
-
+        joins_sql, filters_sql, params = self._build_rated_jokes_filters(max_chars, model)
         sql = text(f"""
             SELECT DISTINCT ON (af.id)
-                af.id,
-                af.content,
-                (afd.context->>'stars')::int as stars
+                af.id, af.content, (afd.context->>'stars')::int as stars
             FROM atomic_facts af
             JOIN atomic_feedback_details afd ON af.id = afd.fact_id
             {joins_sql}
             WHERE af.context_key = :context_key
-              AND afd.context->>'stars' IS NOT NULL
-              {filters_sql}
+              AND afd.context->>'stars' IS NOT NULL {filters_sql}
             ORDER BY af.id, afd.id DESC
         """)
         with self._pg.connect() as conn:
-            rows = conn.execute(sql, {"context_key": self._context_key}).fetchall()
+            rows = conn.execute(sql, params).fetchall()
         return [RatedJoke(id=r[0], content=r[1], stars=r[2]) for r in rows]
+
+    def _build_rated_jokes_filters(
+        self, max_chars: int | None, model: str | None
+    ) -> tuple[str, str, dict[str, object]]:
+        """Build SQL fragments and params for rated jokes query."""
+        joins: list[str] = []
+        filters: list[str] = []
+        params: dict[str, object] = {"context_key": self._context_key}
+
+        if max_chars:
+            joins.append("JOIN atomic_solution_details asd ON asd.fact_id = af.id")
+            filters.append("AND length(asd.answer_text) < :max_chars")
+            params["max_chars"] = max_chars
+
+        if model:
+            joins.append("JOIN agent_jokester_model_usage u ON u.fact_id = af.id")
+            filters.append("AND u.model_name LIKE :model_pattern")
+            params["model_pattern"] = f"%{model}%"
+
+        return "\n            ".join(joins), " ".join(filters), params
 
     def create_pairs(
         self,
