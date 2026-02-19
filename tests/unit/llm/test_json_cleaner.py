@@ -1,5 +1,10 @@
 """Tests for JSON cleaner utilities."""
 
+import json
+
+import pytest
+from pydantic import AliasChoices, BaseModel, Field, ValidationError
+
 from llm_agent.core.llm.json_cleaner import JSONCleaner
 
 
@@ -81,6 +86,25 @@ class TestJSONCleanerAutoClose:
         cleaner = JSONCleaner()
         result = cleaner.clean('{"text": "I {love} this"}')
         assert result == '{"text": "I {love} this"}'
+
+    def test_fix_literal_newline_escapes(self) -> None:
+        """Literal \\n outside strings is converted to actual newline."""
+        cleaner = JSONCleaner()
+        # Model outputs literal \n between keys instead of actual newline
+        content = '{"text": "hello",\\n  "style": "pun"}'
+        result = cleaner.clean(content)
+        import json
+
+        parsed = json.loads(result)
+        assert parsed == {"text": "hello", "style": "pun"}
+
+    def test_no_fix_valid_json_with_escapes(self) -> None:
+        """Valid JSON with escaped newlines in strings is not modified."""
+        cleaner = JSONCleaner()
+        # This is valid JSON - \n inside string value
+        content = '{"text": "line1\\nline2"}'
+        result = cleaner.clean(content)
+        assert result == content  # Should not be modified
 
 
 class TestJSONCleanerMultipleObjects:
@@ -299,3 +323,111 @@ class TestCleanParsed:
         data = {"joke": {"joke": "hello", "style": "pun"}}
         result = cleaner.clean_parsed(data, {"text", "style"})
         assert result == {"joke": "hello", "style": "pun"}
+
+    def test_clean_parsed_alias_wrapper_missing_expected_field(self) -> None:
+        """Alias wrapper with missing expected field is still unwrapped.
+
+        Regression test for jokester error where LLM returned:
+        {"joke": {"text": "..."}} without "style" field.
+
+        The cleaner should unwrap to {"text": "..."} and let Pydantic
+        report the missing field clearly.
+        """
+        cleaner = JSONCleaner()
+        data = {"joke": {"text": "I asked my therapist about fear"}}
+        result = cleaner.clean_parsed(data, {"text", "style"})
+        # Should unwrap - let Pydantic handle the missing "style" error
+        assert result == {"text": "I asked my therapist about fear"}
+
+    def test_clean_parsed_alias_wrapper_with_extra_fields(self) -> None:
+        """Alias wrapper with extra fields (not in expected) is unwrapped.
+
+        LLM might include extra fields like "category" or "topic".
+        """
+        cleaner = JSONCleaner()
+        data = {"joke": {"text": "hello", "category": "pun", "topic": "coding"}}
+        result = cleaner.clean_parsed(data, {"text", "style"})
+        assert result == {"text": "hello", "category": "pun", "topic": "coding"}
+
+
+class TestJokeModelIntegration:
+    """Integration tests simulating actual Joke model parsing flow.
+
+    These tests use a Joke-like model with AliasChoices to verify the
+    full clean + validate flow works correctly.
+    """
+
+    class Joke(BaseModel):
+        """Test model matching jokester's Joke schema."""
+
+        text: str = Field(validation_alias=AliasChoices("text", "joke"))
+        style: str
+
+    def _simulate_llm_parse(self, raw_json: str) -> "TestJokeModelIntegration.Joke":
+        """Simulate the LLM trait's parsing flow."""
+        cleaner = JSONCleaner()
+        cleaned = cleaner.clean(raw_json)
+        data = json.loads(cleaned)
+        if isinstance(data, dict):
+            data = cleaner.clean_parsed(data, set(self.Joke.model_fields.keys()))
+        return self.Joke.model_validate(data)
+
+    def test_direct_format_parses(self) -> None:
+        """Direct format {"text": "...", "style": "..."} parses correctly."""
+        raw = '{"text": "Why did the chicken cross the road?", "style": "classic"}'
+        joke = self._simulate_llm_parse(raw)
+        assert joke.text == "Why did the chicken cross the road?"
+        assert joke.style == "classic"
+
+    def test_alias_format_parses(self) -> None:
+        """Alias format {"joke": "...", "style": "..."} parses correctly."""
+        raw = '{"joke": "Why did the chicken cross the road?", "style": "classic"}'
+        joke = self._simulate_llm_parse(raw)
+        assert joke.text == "Why did the chicken cross the road?"
+        assert joke.style == "classic"
+
+    def test_nested_wrapper_unwraps(self) -> None:
+        """Nested {"joke": {"text": "...", "style": "..."}} unwraps and parses."""
+        raw = '{"joke": {"text": "A pun walks into a bar...", "style": "pun"}}'
+        joke = self._simulate_llm_parse(raw)
+        assert joke.text == "A pun walks into a bar..."
+        assert joke.style == "pun"
+
+    def test_nested_with_alias_unwraps(self) -> None:
+        """Nested {"joke": {"joke": "...", "style": "..."}} unwraps and parses."""
+        raw = '{"joke": {"joke": "Double nested joke", "style": "meta"}}'
+        joke = self._simulate_llm_parse(raw)
+        assert joke.text == "Double nested joke"
+        assert joke.style == "meta"
+
+    def test_nested_missing_style_gives_clear_error(self) -> None:
+        """Nested {"joke": {"text": "..."}} without style gives clear Pydantic error.
+
+        Regression test: Previously this might show confusing error about "joke"
+        field being a dict. After unwrapping, error should only mention "style".
+        """
+        raw = '{"joke": {"text": "I asked my therapist about fear of commitment"}}'
+        with pytest.raises(ValidationError) as exc_info:
+            self._simulate_llm_parse(raw)
+
+        errors = exc_info.value.errors()
+        # Should have exactly ONE error about missing "style"
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("style",)
+        assert errors[0]["type"] == "missing"
+        # The input_value should show the unwrapped dict, not the nested one
+        assert "joke" not in errors[0]["input"]
+
+    def test_code_fences_stripped_before_parse(self) -> None:
+        """Markdown code fences are stripped before parsing."""
+        raw = '```json\n{"text": "Fenced joke", "style": "markdown"}\n```'
+        joke = self._simulate_llm_parse(raw)
+        assert joke.text == "Fenced joke"
+        assert joke.style == "markdown"
+
+    def test_nested_with_extra_fields_unwraps(self) -> None:
+        """Nested with extra fields still unwraps."""
+        raw = '{"joke": {"text": "hello", "style": "pun", "category": "programming"}}'
+        joke = self._simulate_llm_parse(raw)
+        assert joke.text == "hello"
+        assert joke.style == "pun"

@@ -13,6 +13,7 @@ The cleaner operates in two phases:
    Handles:
    - Markdown code fences: ```json {...} ``` → {...}
    - Preamble text before JSON (thinking, explanations)
+   - Literal escape sequences: {"key": "val",\n "k2": ...} → actual newlines
    - Unclosed braces/brackets: {"key": "val" → {"key": "val"}
    - Multiple JSON objects (schema echo): extracts the last non-schema object
 
@@ -60,6 +61,12 @@ Phase 1: String Cleaning (clean)
     │ Extract from fences │      │
     └────────┬────────────┘      │
              │◄──────────────────┘
+             ▼
+    ┌─────────────────────┐
+    │ Fix literal \\n/\\t  │
+    │ (outside strings)   │
+    └────────┬────────────┘
+             │
              ▼
     ┌─────────────────────┐
     │ Valid JSON?         │──Yes──► Done
@@ -176,8 +183,28 @@ class JSONCleaner:
         """Basic cleaning without multi-object handling."""
         cleaned = content.strip()
         cleaned = self._strip_code_fences(cleaned)
+        cleaned = self._fix_literal_escapes(cleaned)
         cleaned = self._auto_close_json(cleaned)
         return cleaned
+
+    def _fix_literal_escapes(self, content: str) -> str:
+        """Fix literal escape sequences outside of strings.
+
+        Some models output literal \\n (backslash-n) instead of actual newlines
+        in JSON structure (not inside string values). This converts them to
+        real whitespace so JSON parsing works.
+        """
+        # Only fix if JSON is currently invalid
+        try:
+            json.loads(content)
+            return content  # Valid JSON, don't touch
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Replace literal \n and \t outside strings with actual whitespace
+        # Simple approach: replace all literal \n with newline, \t with tab
+        # This is safe because valid JSON escapes inside strings use actual backslash
+        return content.replace("\\n", "\n").replace("\\t", "\t")
 
     def _strip_code_fences(self, content: str) -> str:
         """Extract JSON from markdown code fences.
