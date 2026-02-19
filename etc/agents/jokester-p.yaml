@@ -21,12 +21,10 @@ denylist:
 
 # Agent-specific LLM config (merged with global llm.yaml)
 llm:
-  #default: local
-  default: anthropic
+  default: local
   backends:
     local:
-      adapter_id: jokester-dpo
-      #adapter_id: jokester-sft
+      adapter_id: {}
     anthropic:
       model: "claude-haiku-4-5"
       #model: "claude-sonnet-4-20250514"
