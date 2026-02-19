@@ -1,7 +1,158 @@
 """JSON cleanup utilities for LLM outputs.
 
-LLMs often return JSON wrapped in markdown or with extra formatting.
-This module provides utilities to clean up these common patterns.
+LLMs (especially smaller models) frequently return malformed or weirdly structured JSON.
+This module centralizes all the cleanup hacks needed to parse these outputs reliably.
+
+STRATEGY
+--------
+The cleaner operates in two phases:
+
+1. STRING CLEANING (clean method):
+   Raw LLM output → valid JSON string ready for json.loads()
+
+   Handles:
+   - Markdown code fences: ```json {...} ``` → {...}
+   - Preamble text before JSON (thinking, explanations)
+   - Literal escape sequences: {"key": "val",\n "k2": ...} → actual newlines
+   - Unclosed braces/brackets: {"key": "val" → {"key": "val"}
+   - Multiple JSON objects (schema echo): extracts the last non-schema object
+
+2. STRUCTURE CLEANING (clean_parsed method):
+   Parsed dict → unwrapped dict matching expected schema
+
+   Handles confused model outputs where data is nested in wrapper keys:
+   - {"joke": {"text": "...", "style": "..."}} → {"text": "...", "style": "..."}
+   - {"text": {"text": "...", "style": "..."}} → {"text": "...", "style": "..."}
+   - {"text": {"joke": {"text": "...", "style": "..."}}} → {"text": "...", "style": "..."}
+   - {"response": {"data": {"text": "...", "style": "..."}}} → {"text": "...", "style": "..."}
+
+WHY THIS EXISTS
+---------------
+Small models (3B params) often get confused about JSON structure:
+- They wrap the response in extra keys ("response", "data", "output")
+- They nest the schema inside itself
+- They echo the schema definition before the actual data
+- They forget to close braces when output is truncated
+
+Rather than failing on these, we attempt recovery so the model can still be useful.
+The cleaner is intentionally aggressive about unwrapping - it's better to let Pydantic
+validate the final structure than to reject recoverable outputs.
+
+FLOW DIAGRAM
+------------
+
+Phase 1: String Cleaning (clean)
+
+    Raw LLM Output
+          │
+          ▼
+    ┌─────────────────┐
+    │ Strip whitespace │
+    └────────┬────────┘
+             │
+             ▼
+    ┌─────────────────────┐
+    │ Has ```json fence?  │──No──┐
+    └────────┬────────────┘      │
+            Yes                  │
+             │                   │
+             ▼                   │
+    ┌─────────────────────┐      │
+    │ Extract from fences │      │
+    └────────┬────────────┘      │
+             │◄──────────────────┘
+             ▼
+    ┌─────────────────────┐
+    │ Fix literal \\n/\\t  │
+    │ (outside strings)   │
+    └────────┬────────────┘
+             │
+             ▼
+    ┌─────────────────────┐
+    │ Valid JSON?         │──Yes──► Done
+    └────────┬────────────┘
+             No
+             │
+             ▼
+    ┌─────────────────────┐
+    │ Auto-close braces   │
+    │ (scan & append)     │
+    └────────┬────────────┘
+             │
+             ▼
+    ┌─────────────────────┐
+    │ Multiple objects?   │──No──► Done
+    └────────┬────────────┘
+            Yes
+             │
+             ▼
+    ┌───────────────────────────────────────────┐
+    │ Extract last non-schema object            │
+    │                                           │
+    │ Schema detection (_looks_like_schema):    │
+    │ • {"type": "object", "properties": {...}} │
+    │ • {"schema": {"type": "object", ...}}     │
+    │ • {"json_schema": {...}}                  │
+    └────────┬──────────────────────────────────┘
+             │
+             ▼
+          Done
+
+
+Phase 2: Structure Cleaning (clean_parsed)
+
+    Parsed Dict + Expected Fields {text, style}
+          │
+          ▼
+    ┌─────────────────────────────┐
+    │ Has all expected fields?    │──Yes──► Done
+    └────────┬────────────────────┘
+             No
+             │
+             ▼
+    ╔═══════════════════════════════════════════════════════════════╗
+    ║  Try unwrap (loop until no change or fields found):           ║
+    ║                                                               ║
+    ║  Case 1: {"text": {"text": "...", "style": "..."}}            ║
+    ║          Expected field contains dict with all expected       ║
+    ║          → unwrap to inner                                    ║
+    ║                                                               ║
+    ║  Case 2: {"wrapper": {"text": "...", "style": "..."}}         ║
+    ║          Single key, inner has all expected                   ║
+    ║          → unwrap to inner                                    ║
+    ║                                                               ║
+    ║  Case 3: {"text": {"joke": "...", "style": "..."}}            ║
+    ║          Single key IS expected field, inner is dict          ║
+    ║          → unwrap (let Pydantic handle aliases)               ║
+    ║                                                               ║
+    ║  Case 4: {"wrapper": {"deeper": {"text": "...", ...}}}        ║
+    ║          Single key, expected fields exist deeper             ║
+    ║          → unwrap one level, continue loop                    ║
+    ║                                                               ║
+    ║  Case 5: {"joke": {"joke": "...", "style": "..."}}            ║
+    ║          Single key, inner is dict (not schema)               ║
+    ║          → unwrap (let Pydantic handle aliases)               ║
+    ║          Most aggressive - last resort for alias wrappers     ║
+    ╚═══════════════════════════════════════════════════════════════╝
+             │
+             ▼
+    Return (possibly unwrapped) dict
+    → Pydantic validates final structure
+
+
+USAGE
+-----
+Called automatically by LLMTrait._clean_and_parse_json() when parsing structured outputs.
+The expected_fields parameter (from Pydantic model) guides the unwrapping heuristics.
+
+    cleaner = JSONCleaner()
+
+    # Phase 1: string cleaning
+    cleaned = cleaner.clean('```json\\n{"text": "hello"}\\n```')
+    data = json.loads(cleaned)
+
+    # Phase 2: structure cleaning
+    data = cleaner.clean_parsed(data, {"text", "style"})
 """
 
 from __future__ import annotations
@@ -10,18 +161,7 @@ import json
 
 
 class JSONCleaner:
-    """Cleans LLM-generated JSON strings for parsing.
-
-    Handles common issues:
-    - Markdown code fences (```json ... ```)
-    - Leading/trailing whitespace
-    - (Future) Other common LLM formatting quirks
-
-    Example:
-        cleaner = JSONCleaner()
-        raw = '```json\\n{"key": "value"}\\n```'
-        cleaned = cleaner.clean(raw)  # '{"key": "value"}'
-    """
+    """Cleans LLM-generated JSON for reliable parsing. See module docstring for details."""
 
     def clean(self, content: str) -> str:
         """Clean LLM JSON output for parsing.
@@ -43,8 +183,67 @@ class JSONCleaner:
         """Basic cleaning without multi-object handling."""
         cleaned = content.strip()
         cleaned = self._strip_code_fences(cleaned)
+        cleaned = self._fix_literal_escapes(cleaned)
         cleaned = self._auto_close_json(cleaned)
         return cleaned
+
+    def _fix_literal_escapes(self, content: str) -> str:
+        """Fix literal escape sequences outside of strings.
+
+        Some models output literal \\n (backslash-n) instead of actual newlines
+        in JSON structure (not inside string values). This converts them to
+        real whitespace so JSON parsing works.
+
+        Uses string-aware scanning to avoid corrupting valid escape sequences
+        inside quoted string values.
+        """
+        # Only fix if JSON is currently invalid
+        try:
+            json.loads(content)
+            return content  # Valid JSON, don't touch
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Replace literal \n and \t only outside strings
+        return self._replace_escapes_outside_strings(content)
+
+    def _replace_escapes_outside_strings(self, content: str) -> str:
+        """Replace literal \\n and \\t only when outside quoted strings."""
+        result: list[str] = []
+        in_string = False
+        i = 0
+
+        while i < len(content):
+            char = content[i]
+            has_next = i + 1 < len(content)
+
+            # Inside string: pass through escapes verbatim
+            if in_string and char == "\\" and has_next:
+                result.extend([char, content[i + 1]])
+                i += 2
+            # Toggle string state on quotes
+            elif char == '"':
+                in_string = not in_string
+                result.append(char)
+                i += 1
+            # Outside string: replace literal \n/\t with actual whitespace
+            elif not in_string and char == "\\" and has_next:
+                replacement, advance = self._get_escape_replacement(content[i + 1])
+                result.append(replacement)
+                i += advance
+            else:
+                result.append(char)
+                i += 1
+
+        return "".join(result)
+
+    def _get_escape_replacement(self, next_char: str) -> tuple[str, int]:
+        """Get replacement for literal escape sequence outside strings."""
+        if next_char == "n":
+            return "\n", 2
+        elif next_char == "t":
+            return "\t", 2
+        return "\\" + next_char, 2
 
     def _strip_code_fences(self, content: str) -> str:
         """Extract JSON from markdown code fences.
@@ -187,10 +386,27 @@ class JSONCleaner:
         return last_obj
 
     def _looks_like_schema(self, obj: object) -> bool:
-        """Check if parsed object looks like a JSON schema definition."""
+        """Check if parsed object looks like a JSON schema definition.
+
+        Detects both direct schemas and wrapped schemas:
+        - {"type": "object", "properties": {...}}
+        - {"schema": {"type": "object", "properties": {...}}}
+        """
         if not isinstance(obj, dict):
             return False
-        return "properties" in obj and obj.get("type") == "object"
+
+        # Direct schema
+        if "properties" in obj and obj.get("type") == "object":
+            return True
+
+        # Wrapped schema: {"schema": {...}} or {"json_schema": {...}}
+        for key in ("schema", "json_schema", "$schema"):
+            if key in obj and isinstance(obj[key], dict):
+                inner = obj[key]
+                if "properties" in inner and inner.get("type") == "object":
+                    return True
+
+        return False
 
     def clean_parsed(
         self, data: dict[str, object], expected_fields: set[str] | None = None
@@ -226,16 +442,28 @@ class JSONCleaner:
         return self._unwrap_single_wrapper(data)
 
     def _unwrap_with_expected(
-        self, data: dict[str, object], expected: set[str]
+        self, data: dict[str, object], expected: set[str], max_depth: int = 5
     ) -> dict[str, object]:
         """Unwrap nested structure using expected field names as guide.
 
         Tries to find and extract a nested dict that contains the expected fields.
+        Handles multiple levels of nesting (e.g., {"text": {"joke": {"text": "...", "style": "..."}}}).
         """
-        # Already has expected fields → return as-is
-        if expected.issubset(data.keys()):
-            return data
+        for _ in range(max_depth):
+            # Already has expected fields → return as-is
+            if expected.issubset(data.keys()):
+                return data
 
+            unwrapped = self._try_unwrap_once(data, expected)
+            if unwrapped is data:
+                # No unwrapping happened, stop
+                break
+            data = unwrapped
+
+        return data
+
+    def _try_unwrap_once(self, data: dict[str, object], expected: set[str]) -> dict[str, object]:
+        """Attempt a single level of unwrapping."""
         # Case 1: {"text": {"text": "...", "style": "..."}} - field contains nested obj
         for field in expected:
             if field in data and isinstance(data[field], dict):
@@ -243,21 +471,55 @@ class JSONCleaner:
                 if isinstance(inner, dict) and expected.issubset(inner.keys()):
                     return inner
 
-        # Case 2: {"joke": {"text": "...", "style": "..."}} - single wrapper key
+        # Cases 2-5: Single-key wrapper variations
         if len(data) == 1:
-            inner = next(iter(data.values()))
-            if isinstance(inner, dict) and expected.issubset(inner.keys()):
-                return inner
-
-        # Case 3: {"text": {"joke": "...", "style": "..."}} - expected field wraps aliased content
-        # Unwrap if single-key and inner is a dict (let Pydantic aliases handle field names)
-        if len(data) == 1:
-            key = next(iter(data.keys()))
-            inner = data[key]
-            if key in expected and isinstance(inner, dict) and len(inner) >= len(expected):
-                return inner
+            return self._try_unwrap_single_key(data, expected)
 
         return data
+
+    def _try_unwrap_single_key(
+        self, data: dict[str, object], expected: set[str]
+    ) -> dict[str, object]:
+        """Try unwrapping single-key wrapper dict (Cases 2-5)."""
+        key = next(iter(data.keys()))
+        inner = data[key]
+
+        if not isinstance(inner, dict):
+            return data
+
+        # Case 2: {"wrapper": {"text": "...", "style": "..."}} - inner has all expected
+        if expected.issubset(inner.keys()):
+            return inner
+
+        # Case 3: {"text": {"joke": "...", ...}} - key is expected field (alias handling)
+        if key in expected:
+            return inner
+
+        # Case 4: Expected fields exist deeper in nested structure
+        if self._contains_expected_fields(inner, expected):
+            return inner
+
+        # Case 5: Aggressive unwrap - inner is dict but not schema (let Pydantic validate)
+        if not self._looks_like_schema(inner):
+            return inner
+
+        return data
+
+    def _contains_expected_fields(
+        self, data: dict[str, object], expected: set[str], max_depth: int = 5
+    ) -> bool:
+        """Check if expected fields exist at this level or deeper."""
+        for _ in range(max_depth):
+            if expected.issubset(data.keys()):
+                return True
+            # Check one level deeper via single-key wrapper
+            if len(data) == 1:
+                inner = next(iter(data.values()))
+                if isinstance(inner, dict):
+                    data = inner
+                    continue
+            break
+        return False
 
     def _unwrap_single_wrapper(self, data: dict[str, object]) -> dict[str, object]:
         """Heuristically unwrap single-key wrapper dicts.

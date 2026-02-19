@@ -99,7 +99,11 @@ class Factory(BaseFactory):
         llm_trait = agent.require_trait(LLMTrait)
         directive_trait = agent.get_trait(DirectiveTrait)
         novelty_checker = NoveltyChecker(lg, learn_trait, config.get("similarity_threshold", 0.85))
-        expected_adapter = cls._get_expected_adapter(lg, learn_trait, agent.name)
+
+        # Only verify adapter when current backend has adapter_id configured
+        expected_adapter = None
+        if llm_trait.adapter_id:
+            expected_adapter = cls._get_expected_adapter(lg, learn_trait, agent.name)
 
         return JokeGenerator(
             lg=lg,

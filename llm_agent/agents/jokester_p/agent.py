@@ -164,13 +164,15 @@ class JokesterAgent(Agent):
         assert attempt.joke is not None
         return {
             "after": since(self._last_joke_time),
+            "fact": fact_id,
             "agent": self.name,
-            "fact_id": fact_id,
-            "attempts": {"run": attempt.run_attempts, "cumulative": attempt.cumulative_attempts},
-            "style": attempt.joke.style,
             "joke": attempt.joke.text,
-            "session_count": self._jokes_generated_this_session,
+            "chars": len(attempt.joke.text),
+            "model": attempt.model_name,
+            "style": attempt.joke.style,
             "closest": round(attempt.max_similarity, 2),
+            "attempts": {"run": attempt.run_attempts, "cumulative": attempt.cumulative_attempts},
+            "sess_count": self._jokes_generated_this_session,
         }
 
     def ask(self, question: str) -> str:
