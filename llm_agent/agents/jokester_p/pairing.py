@@ -84,6 +84,9 @@ class StarFilter:
 
         Returns:
             StarFilter instance or None if value is None/empty
+
+        Raises:
+            ValueError: If value is not a valid star filter format
         """
         if value is None:
             return None
@@ -94,14 +97,20 @@ class StarFilter:
         if not value:
             return None
 
-        # Check for operator prefix
-        for op in (">=", "<=", ">", "<"):
-            if value.startswith(op):
-                num = int(value[len(op) :])
-                return cls(value=num, op=op)
+        try:
+            # Check for operator prefix
+            for op in (">=", "<=", ">", "<"):
+                if value.startswith(op):
+                    num = int(value[len(op) :])
+                    return cls(value=num, op=op)
 
-        # No operator = exact match
-        return cls(value=int(value), op="==")
+            # No operator = exact match
+            return cls(value=int(value), op="==")
+        except ValueError:
+            raise ValueError(
+                f"Invalid star filter: '{value}'. "
+                f"Use a number (3) or operator with number (>=3, <=2, >1, <5)"
+            ) from None
 
 
 class PairingService:

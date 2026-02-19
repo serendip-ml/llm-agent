@@ -106,6 +106,32 @@ class TestJSONCleanerAutoClose:
         result = cleaner.clean(content)
         assert result == content  # Should not be modified
 
+    def test_fix_literal_escapes_preserves_string_escapes(self) -> None:
+        """Literal \\n outside strings is fixed, but \\n inside strings is preserved.
+
+        Regression test: When JSON is invalid (unclosed brace) AND contains
+        escaped newlines in strings, we must not corrupt the string values.
+        """
+        cleaner = JSONCleaner()
+        # Invalid JSON (unclosed) with \n both outside AND inside string
+        content = '{"text": "line1\\nline2",\\n  "style": "pun"'
+        result = cleaner.clean(content)
+        # Should parse successfully
+        parsed = json.loads(result)
+        # String escape should be preserved (actual newline in value)
+        assert parsed["text"] == "line1\nline2"
+        assert parsed["style"] == "pun"
+
+    def test_fix_literal_escapes_complex_string(self) -> None:
+        """Complex strings with multiple escapes are handled correctly."""
+        cleaner = JSONCleaner()
+        # Invalid JSON with escapes in string and outside
+        content = '{"text": "a\\tb\\nc",\\n  "more": "x\\\\y"'
+        result = cleaner.clean(content)
+        parsed = json.loads(result)
+        assert parsed["text"] == "a\tb\nc"  # Tab and newline in string
+        assert parsed["more"] == "x\\y"  # Escaped backslash
+
 
 class TestJSONCleanerMultipleObjects:
     """Test handling of multiple JSON objects (schema echo issue)."""

@@ -299,7 +299,8 @@ class JokesterCLI(Tool):
         """Query stats for Haiku-generated jokes."""
         assert self._pg is not None
         context_key = self._get_context_key()
-        chars_join, chars_filter = self._build_chars_filter(max_chars)
+        params: dict[str, Any] = {"context_key": context_key}
+        chars_join, chars_filter = self._build_chars_filter(max_chars, params)
 
         sql = text(f"""
             SELECT COUNT(*) as total, COUNT(afd.id) as rated,
@@ -312,16 +313,26 @@ class JokesterCLI(Tool):
               AND u.model_name LIKE '%haiku%' {chars_filter}
         """)
         with self._pg.connect() as conn:
-            row = conn.execute(sql, {"context_key": context_key}).fetchone()
+            row = conn.execute(sql, params).fetchone()
             total, rated, avg_stars = row[0], row[1], row[2]
-            dist = self._query_haiku_distribution(conn, context_key, chars_join, chars_filter)
+            dist = self._query_haiku_distribution(
+                conn, context_key, chars_join, chars_filter, max_chars
+            )
 
         return {"total": total, "rated": rated, "avg_stars": avg_stars, "dist": dist}
 
     def _query_haiku_distribution(
-        self, conn: Any, context_key: str, chars_join: str, chars_filter: str
+        self,
+        conn: Any,
+        context_key: str,
+        chars_join: str,
+        chars_filter: str,
+        max_chars: int | None = None,
     ) -> dict[int, int]:
         """Query star distribution for Haiku jokes."""
+        params: dict[str, Any] = {"context_key": context_key}
+        if max_chars:
+            params["max_chars"] = max_chars
         sql = text(f"""
             SELECT (afd.context->>'stars')::int as stars, COUNT(*) as cnt
             FROM atomic_facts af
@@ -332,15 +343,22 @@ class JokesterCLI(Tool):
               AND u.model_name LIKE '%haiku%' {chars_filter}
             GROUP BY (afd.context->>'stars')::int
         """)
-        rows = conn.execute(sql, {"context_key": context_key}).fetchall()
+        rows = conn.execute(sql, params).fetchall()
         return {r[0]: r[1] for r in rows}
 
-    def _build_chars_filter(self, max_chars: int | None) -> tuple[str, str]:
-        """Build JOIN and WHERE clause for character length filtering."""
+    def _build_chars_filter(
+        self, max_chars: int | None, params: dict[str, Any] | None = None
+    ) -> tuple[str, str]:
+        """Build JOIN and WHERE clause for character length filtering.
+
+        If params dict provided, adds max_chars to it automatically.
+        """
         if not max_chars:
             return "", ""
+        if params is not None:
+            params["max_chars"] = max_chars
         chars_join = "JOIN atomic_solution_details asd ON asd.fact_id = af.id"
-        chars_filter = f"AND length(asd.answer_text) < {max_chars}"
+        chars_filter = "AND length(asd.answer_text) < :max_chars"
         return chars_join, chars_filter
 
     def _cmd_rate(self) -> int:
@@ -909,7 +927,8 @@ class JokesterCLI(Tool):
         assert self._pg is not None
         context_key = self._get_context_key()
         haiku_filter = self._build_haiku_filter(exclude_haiku)
-        chars_join, chars_filter = self._build_chars_filter(max_chars)
+        params: dict[str, Any] = {"context_key": context_key}
+        chars_join, chars_filter = self._build_chars_filter(max_chars, params)
 
         sql = text(f"""
             SELECT COUNT(*) as total,
@@ -926,7 +945,7 @@ class JokesterCLI(Tool):
               {haiku_filter} {chars_filter}
         """)
         with self._pg.connect() as conn:
-            result = conn.execute(sql, {"context_key": context_key}).fetchone()
+            result = conn.execute(sql, params).fetchone()
         return {
             "total": result[0],
             "rated": result[1],
@@ -950,7 +969,8 @@ class JokesterCLI(Tool):
         assert self._pg is not None
         context_key = self._get_context_key()
         haiku_filter = self._build_haiku_filter(exclude_haiku)
-        chars_join, chars_filter = self._build_chars_filter(max_chars)
+        params: dict[str, Any] = {"context_key": context_key}
+        chars_join, chars_filter = self._build_chars_filter(max_chars, params)
 
         sql = text(f"""
             WITH latest_ratings AS (
@@ -967,7 +987,7 @@ class JokesterCLI(Tool):
             FROM latest_ratings GROUP BY stars ORDER BY stars DESC
         """)
         with self._pg.connect() as conn:
-            rows = conn.execute(sql, {"context_key": context_key}).fetchall()
+            rows = conn.execute(sql, params).fetchall()
         return [{"stars": r[0], "count": r[1], "pct": float(r[2])} for r in rows]
 
     def _get_training_runs(self) -> list[dict[str, Any]]:
@@ -1055,7 +1075,8 @@ class JokesterCLI(Tool):
             params["end"] = end
         if max_chars is not None:
             extra_join = "JOIN atomic_solution_details asd ON asd.fact_id = af.id"
-            conditions.append(f"length(asd.answer_text) < {max_chars}")
+            conditions.append("length(asd.answer_text) < :max_chars")
+            params["max_chars"] = max_chars
 
         return " AND ".join(conditions), params, extra_join
 

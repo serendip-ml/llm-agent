@@ -193,6 +193,9 @@ class JSONCleaner:
         Some models output literal \\n (backslash-n) instead of actual newlines
         in JSON structure (not inside string values). This converts them to
         real whitespace so JSON parsing works.
+
+        Uses string-aware scanning to avoid corrupting valid escape sequences
+        inside quoted string values.
         """
         # Only fix if JSON is currently invalid
         try:
@@ -201,10 +204,46 @@ class JSONCleaner:
         except (json.JSONDecodeError, ValueError):
             pass
 
-        # Replace literal \n and \t outside strings with actual whitespace
-        # Simple approach: replace all literal \n with newline, \t with tab
-        # This is safe because valid JSON escapes inside strings use actual backslash
-        return content.replace("\\n", "\n").replace("\\t", "\t")
+        # Replace literal \n and \t only outside strings
+        return self._replace_escapes_outside_strings(content)
+
+    def _replace_escapes_outside_strings(self, content: str) -> str:
+        """Replace literal \\n and \\t only when outside quoted strings."""
+        result: list[str] = []
+        in_string = False
+        i = 0
+
+        while i < len(content):
+            char = content[i]
+            has_next = i + 1 < len(content)
+
+            # Inside string: pass through escapes verbatim
+            if in_string and char == "\\" and has_next:
+                result.extend([char, content[i + 1]])
+                i += 2
+            # Toggle string state on quotes
+            elif char == '"':
+                in_string = not in_string
+                result.append(char)
+                i += 1
+            # Outside string: replace literal \n/\t with actual whitespace
+            elif not in_string and char == "\\" and has_next:
+                replacement, advance = self._get_escape_replacement(content[i + 1])
+                result.append(replacement)
+                i += advance
+            else:
+                result.append(char)
+                i += 1
+
+        return "".join(result)
+
+    def _get_escape_replacement(self, next_char: str) -> tuple[str, int]:
+        """Get replacement for literal escape sequence outside strings."""
+        if next_char == "n":
+            return "\n", 2
+        elif next_char == "t":
+            return "\t", 2
+        return "\\" + next_char, 2
 
     def _strip_code_fences(self, content: str) -> str:
         """Extract JSON from markdown code fences.
