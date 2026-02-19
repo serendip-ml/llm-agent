@@ -74,13 +74,6 @@ class JokesterCLI(Tool):
     def _add_train_args(self, subparsers: Any) -> None:
         """Add train command with dpo/sft subcommands."""
         train_parser = subparsers.add_parser("train", help="Training commands (DPO/SFT)")
-        train_parser.add_argument(
-            "--based-on",
-            "-b",
-            type=int,
-            dest="based_on",
-            help="Train on top of existing run ID (for lineage)",
-        )
         train_subs = train_parser.add_subparsers(dest="train_command", help="Training type")
         self._add_train_dpo_args(train_subs)
         self._add_train_sft_args(train_subs)
@@ -93,6 +86,13 @@ class JokesterCLI(Tool):
             type=str,
             default="jokester-dpo",
             help="Name for the trained adapter (default: jokester-dpo)",
+        )
+        p.add_argument(
+            "--based-on",
+            "-b",
+            type=int,
+            dest="based_on",
+            help="Train on top of existing run ID (for lineage)",
         )
         p.add_argument(
             "--dry-run", action="store_true", help="Show what would be created without saving"
