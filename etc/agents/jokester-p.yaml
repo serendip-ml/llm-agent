@@ -25,6 +25,8 @@ llm:
   backends:
     local:
       adapter_id: null
+    vastai:
+      adapter_id: null
     anthropic:
       model: "claude-haiku-4-5"
       #model: "claude-sonnet-4-20250514"

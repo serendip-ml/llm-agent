@@ -59,6 +59,11 @@ class JokesterCLI(Tool):
             default=140,
             help="Only count jokes under this character length (default: 140)",
         )
+        p.add_argument(
+            "--model",
+            type=str,
+            help="Filter by model (case-insensitive, supports * wildcard, e.g. 'qwen*14b')",
+        )
 
     def _add_rate_args(self, subparsers: Any) -> None:
         """Add rate command arguments."""
@@ -180,23 +185,28 @@ class JokesterCLI(Tool):
         assert self._pg is not None
 
         max_chars = getattr(self.args, "max_chars", 130)
-        stats = self._get_rating_stats(exclude_haiku=True, max_chars=max_chars)
-        dist = self._get_rating_distribution(exclude_haiku=True, max_chars=max_chars)
+        model = getattr(self.args, "model", None)
+        stats = self._get_rating_stats(exclude_haiku=True, max_chars=max_chars, model=model)
+        dist = self._get_rating_distribution(exclude_haiku=True, max_chars=max_chars, model=model)
 
-        self._print_stats_header(max_chars)
+        self._print_stats_header(max_chars, model)
         self._print_rating_summary(stats, dist)
-        self._print_training_run_stats(max_chars=max_chars)
-        self._print_haiku_stats(max_chars=max_chars)
+        self._print_training_run_stats(max_chars=max_chars, model=model)
+        if not model:  # Only show haiku stats when not filtering by model
+            self._print_haiku_stats(max_chars=max_chars)
 
         return 0
 
-    def _print_stats_header(self, max_chars: int) -> None:
+    def _print_stats_header(self, max_chars: int, model_filter: str | None = None) -> None:
         """Print stats header with model and adapter info."""
         context_key = self._get_context_key()
         model = self._get_latest_model(context_key) or "unknown"
         adapter = self._get_latest_adapter(context_key)
         print("\n=== Jokester-p Stats ===\n")
-        print(f"Model:   {model}, <{max_chars} chars")
+        filter_info = f"<{max_chars} chars"
+        if model_filter:
+            filter_info += f", model~'{model_filter}'"
+        print(f"Model:   {model}, {filter_info}")
         if adapter:
             print(f"Adapter: {adapter['name']} (md5: {adapter['md5']}, mtime: {adapter['mtime']})")
         print()
@@ -214,14 +224,16 @@ class JokesterCLI(Tool):
             stars_visual = "★" * row["stars"] + "☆" * (5 - row["stars"])
             print(f"  {stars_visual}  {row['count']:4d}  ({row['pct']:.1f}%)")
 
-    def _print_training_run_stats(self, max_chars: int | None = None) -> None:
+    def _print_training_run_stats(
+        self, max_chars: int | None = None, model: str | None = None
+    ) -> None:
         """Print stats broken down by training runs."""
         runs = self._get_training_runs()
         if not runs:
             return
 
         print("\n=== By Training Run ===\n")
-        period_stats = self._get_stats_by_training_period(runs, max_chars=max_chars)
+        period_stats = self._get_stats_by_training_period(runs, max_chars=max_chars, model=model)
 
         for period in period_stats:
             if period["count"] == 0:
@@ -360,6 +372,27 @@ class JokesterCLI(Tool):
         chars_join = "JOIN atomic_solution_details asd ON asd.fact_id = af.id"
         chars_filter = "AND length(asd.answer_text) < :max_chars"
         return chars_join, chars_filter
+
+    def _build_model_filter(
+        self, model: str | None, params: dict[str, Any] | None = None
+    ) -> tuple[str, str]:
+        """Build JOIN and WHERE clause for model filtering.
+
+        Supports glob-style patterns (e.g., "qwen*14b") with case-insensitive matching.
+        If params dict provided, adds model_pattern to it automatically.
+        """
+        if not model:
+            return "", ""
+        if params is not None:
+            # Normalize to lowercase and convert glob * to SQL %
+            pattern = model.lower().replace("*", "%")
+            # Wrap with % if no wildcards present (substring match)
+            if "%" not in pattern:
+                pattern = f"%{pattern}%"
+            params["model_pattern"] = pattern
+        model_join = "JOIN agent_jokester_model_usage mu ON mu.fact_id = af.id"
+        model_filter = "AND LOWER(mu.model_name) LIKE :model_pattern"
+        return model_join, model_filter
 
     def _cmd_rate(self) -> int:
         """Rate unrated jokes in batches."""
@@ -921,7 +954,10 @@ class JokesterCLI(Tool):
             return None
 
     def _get_rating_stats(
-        self, exclude_haiku: bool = False, max_chars: int | None = None
+        self,
+        exclude_haiku: bool = False,
+        max_chars: int | None = None,
+        model: str | None = None,
     ) -> dict[str, Any]:
         """Get rating statistics using lateral subquery for latest feedback per fact."""
         assert self._pg is not None
@@ -929,6 +965,7 @@ class JokesterCLI(Tool):
         haiku_filter = self._build_haiku_filter(exclude_haiku)
         params: dict[str, Any] = {"context_key": context_key}
         chars_join, chars_filter = self._build_chars_filter(max_chars, params)
+        model_join, model_filter = self._build_model_filter(model, params)
 
         sql = text(f"""
             SELECT COUNT(*) as total,
@@ -937,12 +974,13 @@ class JokesterCLI(Tool):
                    AVG((afd.context->>'stars')::int) as avg_stars
             FROM atomic_facts af
             {chars_join}
+            {model_join}
             LEFT JOIN LATERAL (
                 SELECT afd2.id, afd2.context FROM atomic_feedback_details afd2
                 WHERE afd2.fact_id = af.id ORDER BY afd2.id DESC LIMIT 1
             ) afd ON true
             WHERE af.context_key = :context_key AND af.type = 'solution'
-              {haiku_filter} {chars_filter}
+              {haiku_filter} {chars_filter} {model_filter}
         """)
         with self._pg.connect() as conn:
             result = conn.execute(sql, params).fetchone()
@@ -963,7 +1001,10 @@ class JokesterCLI(Tool):
         )"""
 
     def _get_rating_distribution(
-        self, exclude_haiku: bool = False, max_chars: int | None = None
+        self,
+        exclude_haiku: bool = False,
+        max_chars: int | None = None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get rating distribution using DISTINCT ON for latest rating per fact."""
         assert self._pg is not None
@@ -971,6 +1012,7 @@ class JokesterCLI(Tool):
         haiku_filter = self._build_haiku_filter(exclude_haiku)
         params: dict[str, Any] = {"context_key": context_key}
         chars_join, chars_filter = self._build_chars_filter(max_chars, params)
+        model_join, model_filter = self._build_model_filter(model, params)
 
         sql = text(f"""
             WITH latest_ratings AS (
@@ -978,8 +1020,9 @@ class JokesterCLI(Tool):
                 FROM atomic_facts af
                 JOIN atomic_feedback_details afd ON af.id = afd.fact_id
                 {chars_join}
+                {model_join}
                 WHERE af.context_key = :context_key AND af.type = 'solution'
-                  {haiku_filter} {chars_filter}
+                  {haiku_filter} {chars_filter} {model_filter}
                 ORDER BY af.id, afd.id DESC
             )
             SELECT stars, COUNT(*) as count,
@@ -1005,7 +1048,10 @@ class JokesterCLI(Tool):
         return [{"id": r[0], "adapter_name": r[1], "completed_at": r[2]} for r in rows]
 
     def _get_stats_by_training_period(
-        self, runs: list[dict[str, Any]], max_chars: int | None = None
+        self,
+        runs: list[dict[str, Any]],
+        max_chars: int | None = None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get rating stats for each training period."""
         assert self._pg is not None
@@ -1021,20 +1067,27 @@ class JokesterCLI(Tool):
 
             period_name = "pre-training" if i == 0 else f"after run #{runs[i - 1]['id']}"
 
-            stats = self._get_period_stats(context_key, start, end, max_chars=max_chars)
+            stats = self._get_period_stats(
+                context_key, start, end, max_chars=max_chars, model=model
+            )
             stats["period"] = period_name
             periods.append(stats)
 
         return periods
 
     def _get_period_stats(
-        self, context_key: str, start: Any, end: Any, max_chars: int | None = None
+        self,
+        context_key: str,
+        start: Any,
+        end: Any,
+        max_chars: int | None = None,
+        model: str | None = None,
     ) -> dict[str, Any]:
         """Get stats for jokes created between start and end times."""
         assert self._pg is not None
 
         where, params, extra_join = self._build_period_conditions(
-            context_key, start, end, max_chars=max_chars
+            context_key, start, end, max_chars=max_chars, model=model
         )
         sql = text(f"""
             SELECT COUNT(*) as count, AVG((afd.context->>'stars')::int) as avg_stars
@@ -1052,7 +1105,12 @@ class JokesterCLI(Tool):
         return {"count": count, "avg_stars": avg_stars, "distribution": distribution}
 
     def _build_period_conditions(
-        self, context_key: str, start: Any, end: Any, max_chars: int | None = None
+        self,
+        context_key: str,
+        start: Any,
+        end: Any,
+        max_chars: int | None = None,
+        model: str | None = None,
     ) -> tuple[str, dict[str, Any], str]:
         """Build WHERE conditions, params, and extra JOIN for period queries."""
         conditions = [
@@ -1065,7 +1123,7 @@ class JokesterCLI(Tool):
             )""",
         ]
         params: dict[str, Any] = {"context_key": context_key}
-        extra_join = ""
+        extra_joins = []
 
         if start is not None:
             conditions.append("af.created_at >= :start")
@@ -1074,11 +1132,19 @@ class JokesterCLI(Tool):
             conditions.append("af.created_at < :end")
             params["end"] = end
         if max_chars is not None:
-            extra_join = "JOIN atomic_solution_details asd ON asd.fact_id = af.id"
+            extra_joins.append("JOIN atomic_solution_details asd ON asd.fact_id = af.id")
             conditions.append("length(asd.answer_text) < :max_chars")
             params["max_chars"] = max_chars
+        if model is not None:
+            extra_joins.append("JOIN agent_jokester_model_usage mu ON mu.fact_id = af.id")
+            conditions.append("LOWER(mu.model_name) LIKE :model_pattern")
+            # Normalize to lowercase and convert glob * to SQL %
+            pattern = model.lower().replace("*", "%")
+            if "%" not in pattern:
+                pattern = f"%{pattern}%"
+            params["model_pattern"] = pattern
 
-        return " AND ".join(conditions), params, extra_join
+        return " AND ".join(conditions), params, "\n".join(extra_joins)
 
     def _get_star_distribution(
         self, conn: Any, where: str, params: dict[str, Any], extra_join: str = ""
