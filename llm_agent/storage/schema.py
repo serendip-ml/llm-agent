@@ -45,7 +45,7 @@ class AgentTable(Base):
         autoincrement=True,
     )
 
-    # Isolation column (context_key from llm-learn IsolationContext)
+    # Isolation column (context_key from llm-learn ClientContext)
     # Supports hierarchical keys like "domain:workspace:name"
     context_key: Mapped[str] = mapped_column(
         String(255),

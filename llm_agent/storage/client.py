@@ -89,7 +89,7 @@ class AgentStorage:
         if self._learn.context.context_key is None:
             raise ValueError(
                 "AgentStorage requires isolation context with context_key set. "
-                "Ensure LearnClient was created with valid IsolationContext."
+                "Ensure LearnClient was created with valid ClientContext."
             )
 
     @property

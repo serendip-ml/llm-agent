@@ -92,7 +92,7 @@ class Factory:
         Agent config formats:
             llm: anthropic                    # Select backend (simplest)
             llm: { default: anthropic }       # Explicit default
-            llm: { default: local, backends: { local: { adapter_id: x } } }  # Select + override
+            llm: { default: local, backends: { local: { adapter: x } } }  # Select + override
         """
         llm_config: DotDict = DotDict(self._platform.llm_config())
 
@@ -110,7 +110,7 @@ class Factory:
         """Merge agent-level llm config into global config.
 
         Performs deep merge at the backends level, so agent can override
-        specific backend settings (like adapter_id) without replacing
+        specific backend settings (like adapter) without replacing
         the entire backend config.
         """
         import copy
@@ -245,6 +245,7 @@ class Factory:
             embedder_url=learn_config.get("embedder_url"),
             embedder_model=learn_config.get("embedder_model", "default"),
             embedder_timeout=learn_config.get("embedder_timeout", 30.0),
+            training=learn_config.get("training"),
         )
         return LearnTrait(agent, config)
 

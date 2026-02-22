@@ -37,6 +37,7 @@ Expected fields:
     embedder_url: URL for embedding service (None = no RAG).
     embedder_model: Model name for embeddings (default: "default").
     embedder_timeout: Embedder timeout in seconds (default: 30.0).
+    training: Training configuration dict (default_profiles, etc.).
 """
 
 
@@ -103,18 +104,18 @@ class LearnTrait(BaseTrait):
             embedder: Embedder instance (None if not configured).
             llm_client: LLM client instance (None if not configured).
         """
-        from llm_learn.memory.isolation import IsolationContext
+        from llm_learn.memory.isolation import ClientContext
 
         identity = self._resolve_identity()
 
-        # Create IsolationContext from identity
+        # Create ClientContext from identity
         if identity is None:
             raise ValueError("LearnConfig must have identity set")
 
         context_key = identity.context_key
         schema_name = "public"  # Default schema
 
-        context = IsolationContext(context_key=context_key, schema_name=schema_name)
+        context = ClientContext(context_key=context_key, schema_name=schema_name)
 
         return LearnClient(
             lg=self.agent.lg,
@@ -123,6 +124,7 @@ class LearnTrait(BaseTrait):
             embedder=embedder,
             llm_client=llm_client,
             ensure_schema=True,
+            training_config=self.config.get("training"),
         )
 
     def _resolve_identity(self) -> Identity | None:

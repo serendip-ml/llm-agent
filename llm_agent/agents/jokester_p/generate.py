@@ -31,15 +31,6 @@ class Joke(BaseModel):
 
 
 @dataclass
-class ExpectedAdapter:
-    """Expected adapter info from latest DPO training run."""
-
-    name: str
-    md5: str
-    mtime: str
-
-
-@dataclass
 class GenerationAttempt:
     """Result of a joke generation cycle with all metadata."""
 
@@ -90,7 +81,6 @@ class JokeGenerator:
         directive_trait: DirectiveTrait | None = None,
         max_retries: int = 3,
         denylist: list[str] | None = None,
-        expected_adapter: ExpectedAdapter | None = None,
     ) -> None:
         """Initialize joke generator.
 
@@ -101,7 +91,6 @@ class JokeGenerator:
             directive_trait: Optional directive trait for system prompt.
             max_retries: Maximum retry attempts (default: 3).
             denylist: Words/phrases to filter (case-insensitive).
-            expected_adapter: Expected adapter from latest DPO run (for verification).
         """
         self._lg = lg
         self._llm = llm_trait
@@ -109,9 +98,7 @@ class JokeGenerator:
         self._directive = directive_trait
         self._max_retries = max_retries
         self._denylist = [term.lower() for term in (denylist or [])]
-        self._expected_adapter = expected_adapter
         self._cumulative_attempts = 0
-        self._adapter_verified = False  # Log verification only once per session
         # Track (generated_joke, similar_existing_joke) pairs for smarter retries
         self._recent_failed: deque[tuple[str, str | None]] = deque(maxlen=10)
 
@@ -172,50 +159,12 @@ class JokeGenerator:
         retry_feedback = "" if attempt == 1 else "Try a completely different style."
 
         joke, model_name, adapter = self._call_llm(context, retry_feedback)
-        self._verify_adapter(adapter)
 
         if joke is None:
             self._lg.warning("LLM failed to generate joke", extra={"attempt": attempt})
             return None
 
         return self._validate(joke, model_name, adapter, attempt)
-
-    def _verify_adapter(self, adapter: AdapterInfo | None) -> None:
-        """Verify adapter matches expected from latest DPO run (logs once per session)."""
-        if self._adapter_verified:
-            return
-        self._adapter_verified = True
-
-        expected = self._expected_adapter
-        if expected is None:
-            self._lg.debug("no expected adapter configured, skipping verification")
-            return
-
-        failure = self._check_adapter_failure(adapter, expected)
-        if failure:
-            self._lg.warning(f"adapter verification failed: {failure[0]}", extra=failure[1])
-        else:
-            self._lg.info(
-                "adapter verified",
-                extra={"adapter": expected.name, "md5": expected.md5, "mtime": expected.mtime},
-            )
-
-    def _check_adapter_failure(
-        self, adapter: AdapterInfo | None, expected: ExpectedAdapter
-    ) -> tuple[str, dict[str, object]] | None:
-        """Check for adapter verification failure. Returns (reason, extra) or None if OK."""
-        if adapter is None:
-            return "no adapter info in response", {"expected": expected}
-        if adapter.fallback:
-            return "fell back to base model", {"expected": expected, "actual": adapter}
-        if adapter.md5 != expected.md5:
-            return "md5 mismatch", {
-                "expected_md5": expected.md5,
-                "actual_md5": adapter.md5,
-                "expected_mtime": expected.mtime,
-                "actual_mtime": adapter.mtime,
-            }
-        return None
 
     def _call_llm(
         self, context: list[str], retry_feedback: str

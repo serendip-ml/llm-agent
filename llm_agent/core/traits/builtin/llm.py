@@ -43,7 +43,7 @@ Supports multi-backend format (see llm-infer LLMClient.from_config):
 def _resolve_llm_defaults(config: LLMConfig) -> dict[str, Any]:
     """Extract default values from LLM config.
 
-    Returns dict with model, temperature, max_tokens, adapter_id from the selected backend.
+    Returns dict with model, temperature, max_tokens, adapter from the selected backend.
     """
     backends = config.get("backends", {})
     default_name = config.get("default")
@@ -54,7 +54,7 @@ def _resolve_llm_defaults(config: LLMConfig) -> dict[str, Any]:
             "model": config.get("model", "default"),
             "temperature": config.get("temperature", 0.7),
             "max_tokens": config.get("max_tokens"),
-            "adapter_id": config.get("adapter_id"),
+            "adapter": config.get("adapter"),
         }
 
     if not default_name:
@@ -65,7 +65,7 @@ def _resolve_llm_defaults(config: LLMConfig) -> dict[str, Any]:
         "model": backend_config.get("model", "default"),
         "temperature": backend_config.get("temperature", 0.7),
         "max_tokens": backend_config.get("max_tokens"),
-        "adapter_id": backend_config.get("adapter_id"),
+        "adapter": backend_config.get("adapter"),
     }
 
 
@@ -139,9 +139,9 @@ class LLMTrait(BaseTrait):
         return self._router
 
     @property
-    def adapter_id(self) -> str | None:
-        """Get the default adapter ID from config, if any."""
-        return self._defaults.get("adapter_id")
+    def adapter(self) -> str | None:
+        """Get the default adapter from config, if any."""
+        return self._defaults.get("adapter")
 
     def complete(
         self,
@@ -152,7 +152,7 @@ class LLMTrait(BaseTrait):
         tools: list[dict[str, Any]] | None = None,
         output_schema: type[BaseModel] | None = None,
         backend: str | None = None,
-        adapter_id: str | None = None,
+        adapter: str | None = None,
     ) -> CompletionResult:
         """Generate a completion.
 
@@ -167,7 +167,7 @@ class LLMTrait(BaseTrait):
                 the LLM is instructed to return JSON matching the schema, and the
                 response is validated. Result.parsed will contain the validated object.
             backend: Backend to route to. If None, uses model-based routing or default.
-            adapter_id: LoRA adapter to use (uses config default if None).
+            adapter: LoRA adapter to use (uses config default if None).
 
         Returns:
             CompletionResult with content and metadata. If output_schema was provided,
@@ -181,7 +181,7 @@ class LLMTrait(BaseTrait):
             raise ValueError("Cannot use both tools and output_schema")
 
         api_messages, extra_body = self._prepare_messages(messages, output_schema)
-        params = self._resolve_params(model, temperature, max_tokens, adapter_id)
+        params = self._resolve_params(model, temperature, max_tokens, adapter)
 
         self._log_request(
             api_messages, params["model"], params["temp"], params["max_tokens"], params["adapter"]
@@ -222,7 +222,7 @@ class LLMTrait(BaseTrait):
         model: str | None,
         temperature: float | None,
         max_tokens: int | None,
-        adapter_id: str | None,
+        adapter: str | None,
     ) -> dict[str, Any]:
         """Resolve parameters with defaults."""
         return {
@@ -233,7 +233,7 @@ class LLMTrait(BaseTrait):
             "max_tokens": max_tokens
             if max_tokens is not None
             else self._defaults.get("max_tokens"),
-            "adapter": adapter_id or self._defaults.get("adapter_id"),
+            "adapter": adapter or self._defaults.get("adapter"),
         }
 
     def _messages_to_dicts(self, messages: list[Message]) -> list[dict[str, Any]]:
@@ -307,7 +307,7 @@ class LLMTrait(BaseTrait):
         model: str | None,
         temperature: float | None,
         max_tokens: int | None,
-        adapter_id: str | None,
+        adapter: str | None,
     ) -> None:
         """Log full LLM request at trace level."""
         self.agent.lg.trace(
@@ -316,7 +316,7 @@ class LLMTrait(BaseTrait):
                 "model": model,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
-                "adapter_id": adapter_id,
+                "adapter": adapter,
                 "messages": messages,
             },
         )
@@ -451,7 +451,7 @@ class LLMTraitBackend:
         temperature: float | None = None,
         max_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
-        adapter_id: str | None = None,
+        adapter: str | None = None,
     ) -> CompletionResult:
         """Delegate to LLMTrait.complete()."""
         return self._trait.complete(
@@ -460,7 +460,7 @@ class LLMTraitBackend:
             temperature=temperature,
             max_tokens=max_tokens,
             tools=tools,
-            adapter_id=adapter_id,
+            adapter=adapter,
         )
 
     def load_adapter(self, adapter_path: str) -> None:
