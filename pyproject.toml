@@ -120,7 +120,7 @@ lines-after-imports = 2
 [tool.coverage.run]
 source = ["llm_agent"]
 branch = true
-omit = ["*/tests/*", "*/__pycache__/*"]
+omit = ["*/tests/*", "*/__pycache__/*", "llm_agent/cli/*"]
 
 [tool.coverage.report]
 exclude_lines = [

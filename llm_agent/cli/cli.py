@@ -21,6 +21,7 @@ from .tools import (
     ServeTool,
     StartTool,
     StopTool,
+    TrainTool,
 )
 
 
@@ -37,6 +38,7 @@ def main() -> int:
         .with_tool(AskTool())
         .with_tool(FeedbackTool())
         .with_tool(RateTool())
+        .with_tool(TrainTool())
         .with_tool(AgentTool())
         .done()
         .build()
