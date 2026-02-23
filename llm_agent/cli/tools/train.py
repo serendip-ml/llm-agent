@@ -361,8 +361,8 @@ class TrainTool(Tool):
         print("\nSample:")
         for i, ex in enumerate(examples[:3], 1):
             output = ex.get("output", "")[:60]
-            ellipsis = "..." if len(ex.get("output", "")) > 60 else ""
-            print(f"  {i}. {output}{ellipsis}")
+            suffix = "..." if len(ex.get("output", "")) > 60 else ""
+            print(f"  {i}. {output}{suffix}")
         if len(examples) > 3:
             print(f"  ... and {len(examples) - 3} more")
 
