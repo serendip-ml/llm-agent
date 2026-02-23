@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from appinfra import DotDict
 from appinfra.app.tools import Tool, ToolConfig
 from appinfra.db.pg import PG
 from llm_learn.training import Factory as TrainFactory
-
-
-if TYPE_CHECKING:
-    pass
 
 
 class AdapterNotFoundError(Exception):
