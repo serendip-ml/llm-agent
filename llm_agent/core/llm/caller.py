@@ -93,7 +93,7 @@ class LLMCaller:
         max_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
         backend: str | None = None,
-        adapter_id: str | None = None,
+        adapter: str | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> CallResult:
         """Call LLM with logging and optional dry-run.
@@ -105,13 +105,13 @@ class LLMCaller:
             max_tokens: Maximum tokens to generate.
             tools: Tool definitions in OpenAI format.
             backend: Specific backend to use.
-            adapter_id: LoRA adapter ID.
+            adapter: LoRA adapter.
             extra_body: Extra request body parameters.
 
         Returns:
             CallResult with response content and metadata.
         """
-        self._log_request(messages, model, backend, temperature, max_tokens, adapter_id, tools)
+        self._log_request(messages, model, backend, temperature, max_tokens, adapter, tools)
 
         if self._dry_run:
             return self._dry_run_result(model)
@@ -129,7 +129,7 @@ class LLMCaller:
             temperature=temperature,
             max_tokens=max_tokens,
             tools=tools,
-            adapter=adapter_id,
+            adapter=adapter,
             **kwargs,
         )
 
@@ -185,7 +185,7 @@ class LLMCaller:
         backend: str | None,
         temperature: float,
         max_tokens: int | None,
-        adapter_id: str | None,
+        adapter: str | None,
         tools: list[dict[str, Any]] | None,
     ) -> None:
         """Log full LLM request at trace level."""
@@ -196,7 +196,7 @@ class LLMCaller:
                 "model": model,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
-                "adapter_id": adapter_id,
+                "adapter": adapter,
                 "messages": messages,
                 "tools": [t.get("function", {}).get("name") for t in (tools or [])],
                 "dry_run": self._dry_run,

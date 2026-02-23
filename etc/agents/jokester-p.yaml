@@ -21,10 +21,12 @@ denylist:
 
 # Agent-specific LLM config (merged with global llm.yaml)
 llm:
-  default: local
+  default: vastai
   backends:
     local:
-      adapter_id: null
+      adapter: jokester-sft
+    vastai:
+      adapter: jokester-sft
     anthropic:
       model: "claude-haiku-4-5"
       #model: "claude-sonnet-4-20250514"

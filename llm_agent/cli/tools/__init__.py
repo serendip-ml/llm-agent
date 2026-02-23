@@ -8,6 +8,7 @@ from .rate import RateTool
 from .serve import ServeTool
 from .start import StartTool
 from .stop import StopTool
+from .train import TrainTool
 
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "ServeTool",
     "StartTool",
     "StopTool",
+    "TrainTool",
 ]
