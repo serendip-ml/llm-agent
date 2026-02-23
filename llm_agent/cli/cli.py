@@ -8,6 +8,8 @@ Provides commands to:
 - stop: Stop an agent
 - ask: Ask an agent a question
 - feedback: Provide feedback to an agent
+- rate: Rate agent responses
+- train: Create training manifests for agents
 """
 
 from appinfra.app import AppBuilder

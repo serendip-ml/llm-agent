@@ -21,7 +21,7 @@ backends:
     base_url: "http://localhost:18000/v1"
     model: auto
     max_tokens: 4096
-    # No API key needed for local
+    # No API key needed - proxied locally
 
   anthropic:
     enabled: true

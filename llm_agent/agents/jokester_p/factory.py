@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from appinfra import DotDict
 from appinfra.log import Logger
@@ -22,10 +21,6 @@ from .novelty import NoveltyChecker
 from .rating import BatchRater
 from .schema import ModelUsage, TrainingMetadata
 from .storage import Storage
-
-
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass

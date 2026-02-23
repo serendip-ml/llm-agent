@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -65,7 +66,11 @@ class TrainTool(Tool):
         if not hasattr(self.app, "config"):
             raise RuntimeError("App does not have config")
 
-        db_config = self.app.config.learn.db
+        learn_config = getattr(self.app.config, "learn", None)
+        if learn_config is None:
+            raise RuntimeError("Database configuration not found in learn.db")
+
+        db_config = getattr(learn_config, "db", None)
         if db_config is None:
             raise RuntimeError("Database configuration not found in learn.db")
 
@@ -265,13 +270,9 @@ class TrainTool(Tool):
             adapters_config = self.app.config.learn.get("adapters", {})
             lora_config = adapters_config.get("lora", {})
             if base_path := lora_config.get("base_path"):
-                import os
-
                 return os.path.expanduser(str(base_path))
         except (AttributeError, KeyError):
             pass
-
-        import os
 
         return os.environ.get("ADAPTER_REGISTRY_PATH", os.path.expanduser("~/.llm-learn/adapters"))
 

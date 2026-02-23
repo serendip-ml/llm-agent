@@ -94,8 +94,9 @@ class JokesterCLI(Tool):
             help=f"Name for the trained adapter (default: {default_adapter})",
         )
         p.add_argument(
-            "--model",
+            "--base-model",
             type=str,
+            dest="base_model",
             help="Base model for training (default: from llm-learn config)",
         )
         p.add_argument(
@@ -289,7 +290,7 @@ class JokesterCLI(Tool):
         sql = self._build_adapter_stats_sql(chars_join, model_join, chars_filter, model_filter)
         with self._pg.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-            return self._build_adapter_results(conn, context_key, rows, params, max_chars)
+            return self._build_adapter_results(conn, context_key, rows, params, max_chars, model)
 
     def _build_adapter_stats_sql(
         self, chars_join: str, model_join: str, chars_filter: str, model_filter: str
@@ -316,12 +317,15 @@ class JokesterCLI(Tool):
         rows: list[Any],
         params: dict[str, Any],
         max_chars: int | None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build result dicts with distribution for each adapter."""
         results = []
         for row in rows:
             md5, total, rated, avg_stars = row
-            dist = self._query_adapter_distribution(conn, context_key, md5, params, max_chars)
+            dist = self._query_adapter_distribution(
+                conn, context_key, md5, params, max_chars, model
+            )
             results.append(
                 {
                     "md5": md5,
@@ -340,10 +344,12 @@ class JokesterCLI(Tool):
         adapter_md5: str | None,
         base_params: dict[str, Any],
         max_chars: int | None = None,
+        model: str | None = None,
     ) -> dict[int, int]:
         """Query star distribution for a specific adapter md5."""
         params = dict(base_params)
         chars_join, chars_filter = self._build_chars_filter(max_chars, params)
+        model_join, model_filter = self._build_model_filter(model, params)
 
         if adapter_md5 is None:
             md5_filter = "AND t.adapter_info->>'md5' IS NULL"
@@ -356,9 +362,10 @@ class JokesterCLI(Tool):
             FROM atomic_facts af
             JOIN agent_jokester_training t ON t.fact_id = af.id
             {chars_join}
+            {model_join}
             JOIN atomic_feedback_details afd ON af.id = afd.fact_id
             WHERE af.context_key = :context_key AND af.type = 'solution'
-              {chars_filter} {md5_filter}
+              {chars_filter} {model_filter} {md5_filter}
             GROUP BY (afd.context->>'stars')::int
         """)
         rows = conn.execute(sql, params).fetchall()
@@ -896,8 +903,8 @@ class JokesterCLI(Tool):
     def _confirm_replace_manifest(self, adapter_name: str) -> bool:
         """Ask user to confirm replacing an existing pending manifest."""
         print(f"\nFound existing pending manifest for adapter: {adapter_name}")
-        response = input("Replace it? [Y/n] ").strip().lower()
-        return response != "n"
+        response = input("Replace it? [y/N] ").strip().lower()
+        return response in ("y", "yes")
 
     def _print_train_summary(
         self,
