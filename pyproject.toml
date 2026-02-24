@@ -71,6 +71,7 @@ markers = [
     "e2e: marks tests as end-to-end tests (full system workflows)",
     "security: marks tests as security tests (injection, validation, XSS)",
     "performance: marks tests as performance tests (benchmarks, load tests)",
+    "expected_skip: marks tests expected to skip (e.g., missing external services)",
 ]
 
 [tool.mypy]
