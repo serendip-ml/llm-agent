@@ -11,7 +11,6 @@ from .models import (
     BatchConfig,
     Criteria,
     CriteriaConfig,
-    PairingConfig,
     ProviderConfig,
     ProviderType,
 )
@@ -212,34 +211,6 @@ class ConfigParser:
                     )
                 )
         return criteria
-
-    def parse_pairing(self, pairing_config: dict[str, Any] | None) -> PairingConfig:
-        """Parse preference pairing configuration.
-
-        Format:
-          pairing:
-            enabled: true
-            high_threshold: 4
-            low_threshold: 2
-            prompt: "Tell me a joke about {category}."
-
-        Args:
-            pairing_config: Pairing configuration dict (None = defaults).
-
-        Returns:
-            PairingConfig with parsed or default values.
-        """
-        if not pairing_config:
-            return PairingConfig()
-
-        config = self._ensure_dotdict(pairing_config)
-
-        return PairingConfig(
-            enabled=config.get("enabled", True),
-            high_threshold=int(config.get("high_threshold", 4)),
-            low_threshold=int(config.get("low_threshold", 2)),
-            prompt=str(config.get("prompt", "Generate content for this category.")),
-        )
 
     def parse_batch(self, batch_size: int | None = None) -> BatchConfig:
         """Parse batch configuration.

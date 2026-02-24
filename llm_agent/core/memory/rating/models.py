@@ -74,20 +74,6 @@ class CriteriaConfig:
 
 
 @dataclass
-class PairingConfig:
-    """Configuration for preference pairing (DPO training).
-
-    When a rating qualifies (4+ stars or 2- stars), the system looks for
-    an unpaired opposite in the same category and creates a preference pair.
-    """
-
-    enabled: bool = True
-    high_threshold: int = 4  # Minimum stars for "chosen" (4+)
-    low_threshold: int = 2  # Maximum stars for "rejected" (2-)
-    prompt: str = "Generate content for this category."  # Context prompt for preference
-
-
-@dataclass
 class BatchItem:
     """A single item in a batch rating request."""
 
