@@ -324,7 +324,9 @@ class TrainTool(Tool):
             description=description,
         )
 
-        path = factory.manifest.submit(manifest)
+        result = factory.manifest.submit(manifest)
+        location = getattr(result, "location", None)
+        path = Path(location) if location else None
         self._print_submit_result(manifest, method, len(data), path)
         return 0
 
@@ -373,11 +375,13 @@ class TrainTool(Tool):
         print(f"\n=== DPO Training: {provider.get_context_key()} ===")
         print(f"Pairs: {len(pairs)}")
 
-    def _print_submit_result(self, manifest: Any, method: str, count: int, path: Path) -> None:
+    def _print_submit_result(
+        self, manifest: Any, method: str, count: int, path: Path | None
+    ) -> None:
         """Print manifest submission result."""
         print(f"\n✓ Submitted {method.upper()} manifest")
         print(f"  Adapter:   {manifest.adapter}")
         model = manifest.training.get("requested_model") or "(from config)"
         print(f"  Model:     {model}")
         print(f"  Records:   {count}")
-        print(f"  Path:      {path}")
+        print(f"  Path:      {path or '(unknown)'}")

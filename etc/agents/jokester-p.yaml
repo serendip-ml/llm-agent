@@ -21,12 +21,12 @@ denylist:
 
 # Agent-specific LLM config (merged with global llm.yaml)
 llm:
-  default: vastai
+  default: local
   backends:
     local:
-      adapter: jokester-sft
+      adapter: jokester-p-sft
     vastai:
-      adapter: jokester-sft
+      adapter: jokester-p-sft
     anthropic:
       model: "claude-haiku-4-5"
       #model: "claude-sonnet-4-20250514"
@@ -109,14 +109,6 @@ rating:
             weight: 0.2
   batch_size: 5
   auto: true
-  # Preference pairing for DPO training
-  # Disabled - pairing done at training time via llm-learn CLI for optimal matching
-  pairing:
-    enabled: false
-    margin: 3  # 4★ vs 1★ ensures significant signal
-    # high_threshold: 4  # 4+ stars = "chosen"
-    # low_threshold: 2   # 2- stars = "rejected"
-    # prompt: "Tell me a {category}."  # Context prompt for preference pairs
 
 # No tools needed - programmatic agent uses LearnTrait/LLMTrait directly
 # No conversation config - not using conversation runner

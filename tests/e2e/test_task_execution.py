@@ -44,6 +44,7 @@ skip_no_saia = pytest.mark.skipif(
 )
 
 
+@pytest.mark.expected_skip
 @skip_no_saia
 class TestAgentExecutionE2E:
     """E2E tests for Agent with real LLM via SAIA."""
