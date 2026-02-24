@@ -54,7 +54,7 @@ class InlineRater:
         """
         try:
             results = self._rating.rate_fact_with_all_providers(
-                fact_id=fact_id, content=joke_text, fact_type="solution", category="joke"
+                fact_id=fact_id, content=joke_text, fact_type="solution"
             )
             for result in results:
                 self._log_rating(fact_id, result)
@@ -102,7 +102,6 @@ class BatchRater:
         rating_trait: RatingTrait,
         batch_size: int,
         fact_type: str = "solution",
-        category: str = "joke",
     ) -> None:
         """Initialize batch rater.
 
@@ -111,13 +110,11 @@ class BatchRater:
             rating_trait: RatingTrait for batch rating operations.
             batch_size: Number of items to queue before auto-flushing.
             fact_type: Type of facts (default: "solution").
-            category: Category for preference pairing (default: "joke").
         """
         self._lg = lg
         self._rating = rating_trait
         self._batch_size = batch_size
         self._fact_type = fact_type
-        self._category = category
         self._queue: list[tuple[int, str]] = []
 
     def queue(self, fact_id: int, content: str) -> None:
@@ -148,7 +145,7 @@ class BatchRater:
         self._queue.clear()
 
         try:
-            rated = self._rating.rate_items(items, self._fact_type, self._category)
+            rated = self._rating.rate_items(items, self._fact_type)
             self._log_batch_results(items, rated)
             return rated
         except Exception as e:

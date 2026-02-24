@@ -324,8 +324,8 @@ class TrainTool(Tool):
             description=description,
         )
 
-        path = factory.manifest.submit(manifest)
-        self._print_submit_result(manifest, method, len(data), path)
+        result = factory.manifest.submit(manifest)
+        self._print_submit_result(manifest, method, len(data), result.path)
         return 0
 
     def _confirm_replace(self, adapter_name: str) -> bool:
