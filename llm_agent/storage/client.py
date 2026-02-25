@@ -14,14 +14,14 @@ from .schema import AgentTable, validate_agent_table
 
 
 if TYPE_CHECKING:
-    from llm_learn import LearnClient
+    from llm_kelt import Client
 
 
 class AgentStorage:
     """
     Storage client for agent-defined relational data.
 
-    Wraps LearnClient to provide:
+    Wraps Client to provide:
     - Table registration with automatic isolation
     - Query helpers with automatic context_key filtering
     - Direct SQLAlchemy access for complex queries
@@ -71,12 +71,12 @@ class AgentStorage:
         results = agent.storage.execute(stmt).all()
     """
 
-    def __init__(self, lg: Logger, learn_client: LearnClient) -> None:
+    def __init__(self, lg: Logger, learn_client: Client) -> None:
         """Initialize agent storage.
 
         Args:
             lg: Logger instance.
-            learn_client: LearnClient instance (provides database + isolation context).
+            learn_client: Client instance (provides database + isolation context).
 
         Raises:
             ValueError: If learn_client's isolation context has no context_key.
@@ -89,7 +89,7 @@ class AgentStorage:
         if self._learn.context.context_key is None:
             raise ValueError(
                 "AgentStorage requires isolation context with context_key set. "
-                "Ensure LearnClient was created with valid ClientContext."
+                "Ensure Client was created with valid ClientContext."
             )
 
     @property

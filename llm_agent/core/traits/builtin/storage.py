@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 class StorageTrait(BaseTrait):
     """Provides AgentStorage for custom relational schemas.
 
-    Wraps LearnClient to provide direct SQLAlchemy access for agent tables
+    Wraps Client to provide direct SQLAlchemy access for agent tables
     with automatic isolation.
 
     **IMPORTANT:** StorageTrait depends on LearnTrait. LearnTrait must be attached
@@ -71,7 +71,7 @@ class StorageTrait(BaseTrait):
         results = storage.execute(stmt).all()
 
     Lifecycle:
-        - on_start(): Creates AgentStorage from LearnTrait's LearnClient
+        - on_start(): Creates AgentStorage from LearnTrait's Client
         - on_stop(): Cleanup (no-op, AgentStorage is stateless)
     """
 
@@ -85,7 +85,7 @@ class StorageTrait(BaseTrait):
         self._storage: AgentStorage | None = None
 
     def on_start(self) -> None:
-        """Create AgentStorage from LearnTrait's LearnClient.
+        """Create AgentStorage from LearnTrait's Client.
 
         Raises:
             TraitNotFoundError: If LearnTrait is not attached.
@@ -95,7 +95,7 @@ class StorageTrait(BaseTrait):
         # Require LearnTrait
         learn_trait = self.agent.require_trait(LearnTrait)
 
-        # Create storage wrapping LearnClient
+        # Create storage wrapping Client
         self._storage = AgentStorage(self.agent.lg, learn_trait.learn)
 
         self.agent.lg.debug("storage trait started")

@@ -14,21 +14,21 @@ preference pairs, and enables fine-tuning.
 ### Stack
 
 ```
-appinfra → llm-infer → llm-learn → llm-agent
+appinfra → llm-infer → llm-kelt → llm-agent
 ```
 
 | Layer | Responsibility |
 |-------|----------------|
 | `appinfra` | Logging, configuration, tracing |
 | `llm-infer` | LLM serving, adapter loading |
-| `llm-learn` | Facts, feedback, preferences, embeddings, training |
+| `llm-kelt` | Facts, feedback, preferences, embeddings, training |
 | `llm-agent` | Agent coordination, LLM completion, conversation management |
 
 ### Goals
 
-1. **Remember** - Store facts about the user (via `llm-learn`)
-2. **Recall** - Retrieve relevant facts when building context (via `llm-learn`)
-3. **Learn** - Collect feedback, generate preference pairs (via `llm-learn`)
+1. **Remember** - Store facts about the user (via `llm-kelt`)
+2. **Recall** - Retrieve relevant facts when building context (via `llm-kelt`)
+3. **Learn** - Collect feedback, generate preference pairs (via `llm-kelt`)
 4. **Improve** - Load fine-tuned adapters that reflect learned preferences
 
 ---
@@ -40,7 +40,7 @@ appinfra → llm-infer → llm-learn → llm-agent
 │                              Agent                                       │
 │                                                                          │
 │  ┌──────────────┐  ┌────────────────────────────────────────────────┐   │
-│  │  LLMBackend  │  │              LearnClient (llm-learn)           │   │
+│  │  LLMBackend  │  │              Client (llm-kelt)           │   │
 │  │              │  │                                                 │   │
 │  │  - complete  │  │  ┌──────────┐ ┌──────────┐ ┌───────────────┐   │   │
 │  │  - adapter   │  │  │  facts   │ │ feedback │ │  preferences  │   │   │
@@ -58,8 +58,8 @@ appinfra → llm-infer → llm-learn → llm-agent
 - `LLMBackend` - Protocol for LLM inference with adapter support
 - `HTTPBackend` - OpenAI-compatible HTTP implementation
 
-**What comes from `llm-learn`:**
-- `LearnClient` - Main entry point for learning data
+**What comes from `llm-kelt`:**
+- `Client` - Main entry point for learning data
 - `FactsClient` - Fact storage and retrieval
 - `FeedbackClient` - Feedback signal recording
 - `PreferencesClient` - Preference pair storage
@@ -76,8 +76,8 @@ appinfra → llm-infer → llm-learn → llm-agent
 The main entry point. Coordinates LLM backend with learning infrastructure.
 
 ```python
-from llm_learn import LearnClient
-from llm_learn.inference import ContextBuilder, Embedder, RAGArgs
+from llm_kelt import Client
+from llm_kelt.inference import ContextBuilder, Embedder, RAGArgs
 
 class Agent:
     """Learning agent that improves through feedback."""
@@ -86,7 +86,7 @@ class Agent:
         self,
         config: AgentConfig,
         llm: LLMBackend,
-        learn: LearnClient,
+        learn: Client,
         embedder: Embedder | None = None,
     ) -> None:
         """Initialize agent.
@@ -94,7 +94,7 @@ class Agent:
         Args:
             config: Agent configuration.
             llm: LLM backend for completions.
-            learn: Learning client from llm-learn.
+            learn: Learning client from llm-kelt.
             embedder: Embedder for RAG (optional, enables semantic search).
         """
         ...
@@ -119,7 +119,7 @@ class Agent:
         """
         ...
 
-    # === Memory (delegates to llm-learn) ===
+    # === Memory (delegates to llm-kelt) ===
 
     def remember(self, fact: str, category: str = "general") -> int:
         """Store a fact. Returns fact ID."""
@@ -133,7 +133,7 @@ class Agent:
         """Retrieve relevant facts for a query using RAG."""
         ...
 
-    # === Feedback (delegates to llm-learn) ===
+    # === Feedback (delegates to llm-kelt) ===
 
     def feedback(
         self,
@@ -267,13 +267,13 @@ class HTTPBackend(LLMBackend):
 
 ---
 
-### Components from llm-learn
+### Components from llm-kelt
 
-These are used by Agent but defined in `llm-learn`. See llm-learn documentation for details.
+These are used by Agent but defined in `llm-kelt`. See llm-kelt documentation for details.
 
 | Component | Purpose |
 |-----------|---------|
-| `LearnClient` | Main entry point, scoped to a profile |
+| `Client` | Main entry point, scoped to a profile |
 | `FactsClient` | Store and retrieve facts |
 | `FeedbackClient` | Record explicit feedback signals |
 | `PreferencesClient` | Store preference pairs for DPO |
@@ -288,8 +288,8 @@ These are used by Agent but defined in `llm-learn`. See llm-learn documentation 
 ## Usage Example
 
 ```python
-from llm_learn import LearnClient
-from llm_learn.inference import Embedder, RAGArgs
+from llm_kelt import Client
+from llm_kelt.inference import Embedder, RAGArgs
 
 from llm_agent import Agent, AgentConfig
 from llm_agent.llm import HTTPBackend
@@ -297,8 +297,8 @@ from llm_agent.llm import HTTPBackend
 # Create LLM backend (connects to llm-infer or OpenAI-compatible API)
 llm = HTTPBackend(base_url="http://localhost:8000/v1")
 
-# Create learning client (from llm-learn)
-learn = LearnClient(profile_id=1)
+# Create learning client (from llm-kelt)
+learn = Client(profile_id=1)
 learn.migrate()  # Ensure database tables exist
 
 # Optional: embedder for RAG
@@ -316,7 +316,7 @@ agent = Agent(
     embedder=embedder,
 )
 
-# Store facts (persisted via llm-learn)
+# Store facts (persisted via llm-kelt)
 agent.remember("User prefers concise responses", category="preferences")
 agent.remember("User is a Python expert", category="background")
 
@@ -360,10 +360,10 @@ agent.load_adapter("/models/adapters/my-adapter")
 - [x] `Message`, `CompletionResult` types
 - [x] Basic completion flow (no facts, no feedback)
 
-### Phase 2: llm-learn Integration (Done)
+### Phase 2: llm-kelt Integration (Done)
 
-- [x] Add `llm-learn` as dependency
-- [x] Update `Agent.__init__` to take `LearnClient`
+- [x] Add `llm-kelt` as dependency
+- [x] Update `Agent.__init__` to take `Client`
 - [x] Implement `remember()` / `forget()` delegating to `learn.facts`
 - [x] Implement `feedback()` delegating to `learn.feedback` / `learn.preferences`
 - [x] Wire `ContextBuilder` for fact injection in `complete()`
@@ -377,7 +377,7 @@ agent.load_adapter("/models/adapters/my-adapter")
 
 ### Phase 4: Training Integration
 
-- [ ] Implement `export_preferences()` using `llm-learn` exporters
+- [ ] Implement `export_preferences()` using `llm-kelt` exporters
 - [ ] Implement `training_stats()`
 - [ ] Add response tracking for feedback collection
 
@@ -393,9 +393,9 @@ agent.load_adapter("/models/adapters/my-adapter")
 
 | Question | Status | Notes |
 |----------|--------|-------|
-| Storage backend | Resolved | PostgreSQL via llm-learn |
+| Storage backend | Resolved | PostgreSQL via llm-kelt |
 | Embedding model | Resolved | Via llm-infer |
-| Fact deduplication | Resolved | Handled by llm-learn |
+| Fact deduplication | Resolved | Handled by llm-kelt |
 | Training orchestration | Open | In-agent vs external workflow |
 
 ---
@@ -404,7 +404,7 @@ agent.load_adapter("/models/adapters/my-adapter")
 
 | Criterion | How to verify |
 |-----------|---------------|
-| Facts persist | Restart agent, facts still there (via llm-learn DB) |
+| Facts persist | Restart agent, facts still there (via llm-kelt DB) |
 | Facts injected | Check system prompt includes facts |
 | Feedback tracked | Query `learn.feedback` shows recorded signals |
 | Preferences created | Negative feedback with correction creates pair |

@@ -10,7 +10,7 @@ from typing import Any, Literal, Protocol
 from appinfra import DotDict
 from appinfra.app.tools import Tool, ToolConfig
 from appinfra.db.pg import PG
-from llm_learn.training import Factory as TrainFactory
+from llm_kelt.training import Factory as TrainFactory
 
 
 class AdapterNotFoundError(Exception):
@@ -94,7 +94,7 @@ class TrainTool(Tool):
         parser.add_argument(
             "--model",
             type=str,
-            help="Base model for training (default: from llm-learn config)",
+            help="Base model for training (default: from llm-kelt config)",
         )
         parser.add_argument(
             "--adapter",
@@ -109,7 +109,7 @@ class TrainTool(Tool):
         parser.add_argument(
             "--registry-path",
             type=str,
-            help="Path to adapter registry (default: from config or ~/.llm-learn/adapters)",
+            help="Path to adapter registry (default: from config or ~/.llm-kelt/adapters)",
         )
         parser.add_argument(
             "--dry-run",
@@ -274,7 +274,7 @@ class TrainTool(Tool):
         except (AttributeError, KeyError):
             pass
 
-        return os.environ.get("ADAPTER_REGISTRY_PATH", os.path.expanduser("~/.llm-learn/adapters"))
+        return os.environ.get("ADAPTER_REGISTRY_PATH", os.path.expanduser("~/.llm-kelt/adapters"))
 
     def _get_default_profiles(self) -> DotDict | None:
         """Get default training profiles from config."""

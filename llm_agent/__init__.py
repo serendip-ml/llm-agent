@@ -1,7 +1,7 @@
 """Agent framework with learning capabilities."""
 
-from llm_learn.core.types import ScoredEntity
-from llm_learn.memory.atomic import Fact
+from llm_kelt.core.types import ScoredEntity
+from llm_kelt.memory.atomic import Fact
 
 from .core.agent import Agent, Config, Identity
 from .core.errors import AgentError, ConfigError

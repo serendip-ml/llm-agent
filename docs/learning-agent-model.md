@@ -11,7 +11,7 @@ The agent works like Claude Code solving a problem - but autonomously, without a
 3. **Task** - Problem or question to work through
 4. **Conversation** - Agent works through the problem across multiple LLM requests, maintaining context
 5. **Conclusion** - Agent determines if task is solved, unsolvable, or needs help
-6. **Learning** - Conclusions and feedback accumulate in llm-learn
+6. **Learning** - Conclusions and feedback accumulate in llm-kelt
 
 ## Key Insight: Failure is Training Data
 
@@ -38,7 +38,7 @@ it should become significantly better.
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                     llm-learn                               │
+│                     llm-kelt                               │
 │  - Facts about codebase                                     │
 │  - What worked / what didn't                                │
 │  - User corrections                                         │
@@ -68,17 +68,17 @@ it should become significantly better.
    - Even if conclusion is wrong, it should recognize "I'm done trying"
    - Possible states: WORKING, SOLVED, UNSOLVABLE, STUCK
 
-3. **Conclusion storage** - Save what agent concluded to llm-learn
+3. **Conclusion storage** - Save what agent concluded to llm-kelt
    - Store the conclusion with context
    - Tag with task type, confidence, etc.
 
-4. **Feedback integration** - User feedback flows to llm-learn
+4. **Feedback integration** - User feedback flows to llm-kelt
    - "That was wrong because X" → negative signal + correction
    - "Good insight" → positive signal
    - Creates preference pairs for future fine-tuning
 
 5. **Recall at session start** - Inject relevant past learnings into context
-   - Query llm-learn for relevant facts before starting
+   - Query llm-kelt for relevant facts before starting
    - Include in system prompt or early conversation
 
 ## Open Questions

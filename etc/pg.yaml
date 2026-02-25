@@ -1,9 +1,9 @@
 # PostgreSQL configuration for llm-agent
-# Connects to same database as llm-learn
+# Connects to same database as llm-kelt
 
 pgserver:
-  name: learn-pg               # Same server as llm-learn
-  port: 7632                   # Same port as llm-learn
+  name: learn-pg               # Same server as llm-kelt
+  port: 7632                   # Same port as llm-kelt
   user: postgres
   pass: ''
 

@@ -13,13 +13,13 @@ from .models import ProviderType, Result
 
 
 if TYPE_CHECKING:
-    from llm_learn.core import Database
+    from llm_kelt.core import Database
 
 
 class AtomicFactsBackend:
-    """Persistence backend for llm-learn atomic facts model.
+    """Persistence backend for llm-kelt atomic facts model.
 
-    Saves ratings to atomic_feedback_details table in the llm-learn schema.
+    Saves ratings to atomic_feedback_details table in the llm-kelt schema.
 
     Example:
         from llm_agent.core.memory.rating import AtomicFactsBackend
@@ -33,7 +33,7 @@ class AtomicFactsBackend:
 
         Args:
             lg: Logger instance.
-            database: llm-learn Database instance.
+            database: llm-kelt Database instance.
         """
         self._lg = lg
         self._db = database

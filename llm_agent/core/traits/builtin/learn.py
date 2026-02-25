@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING, Any, Literal
 from appinfra.db.pg import PG
 from llm_infer.client import ChatClient, ChatResponse
 from llm_infer.client import Factory as LLMClientFactory
-from llm_learn import LearnClient
-from llm_learn.core import Database
-from llm_learn.core.types import ScoredEntity
-from llm_learn.inference import ContextBuilder, Embedder
-from llm_learn.memory.atomic import Fact
+from llm_kelt import Client
+from llm_kelt.core import Database
+from llm_kelt.core.types import ScoredEntity
+from llm_kelt.inference import ContextBuilder, Embedder
+from llm_kelt.memory.atomic import Fact
 
 from ...llm.types import CompletionResult
 from ...runnable import ExecutionResult
@@ -44,7 +44,7 @@ Expected fields:
 class LearnTrait(BaseTrait):
     """Learn capability trait for memory, feedback, and learned completions.
 
-    Wraps llm_learn.LearnClient, ChatClient, and Embedder to provide
+    Wraps llm_kelt.Client, ChatClient, and Embedder to provide
     learning-enabled completions with memory and feedback.
 
     Capabilities:
@@ -74,7 +74,7 @@ class LearnTrait(BaseTrait):
         agent.get_trait(LearnTrait).remember("User prefers concise answers")
 
     Lifecycle:
-        - on_start(): Creates LearnClient, ChatClient, Embedder, ContextBuilder
+        - on_start(): Creates Client, ChatClient, Embedder, ContextBuilder
         - on_stop(): Closes ChatClient and Embedder
     """
 
@@ -88,7 +88,7 @@ class LearnTrait(BaseTrait):
         super().__init__(agent)
         self.config = config
         self._database: Database | None = None
-        self._learn: LearnClient | None = None
+        self._learn: Client | None = None
         self._embedder: Embedder | None = None
         self._context: ContextBuilder | None = None
         self._client: ChatClient | None = None
@@ -96,7 +96,7 @@ class LearnTrait(BaseTrait):
 
     def _create_learn_client(
         self, database: Database, embedder: Embedder | None, llm_client: ChatClient | None
-    ) -> LearnClient:
+    ) -> Client:
         """Create learn client from config using identity or legacy path.
 
         Args:
@@ -104,7 +104,7 @@ class LearnTrait(BaseTrait):
             embedder: Embedder instance (None if not configured).
             llm_client: LLM client instance (None if not configured).
         """
-        from llm_learn.memory.isolation import ClientContext
+        from llm_kelt.memory.isolation import ClientContext
 
         identity = self._resolve_identity()
 
@@ -117,7 +117,7 @@ class LearnTrait(BaseTrait):
 
         context = ClientContext(context_key=context_key, schema_name=schema_name)
 
-        return LearnClient(
+        return Client(
             lg=self.agent.lg,
             database=database,
             context=context,
@@ -142,12 +142,12 @@ class LearnTrait(BaseTrait):
         pg = PG(self.agent.lg, self.config.db)
         self._database = Database(self.agent.lg, pg)
 
-        # Create LLM client for completions (before LearnClient)
+        # Create LLM client for completions (before Client)
         llm_config: DotDict = self.config.get("llm") or DotDict()
         self._client = LLMClientFactory(self.agent.lg).from_config(llm_config)
         self._llm_defaults = _resolve_llm_defaults(llm_config)
 
-        # Create embedder if URL provided (before LearnClient)
+        # Create embedder if URL provided (before Client)
         if self.config.embedder_url:
             self._embedder = Embedder(
                 base_url=self.config.embedder_url,
@@ -174,7 +174,7 @@ class LearnTrait(BaseTrait):
         self._database = None
 
     @property
-    def learn(self) -> LearnClient:
+    def learn(self) -> Client:
         """Access the learn client.
 
         Raises:

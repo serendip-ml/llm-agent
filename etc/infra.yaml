@@ -1,4 +1,4 @@
-# PostgreSQL (shared with llm-learn)
+# PostgreSQL (shared with llm-kelt)
 pgserver: !include './pg.yaml#pgserver'
 dbs: !include './pg.yaml#dbs'
 
