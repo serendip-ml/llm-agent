@@ -45,9 +45,9 @@ dev = [
 llm-gent = "llm_gent.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/serendip-ml/llm-agent"
-Documentation = "https://github.com/serendip-ml/llm-agent#readme"
-Repository = "https://github.com/serendip-ml/llm-agent"
+Homepage = "https://github.com/serendip-ml/llm-gent"
+Documentation = "https://github.com/serendip-ml/llm-gent#readme"
+Repository = "https://github.com/serendip-ml/llm-gent"
 
 [tool.hatch.metadata]
 allow-direct-references = true
