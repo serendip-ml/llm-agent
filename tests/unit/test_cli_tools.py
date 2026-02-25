@@ -5,10 +5,10 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import httpx
 import pytest
 
-from llm_agent.cli.tools.ask import AskTool
-from llm_agent.cli.tools.feedback import FeedbackTool
-from llm_agent.cli.tools.start import StartTool
-from llm_agent.cli.tools.stop import StopTool
+from llm_gent.cli.tools.ask import AskTool
+from llm_gent.cli.tools.feedback import FeedbackTool
+from llm_gent.cli.tools.start import StartTool
+from llm_gent.cli.tools.stop import StopTool
 
 
 pytestmark = pytest.mark.unit

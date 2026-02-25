@@ -6,9 +6,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from llm_agent.runtime.server import create_app
-from llm_agent.runtime.server.management import create_management_routes
-from llm_agent.runtime.server.protocol.management import (
+from llm_gent.runtime.server import create_app
+from llm_gent.runtime.server.management import create_management_routes
+from llm_gent.runtime.server.protocol.management import (
     AskAgentResponse,
     FeedbackAgentResponse,
     GetAgentResponse,

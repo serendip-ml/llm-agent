@@ -1,4 +1,4 @@
-# PostgreSQL configuration for llm-agent
+# PostgreSQL configuration for llm-gent
 # Connects to same database as llm-kelt
 
 pgserver:

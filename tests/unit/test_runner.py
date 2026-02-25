@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from llm_agent.core.agent import ExecutionResult
-from llm_agent.runtime import AgentRunner
-from llm_agent.runtime.transport import Message, MessageType, Response
+from llm_gent.core.agent import ExecutionResult
+from llm_gent.runtime import AgentRunner
+from llm_gent.runtime.transport import Message, MessageType, Response
 
 
 pytestmark = pytest.mark.unit

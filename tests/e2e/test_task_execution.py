@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from llm_agent.agents.default import Factory
+from llm_gent.agents.default import Factory
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]

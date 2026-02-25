@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from appinfra import DotDict
 
-from llm_agent import CompletionResult, HTTPConfig, HTTPTrait
-from llm_agent.runtime.server.http import HTTPServer, HTTPServerConfig
-from llm_agent.runtime.server.protocol.v1 import (
+from llm_gent import CompletionResult, HTTPConfig, HTTPTrait
+from llm_gent.runtime.server.http import HTTPServer, HTTPServerConfig
+from llm_gent.runtime.server.protocol.v1 import (
     CompleteRequest,
     CompleteResponse,
     FeedbackRequest,
@@ -209,7 +209,7 @@ class TestHTTPTraitHandleRequest:
     @pytest.fixture
     def mock_llm_trait(self):
         """Create mock LLMTrait."""
-        from llm_agent.core.traits.builtin.llm import LLMTrait
+        from llm_gent.core.traits.builtin.llm import LLMTrait
 
         trait = create_mock_trait(
             LLMTrait,
@@ -226,7 +226,7 @@ class TestHTTPTraitHandleRequest:
     @pytest.fixture
     def mock_learn_trait(self):
         """Create mock LearnTrait."""
-        from llm_agent.core.traits.builtin.learn import LearnTrait
+        from llm_gent.core.traits.builtin.learn import LearnTrait
 
         trait = create_mock_trait(
             LearnTrait,
@@ -251,7 +251,7 @@ class TestHTTPTraitHandleRequest:
     @pytest.fixture
     def agent(self, mock_logger, mock_llm_trait, mock_learn_trait):
         """Create a test agent with mocked traits."""
-        from llm_agent.agents.default import Agent as DefaultAgent
+        from llm_gent.agents.default import Agent as DefaultAgent
 
         agent = DefaultAgent(
             lg=mock_logger, config=DotDict(identity={"name": "test"}, default_prompt="")
@@ -264,7 +264,7 @@ class TestHTTPTraitHandleRequest:
     @pytest.fixture
     def http_trait(self, agent):
         """Create HTTPTrait attached to agent."""
-        from llm_agent.agents.default.http import HTTPHandler
+        from llm_gent.agents.default.http import HTTPHandler
 
         handler = HTTPHandler(agent)
         trait = HTTPTrait(agent, handler=handler)
@@ -328,7 +328,7 @@ class TestHTTPTraitHandleRequest:
 
     def test_handle_unknown_message_type(self, http_trait):
         # Create a request with unknown message type
-        from llm_agent.runtime.server.protocol.base import Request
+        from llm_gent.runtime.server.protocol.base import Request
 
         class UnknownRequest(Request):
             message_type = "unknown_type"
@@ -378,7 +378,7 @@ class TestHTTPTraitHandleRequest:
 
         resp = http_trait.handle_request(req)
 
-        from llm_agent.runtime.server.protocol.v1 import RecallResponse
+        from llm_gent.runtime.server.protocol.v1 import RecallResponse
 
         assert isinstance(resp, RecallResponse)
         assert resp.success is False
@@ -386,10 +386,10 @@ class TestHTTPTraitHandleRequest:
 
     def test_handle_recall_request_success(self, mock_logger):
         """Verify successful recall returns facts serialized correctly."""
-        from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.core.traits.builtin.learn import LearnTrait
-        from llm_agent.core.traits.builtin.llm import LLMTrait
-        from llm_agent.runtime.server.protocol.v1 import RecallResponse
+        from llm_gent.agents.default import Agent as DefaultAgent
+        from llm_gent.core.traits.builtin.learn import LearnTrait
+        from llm_gent.core.traits.builtin.llm import LLMTrait
+        from llm_gent.runtime.server.protocol.v1 import RecallResponse
 
         # Setup mock scored facts
         mock_fact = MagicMock()
@@ -414,7 +414,7 @@ class TestHTTPTraitHandleRequest:
         agent._traits.register(mock_learn_trait)
 
         # Create HTTPTrait with handler
-        from llm_agent.agents.default.http import HTTPHandler
+        from llm_gent.agents.default.http import HTTPHandler
 
         handler = HTTPHandler(agent)
         http_trait = HTTPTrait(agent, handler=handler)
@@ -443,8 +443,8 @@ class TestHTTPTraitHandleRequest:
 
     def test_handle_complete_agent_without_complete(self, mock_logger):
         """Verify error when agent doesn't support complete() (missing LLMTrait)."""
-        from llm_agent.agents.default import Agent as DefaultAgent
-        from llm_agent.agents.default.http import HTTPHandler
+        from llm_gent.agents.default import Agent as DefaultAgent
+        from llm_gent.agents.default.http import HTTPHandler
 
         # Create agent without LLMTrait
         agent = DefaultAgent(
@@ -477,7 +477,7 @@ class TestHTTPTraitLifecycle:
         agent.lg = MagicMock()
         return agent
 
-    @patch("llm_agent.runtime.server.http.mp.Queue")
+    @patch("llm_gent.runtime.server.http.mp.Queue")
     @patch("appinfra.app.fastapi.ServerBuilder")
     def test_on_start_creates_server(self, mock_builder_cls, mock_queue, mock_logger, mock_agent):
         """Verify on_start creates server with correct configuration."""
@@ -512,7 +512,7 @@ class TestHTTPTraitLifecycle:
         mock_server.start_subprocess.assert_called_once()
         trait.on_stop()
 
-    @patch("llm_agent.runtime.server.http.mp.Queue")
+    @patch("llm_gent.runtime.server.http.mp.Queue")
     @patch("appinfra.app.fastapi.ServerBuilder")
     def test_on_stop_stops_server(self, mock_builder_cls, mock_queue, mock_logger, mock_agent):
         """Verify on_stop stops server and cleans up."""
@@ -559,7 +559,7 @@ class TestHTTPTraitIPCLoop:
         """Verify IPC loop sends error response when handler raises."""
         from queue import Queue
 
-        from llm_agent.runtime.server.protocol.v1 import HealthRequest
+        from llm_gent.runtime.server.protocol.v1 import HealthRequest
 
         # Create mock agent
         mock_agent = MagicMock()

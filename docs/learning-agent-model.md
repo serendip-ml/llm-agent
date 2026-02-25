@@ -57,7 +57,7 @@ it should become significantly better.
 
 ### Done
 
-1. **Conversation persistence** - `llm_agent/core/conversation/`
+1. **Conversation persistence** - `llm_gent/core/conversation/`
    - Maintains context across `run_once()` cycles
    - Token tracking and compaction when approaching limit
    - `SlidingWindowCompactor` (drops old) and `SummarizingCompactor` (LLM summary)

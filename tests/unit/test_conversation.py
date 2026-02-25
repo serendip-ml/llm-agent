@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from llm_agent.core.conv import (
+from llm_gent.core.conv import (
     Conversation,
     ConversationConfig,
     SlidingWindowCompactor,
@@ -10,7 +10,7 @@ from llm_agent.core.conv import (
     estimate_message_tokens,
     estimate_tokens,
 )
-from llm_agent.core.llm import Message
+from llm_gent.core.llm import Message
 
 
 class TestTokenEstimation:

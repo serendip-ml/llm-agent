@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from llm_agent.runtime import AgentHandle, AgentInfo, AgentRegistry, AgentState
+from llm_gent.runtime import AgentHandle, AgentInfo, AgentRegistry, AgentState
 
 
 pytestmark = pytest.mark.unit

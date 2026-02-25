@@ -5,15 +5,15 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel
 
-from llm_agent import (
+from llm_gent import (
     BaseTrait,
     Directive,
     DirectiveTrait,
     MethodTrait,
     StructuredOutputError,
 )
-from llm_agent.core.llm.types import Message
-from llm_agent.core.traits.builtin.llm import LLMTrait
+from llm_gent.core.llm.types import Message
+from llm_gent.core.traits.builtin.llm import LLMTrait
 
 
 pytestmark = pytest.mark.unit
@@ -169,7 +169,7 @@ class TestAgentTraits:
         """Create a test agent."""
         from appinfra import DotDict
 
-        from llm_agent.agents.default import Agent as DefaultAgent
+        from llm_gent.agents.default import Agent as DefaultAgent
 
         config = DotDict(identity={"name": "test"}, default_prompt="")
         return DefaultAgent(lg=mock_logger, config=config)
@@ -190,7 +190,7 @@ class TestAgentTraits:
         assert trait.agent == agent
 
     def test_add_duplicate_trait_raises(self, agent):
-        from llm_agent.core.errors import DuplicateTraitError
+        from llm_gent.core.errors import DuplicateTraitError
 
         identity = Directive(prompt="Test identity")
         agent.add_trait(DirectiveTrait(agent, identity))

@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "llm-agent"
+name = "llm-gent"
 version = "0.0.0"
 description = "Agent framework with learning capabilities"
 readme = "README.md"
@@ -42,7 +42,7 @@ dev = [
 ]
 
 [project.scripts]
-agent = "llm_agent.cli:main"
+llm-gent = "llm_gent.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/serendip-ml/llm-agent"
@@ -53,7 +53,7 @@ Repository = "https://github.com/serendip-ml/llm-agent"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["llm_agent"]
+packages = ["llm_gent"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -111,7 +111,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["llm_agent"]
+known-first-party = ["llm_gent"]
 force-single-line = false
 lines-after-imports = 2
 
@@ -119,9 +119,9 @@ lines-after-imports = 2
 "tests/*" = ["ARG001", "ARG002"]
 
 [tool.coverage.run]
-source = ["llm_agent"]
+source = ["llm_gent"]
 branch = true
-omit = ["*/tests/*", "*/__pycache__/*", "*/llm_agent/cli/*"]
+omit = ["*/tests/*", "*/__pycache__/*", "*/llm_gent/cli/*"]
 
 [tool.coverage.report]
 exclude_lines = [

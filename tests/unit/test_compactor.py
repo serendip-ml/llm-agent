@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from llm_agent.core.conv.compactor import SlidingWindowCompactor, SummarizingCompactor
-from llm_agent.core.llm import Message
+from llm_gent.core.conv.compactor import SlidingWindowCompactor, SummarizingCompactor
+from llm_gent.core.llm import Message
 
 
 pytestmark = pytest.mark.unit

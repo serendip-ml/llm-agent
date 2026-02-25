@@ -2,7 +2,7 @@
 
 import pytest
 
-from llm_agent.runtime import AgentState, InvalidTransitionError, can_transition, transition
+from llm_gent.runtime import AgentState, InvalidTransitionError, can_transition, transition
 
 
 pytestmark = pytest.mark.unit

@@ -1,8 +1,8 @@
-"""Standalone joke teller - using llm-agent without runtime.
+"""Standalone joke teller - using llm-gent without runtime.
 
-This example demonstrates how to use llm-agent agents in your own Python scripts
+This example demonstrates how to use llm-gent agents in your own Python scripts
 without the multi-agent runtime infrastructure. You only need:
-- llm_agent.core (platform resources)
+- llm_gent.core (platform resources)
 - The agent you want to use (jokester)
 
 No runtime, no HTTP server, no subprocess management - just agents.
@@ -12,8 +12,8 @@ from typing import Any
 
 from appinfra.log import LogConfig, Logger, LoggerFactory
 
-from llm_agent.agents.jokester_p import Factory
-from llm_agent.core import PlatformContext
+from llm_gent.agents.jokester_p import Factory
+from llm_gent.core import PlatformContext
 
 
 def _setup_logging() -> Logger:
