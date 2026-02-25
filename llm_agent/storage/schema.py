@@ -8,7 +8,7 @@ from __future__ import annotations
 import warnings
 from datetime import datetime
 
-from llm_learn.core.base import Base, utc_now
+from llm_kelt.core.base import Base, utc_now
 from sqlalchemy import BigInteger, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,7 +45,7 @@ class AgentTable(Base):
         autoincrement=True,
     )
 
-    # Isolation column (context_key from llm-learn ClientContext)
+    # Isolation column (context_key from llm-kelt ClientContext)
     # Supports hierarchical keys like "domain:workspace:name"
     context_key: Mapped[str] = mapped_column(
         String(255),

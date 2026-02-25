@@ -1388,7 +1388,7 @@ class TestRecallTool:
 
         mock_learn_trait = MagicMock()
         mock_learn_trait.has_embedder = False
-        mock_learn_trait.learn = mock_learn
+        mock_learn_trait.kelt = mock_learn
 
         tool = RecallTool(mock_learn_trait)
         result = tool.execute(query="editor")

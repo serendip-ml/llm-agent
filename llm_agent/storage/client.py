@@ -14,14 +14,14 @@ from .schema import AgentTable, validate_agent_table
 
 
 if TYPE_CHECKING:
-    from llm_learn import LearnClient
+    from llm_kelt import Client as KeltClient
 
 
 class AgentStorage:
     """
     Storage client for agent-defined relational data.
 
-    Wraps LearnClient to provide:
+    Wraps Client to provide:
     - Table registration with automatic isolation
     - Query helpers with automatic context_key filtering
     - Direct SQLAlchemy access for complex queries
@@ -71,25 +71,25 @@ class AgentStorage:
         results = agent.storage.execute(stmt).all()
     """
 
-    def __init__(self, lg: Logger, learn_client: LearnClient) -> None:
+    def __init__(self, lg: Logger, kelt_client: KeltClient) -> None:
         """Initialize agent storage.
 
         Args:
             lg: Logger instance.
-            learn_client: LearnClient instance (provides database + isolation context).
+            kelt_client: KeltClient instance (provides database + isolation context).
 
         Raises:
-            ValueError: If learn_client's isolation context has no context_key.
+            ValueError: If kelt_client's isolation context has no context_key.
         """
         self._lg = lg
-        self._learn = learn_client
+        self._kelt = kelt_client
         self._registered_tables: dict[str, type[AgentTable]] = {}
 
         # Validate that context_key is set (required for isolation)
-        if self._learn.context.context_key is None:
+        if self._kelt.context.context_key is None:
             raise ValueError(
                 "AgentStorage requires isolation context with context_key set. "
-                "Ensure LearnClient was created with valid ClientContext."
+                "Ensure Client was created with valid ClientContext."
             )
 
     @property
@@ -99,12 +99,12 @@ class AgentStorage:
         Returns:
             The context key for data isolation (guaranteed to be set).
         """
-        return self._learn.context.context_key  # type: ignore[return-value]
+        return self._kelt.context.context_key  # type: ignore[return-value]
 
     @property
     def schema_name(self) -> str | None:
         """Get schema name from isolation context."""
-        return self._learn.context.schema_name
+        return self._kelt.context.schema_name
 
     def register_table(self, model_class: type[AgentTable]) -> None:
         """Register an agent-defined table schema.
@@ -128,7 +128,7 @@ class AgentStorage:
         # TODO: Implement proper schema support via schema-qualified table names at query time.
 
         # Create table if it doesn't exist
-        engine = self._learn.database.engine
+        engine = self._kelt.database.engine
         model_class.__table__.create(engine, checkfirst=True)  # type: ignore[attr-defined]
 
         # Store registration
@@ -192,7 +192,7 @@ class AgentStorage:
                 )
             stmt = stmt.where(getattr(model_class, key) == value)
 
-        with self._learn.database.session() as session:
+        with self._kelt.database.session() as session:
             return list(session.execute(stmt).scalars().all())
 
     def insert(self, model_class: type[AgentTable], **values: Any) -> int:
@@ -224,7 +224,7 @@ class AgentStorage:
         # Add context_key automatically
         values["context_key"] = self.context_key
 
-        with self._learn.database.session() as session:
+        with self._kelt.database.session() as session:
             record = model_class(**values)
             session.add(record)
             session.flush()
@@ -257,7 +257,7 @@ class AgentStorage:
 
             results = agent.storage.execute(stmt)  # Returns list directly
         """
-        with self._learn.database.session() as session:
+        with self._kelt.database.session() as session:
             result = session.execute(stmt)
             return list(result.all())
 
@@ -288,7 +288,7 @@ class AgentStorage:
 
         from sqlalchemy import select
 
-        with self._learn.database.session() as session:
+        with self._kelt.database.session() as session:
             # Query with isolation (context_key required)
             stmt = select(model_class).where(
                 model_class.id == row_id, model_class.context_key == self.context_key
@@ -323,7 +323,7 @@ class AgentStorage:
 
         from sqlalchemy import select
 
-        with self._learn.database.session() as session:
+        with self._kelt.database.session() as session:
             # Query with isolation (context_key required)
             stmt = select(model_class).where(
                 model_class.id == row_id, model_class.context_key == self.context_key

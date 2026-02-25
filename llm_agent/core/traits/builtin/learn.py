@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING, Any, Literal
 from appinfra.db.pg import PG
 from llm_infer.client import ChatClient, ChatResponse
 from llm_infer.client import Factory as LLMClientFactory
-from llm_learn import LearnClient
-from llm_learn.core import Database
-from llm_learn.core.types import ScoredEntity
-from llm_learn.inference import ContextBuilder, Embedder
-from llm_learn.memory.atomic import Fact
+from llm_kelt import Client as KeltClient
+from llm_kelt.core import Database
+from llm_kelt.core.types import ScoredEntity
+from llm_kelt.inference import ContextBuilder, Embedder
+from llm_kelt.memory.atomic import Fact
+from llm_kelt.memory.isolation import ClientContext
 
 from ...llm.types import CompletionResult
 from ...runnable import ExecutionResult
@@ -44,7 +45,7 @@ Expected fields:
 class LearnTrait(BaseTrait):
     """Learn capability trait for memory, feedback, and learned completions.
 
-    Wraps llm_learn.LearnClient, ChatClient, and Embedder to provide
+    Wraps llm_kelt.Client, ChatClient, and Embedder to provide
     learning-enabled completions with memory and feedback.
 
     Capabilities:
@@ -74,7 +75,7 @@ class LearnTrait(BaseTrait):
         agent.get_trait(LearnTrait).remember("User prefers concise answers")
 
     Lifecycle:
-        - on_start(): Creates LearnClient, ChatClient, Embedder, ContextBuilder
+        - on_start(): Creates Client, ChatClient, Embedder, ContextBuilder
         - on_stop(): Closes ChatClient and Embedder
     """
 
@@ -88,24 +89,22 @@ class LearnTrait(BaseTrait):
         super().__init__(agent)
         self.config = config
         self._database: Database | None = None
-        self._learn: LearnClient | None = None
+        self._kelt: KeltClient | None = None
         self._embedder: Embedder | None = None
         self._context: ContextBuilder | None = None
         self._client: ChatClient | None = None
         self._llm_defaults: dict[str, Any] = {}
 
-    def _create_learn_client(
+    def _create_kelt_client(
         self, database: Database, embedder: Embedder | None, llm_client: ChatClient | None
-    ) -> LearnClient:
-        """Create learn client from config using identity or legacy path.
+    ) -> KeltClient:
+        """Create kelt client from config using identity.
 
         Args:
             database: Database instance.
             embedder: Embedder instance (None if not configured).
             llm_client: LLM client instance (None if not configured).
         """
-        from llm_learn.memory.isolation import ClientContext
-
         identity = self._resolve_identity()
 
         # Create ClientContext from identity
@@ -117,7 +116,7 @@ class LearnTrait(BaseTrait):
 
         context = ClientContext(context_key=context_key, schema_name=schema_name)
 
-        return LearnClient(
+        return KeltClient(
             lg=self.agent.lg,
             database=database,
             context=context,
@@ -142,12 +141,12 @@ class LearnTrait(BaseTrait):
         pg = PG(self.agent.lg, self.config.db)
         self._database = Database(self.agent.lg, pg)
 
-        # Create LLM client for completions (before LearnClient)
+        # Create LLM client for completions (before Client)
         llm_config: DotDict = self.config.get("llm") or DotDict()
         self._client = LLMClientFactory(self.agent.lg).from_config(llm_config)
         self._llm_defaults = _resolve_llm_defaults(llm_config)
 
-        # Create embedder if URL provided (before LearnClient)
+        # Create embedder if URL provided (before Client)
         if self.config.embedder_url:
             self._embedder = Embedder(
                 base_url=self.config.embedder_url,
@@ -157,9 +156,9 @@ class LearnTrait(BaseTrait):
         else:
             self._embedder = None
 
-        # Create learn client with embedder and llm_client already available
-        self._learn = self._create_learn_client(self._database, self._embedder, self._client)
-        self._context = ContextBuilder(self._learn.atomic.assertions)
+        # Create kelt client with embedder and llm_client already available
+        self._kelt = self._create_kelt_client(self._database, self._embedder, self._client)
+        self._context = ContextBuilder(self._kelt.atomic.assertions)
 
     def on_stop(self) -> None:
         """Close LLM client and embedder on agent stop."""
@@ -169,20 +168,20 @@ class LearnTrait(BaseTrait):
         if self._embedder is not None:
             self._embedder.close()
             self._embedder = None
-        self._learn = None
+        self._kelt = None
         self._context = None
         self._database = None
 
     @property
-    def learn(self) -> LearnClient:
-        """Access the learn client.
+    def kelt(self) -> KeltClient:
+        """Access the kelt client.
 
         Raises:
             RuntimeError: If trait not started.
         """
-        if self._learn is None:
+        if self._kelt is None:
             raise RuntimeError("LearnTrait not started - ensure agent.start() was called")
-        return self._learn
+        return self._kelt
 
     @property
     def embedder(self) -> Embedder | None:
@@ -321,14 +320,14 @@ class LearnTrait(BaseTrait):
         Returns:
             Fact ID.
         """
-        fact_id = self.learn.atomic.assertions.add(
+        fact_id = self.kelt.atomic.assertions.add(
             fact, category=category, source=source, confidence=confidence
         )
 
         # Embed for semantic search if embedder available
         if self._embedder is not None:
             embedding = self._embedder.embed(fact)
-            self.learn.atomic.embeddings.set_embedding(
+            self.kelt.atomic.embeddings.set_embedding(
                 fact_id=fact_id,
                 embedding=embedding.embedding,
                 model_name=self._embedder.model,
@@ -342,7 +341,7 @@ class LearnTrait(BaseTrait):
         Args:
             fact_id: ID of the fact to remove.
         """
-        self.learn.atomic.assertions.delete(fact_id)
+        self.kelt.atomic.assertions.delete(fact_id)
 
     def recall(
         self,
@@ -369,7 +368,7 @@ class LearnTrait(BaseTrait):
             raise ValueError("recall() requires embedder - configure embedder_url in LearnConfig")
 
         embedding = self._embedder.embed(query)
-        return self.learn.atomic.embeddings.search_similar(
+        return self.kelt.atomic.embeddings.search_similar(
             query=embedding.embedding,
             model_name=self._embedder.model,
             top_k=top_k,
@@ -460,7 +459,7 @@ class LearnTrait(BaseTrait):
         Returns:
             Feedback ID.
         """
-        return self.learn.atomic.feedback.record(
+        return self.kelt.atomic.feedback.record(
             signal=signal,
             comment=content,
             context=context,
@@ -482,7 +481,7 @@ class LearnTrait(BaseTrait):
         Returns:
             Preference ID.
         """
-        return self.learn.atomic.preferences.record(
+        return self.kelt.atomic.preferences.record(
             context=context,
             chosen=chosen,
             rejected=rejected,
@@ -507,7 +506,7 @@ class LearnTrait(BaseTrait):
             result: The execution result with outcome details.
             summary: Human-readable summary of the solution.
         """
-        self.learn.atomic.solutions.record(
+        self.kelt.atomic.solutions.record(
             agent_name=agent_name,
             problem=problem,
             problem_context={

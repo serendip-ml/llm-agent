@@ -63,7 +63,7 @@ class Storage:
         Returns:
             The fact_id of the saved joke.
         """
-        fact_id = self._learn.learn.atomic.solutions.record(
+        fact_id = self._learn.kelt.atomic.solutions.record(
             agent_name=self._agent_name,
             problem="Tell one short, original joke",
             problem_context={"style_preference": "varied"},

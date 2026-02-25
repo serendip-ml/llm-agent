@@ -8,7 +8,7 @@ from typing import Any, cast
 from appinfra import DotDict
 from appinfra.app.tools import Tool, ToolConfig
 from appinfra.db.pg import PG
-from llm_learn.core import Database
+from llm_kelt.core import Database
 
 from llm_agent.core.memory.rating import (
     AtomicFactsBackend,
