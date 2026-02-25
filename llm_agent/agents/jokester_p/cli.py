@@ -441,9 +441,9 @@ class JokesterCLI(Tool):
             print("No unrated jokes found.")
             return 0
 
-        print(f"\nUnrated jokes: {len(unrated)}")
+        print(f"\nUnrated jokes: ~{len(unrated)} (estimate)")
         print(f"Batch size: {batch_size}")
-        print(f"Estimated batches: {(len(unrated) + batch_size - 1) // batch_size}")
+        print(f"Estimated batches: ~{(len(unrated) + batch_size - 1) // batch_size}")
         print()
 
         total_rated = 0
@@ -453,7 +453,8 @@ class JokesterCLI(Tool):
             batch_count += 1
             for r in batch:
                 total_rated += 1
-                stars = "★" * r.score + "☆" * (5 - r.score)
+                clamped = max(0, min(5, r.score))
+                stars = "★" * clamped + "☆" * (5 - clamped)
                 joke = r.content[:90] + "..." if len(r.content) > 90 else r.content
                 print(f"{r.id}  ({r.score})  {stars}  {joke}")
 

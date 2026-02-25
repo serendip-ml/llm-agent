@@ -81,6 +81,18 @@ class StarFilter:
             ) from None
 
 
+def _validate_pairing_params(margin: int, min_pairs: int | None, max_pairs: int | None) -> None:
+    """Validate pairing parameters."""
+    if margin < 1:
+        raise ValueError(f"margin must be >= 1, got {margin}")
+    if min_pairs is not None and min_pairs < 0:
+        raise ValueError(f"min_pairs cannot be negative, got {min_pairs}")
+    if max_pairs is not None and max_pairs < 0:
+        raise ValueError(f"max_pairs cannot be negative, got {max_pairs}")
+    if min_pairs is not None and max_pairs is not None and min_pairs > max_pairs:
+        raise ValueError(f"min_pairs ({min_pairs}) cannot be greater than max_pairs ({max_pairs})")
+
+
 def pair_by_margin(
     rated_items: list[StarRatedItem],
     margin: int = 1,
@@ -106,7 +118,12 @@ def pair_by_margin(
 
     Returns:
         PairingResult with pairs and metadata.
+
+    Raises:
+        ValueError: If margin < 1 or min/max_pairs are invalid.
     """
+    _validate_pairing_params(margin, min_pairs, max_pairs)
+
     if not rated_items:
         return StarPairingResult(
             pairs=[], total_rated=0, strategy="margin", params={"margin": margin}

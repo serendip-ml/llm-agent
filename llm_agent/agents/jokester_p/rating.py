@@ -89,10 +89,10 @@ class BatchRater:
             return 0
 
         items = self._queue[:]
-        self._queue.clear()
 
         try:
             rated = self._rating.rate_items(items, self._fact_type)
+            self._queue.clear()
             self._log_batch_results(items, rated)
             return rated
         except Exception as e:
@@ -108,8 +108,9 @@ class BatchRater:
 
         for fact_id, content in items:
             stars = self._rating.get_fact_rating(fact_id)
-            if stars:
-                stars_visual = "★" * stars + "☆" * (5 - stars)
+            if stars is not None:
+                clamped = max(0, min(5, stars))
+                stars_visual = "★" * clamped + "☆" * (5 - clamped)
                 preview = content[:80] + "..." if len(content) > 80 else content
                 self._lg.info(
                     f"rated: {stars_visual}",

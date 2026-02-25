@@ -62,7 +62,8 @@ class BatchRatingService:
 
     def get_unrated(self, limit: int | None = None) -> list[UnratedItem]:
         """Get unrated facts from the database."""
-        sql = text("""
+        limit_clause = "LIMIT :limit" if limit is not None else ""
+        sql = text(f"""
             SELECT af.id, af.content
             FROM atomic_facts af
             LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
@@ -70,13 +71,14 @@ class BatchRatingService:
               AND af.type = :fact_type
               AND afd.id IS NULL
             ORDER BY af.created_at ASC
-            LIMIT :limit
+            {limit_clause}
         """)
-        params = {
+        params: dict[str, object] = {
             "context_key": self._context_key,
             "fact_type": self._fact_type,
-            "limit": limit or 10000,
         }
+        if limit is not None:
+            params["limit"] = limit
         with self._pg.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [UnratedItem(id=r[0], content=r[1]) for r in rows]
@@ -97,7 +99,9 @@ class BatchRatingService:
         if not items:
             return
 
-        size = batch_size or self._batch_size
+        size = batch_size if batch_size is not None else self._batch_size
+        if size <= 0:
+            raise ValueError(f"batch_size must be > 0, got {size}")
 
         for i in range(0, len(items), size):
             batch = items[i : i + size]

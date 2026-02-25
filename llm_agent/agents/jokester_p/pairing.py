@@ -57,7 +57,9 @@ class PairingService:
         """)
         with self._pg.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-        return [StarRatedItem(id=r[0], content=r[1], score=r[2]) for r in rows]
+        rated = [StarRatedItem(id=r[0], content=r[1], score=r[2]) for r in rows]
+        rated.sort(key=lambda item: (-item.score, item.id))
+        return rated
 
     def _build_rated_jokes_filters(
         self, max_chars: int | None, model: str | None
