@@ -120,6 +120,7 @@ class PairingService:
         Returns:
             PairingResult with pairs and metadata.
         """
+        self._validate_strategy(strategy)
         self._lg.debug(
             "fetching rated jokes...",
             extra={"max_chars": max_chars, "model": model},
@@ -128,7 +129,6 @@ class PairingService:
         self._lg.debug("fetched rated jokes", extra={"count": len(rated)})
 
         self._lg.debug("creating pairs...", extra={"strategy": strategy, "margin": margin})
-        self._validate_strategy(strategy)
 
         if strategy == "relative":
             result = pair_by_margin(
