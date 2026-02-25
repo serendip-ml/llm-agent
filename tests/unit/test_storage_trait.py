@@ -27,9 +27,9 @@ class TestStorageTrait:
 
     @pytest.fixture
     def mock_learn_trait(self):
-        """Create a mock LearnTrait with learn client."""
+        """Create a mock LearnTrait with kelt client."""
         learn_trait = MagicMock()
-        learn_trait.learn = MagicMock()
+        learn_trait.kelt = MagicMock()
         return learn_trait
 
     def test_init(self, mock_agent):
@@ -64,8 +64,8 @@ class TestStorageTrait:
 
         mock_agent.require_trait.assert_called_once_with(LearnTrait)
 
-        # Verify AgentStorage was created with logger and learn client
-        mock_agent_storage_class.assert_called_once_with(mock_agent.lg, mock_learn_trait.learn)
+        # Verify AgentStorage was created with logger and kelt client
+        mock_agent_storage_class.assert_called_once_with(mock_agent.lg, mock_learn_trait.kelt)
 
         # Verify storage was set
         assert trait._storage == mock_storage_instance

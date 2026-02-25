@@ -24,7 +24,7 @@ def recall_chronological(learn_trait: Any, agent_name: str, limit: int = 5) -> l
         List of solution facts, ordered by most recent first.
     """
     try:
-        solutions = learn_trait.learn.atomic.solutions.list_by_agent(
+        solutions = learn_trait.kelt.atomic.solutions.list_by_agent(
             agent_name=agent_name,
             limit=limit,
             active_only=True,
@@ -58,7 +58,7 @@ def recall_semantic(
     """
     try:
         # Search uses substring matching on problem text
-        solutions = learn_trait.learn.atomic.solutions.search(
+        solutions = learn_trait.kelt.atomic.solutions.search(
             query=query,
             limit=limit,
             active_only=True,

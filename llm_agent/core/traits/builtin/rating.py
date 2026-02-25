@@ -151,7 +151,7 @@ class RatingTrait(BaseTrait):
         # Initialize rating service and backend with LLMCaller wrapper
         caller = LLMCaller(self.agent.lg, llm_trait.router)
         self._service = RatingService(self.agent.lg, caller)
-        self._backend = AtomicFactsBackend(self.agent.lg, learn_trait.learn.database)
+        self._backend = AtomicFactsBackend(self.agent.lg, learn_trait.kelt.database)
 
         self._parse_config()
         self._log_started()
@@ -208,7 +208,7 @@ class RatingTrait(BaseTrait):
             raise RuntimeError("Rating backend not initialized - call on_start() first")
 
         learn_trait = self.agent.require_trait(LearnTrait)
-        context_key = str(learn_trait.learn.context.context_key)
+        context_key = str(learn_trait.kelt.context.context_key)
 
         return self._backend.get_unrated_count(context_key, fact_type, category)
 
@@ -237,7 +237,7 @@ class RatingTrait(BaseTrait):
 
         provider = self._select_provider(provider_index)
         learn_trait = self.agent.require_trait(LearnTrait)
-        context_key = str(learn_trait.learn.context.context_key)
+        context_key = str(learn_trait.kelt.context.context_key)
 
         results = []
         for fact in self._backend.unrated_facts(context_key, fact_type, category, limit):
@@ -295,7 +295,7 @@ class RatingTrait(BaseTrait):
 
         backend_type = provider.backend.get("type", "unknown")
         return _BatchContext(
-            context_key=str(learn_trait.learn.context.context_key),
+            context_key=str(learn_trait.kelt.context.context_key),
             prompt=type_criteria.prompt,
             criteria=type_criteria.criteria,
             model=provider.model,
