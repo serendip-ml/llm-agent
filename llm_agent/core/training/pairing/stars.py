@@ -44,7 +44,7 @@ class StarFilter:
             return stars > self.value
         elif self.op == "<":
             return stars < self.value
-        return False
+        raise ValueError(f"Unsupported operator for StarFilter: {self.op!r}")
 
     @classmethod
     def parse(cls, value: str | int | None) -> StarFilter | None:
@@ -129,8 +129,7 @@ def pair_by_margin(
             pairs=[], total_rated=0, strategy="margin", params={"margin": margin}
         )
 
-    sorted_items = sorted(rated_items, key=lambda x: (-x.score, x.id))
-    chosen_pool, rejected_pool = _build_pools(sorted_items, margin, chosen_filter, rejected_filter)
+    chosen_pool, rejected_pool = _build_pools(rated_items, margin, chosen_filter, rejected_filter)
 
     if not chosen_pool or not rejected_pool:
         return StarPairingResult(
@@ -182,6 +181,8 @@ def pair_by_threshold(
             f"high_threshold ({high_threshold}) must be greater than "
             f"low_threshold ({low_threshold})"
         )
+    if max_pairs is not None and max_pairs < 0:
+        raise ValueError(f"max_pairs cannot be negative, got {max_pairs}")
 
     params = {"high_threshold": high_threshold, "low_threshold": low_threshold}
 

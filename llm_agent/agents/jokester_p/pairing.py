@@ -81,6 +81,13 @@ class PairingService:
 
         return "\n            ".join(joins), " ".join(filters), params
 
+    def _validate_strategy(self, strategy: str) -> None:
+        """Validate pairing strategy."""
+        if strategy not in ("relative", "threshold"):
+            raise ValueError(
+                f"Unknown pairing strategy: {strategy!r}. Expected 'relative' or 'threshold'."
+            )
+
     def create_pairs(
         self,
         strategy: str = "relative",
@@ -121,6 +128,8 @@ class PairingService:
         self._lg.debug("fetched rated jokes", extra={"count": len(rated)})
 
         self._lg.debug("creating pairs...", extra={"strategy": strategy, "margin": margin})
+        self._validate_strategy(strategy)
+
         if strategy == "relative":
             result = pair_by_margin(
                 rated,

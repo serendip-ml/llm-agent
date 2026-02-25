@@ -114,7 +114,7 @@ class BatchRater:
                 preview = content[:80] + "..." if len(content) > 80 else content
                 self._lg.info(
                     f"rated: {stars_visual}",
-                    extra={"fact_id": fact_id, "stars": stars, "joke": preview},
+                    extra={"fact_id": fact_id, "stars": stars, "preview": preview},
                 )
 
     @property
