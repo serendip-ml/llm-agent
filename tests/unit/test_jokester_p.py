@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from llm_agent.agents.jokester_p.novelty import NoveltyCheck, NoveltyChecker
-from llm_agent.agents.jokester_p.pairing import PreferencePair, RatedJoke
+from llm_agent.core.training import StarPreferencePair, StarRatedItem
 
 
 pytestmark = pytest.mark.unit
@@ -105,25 +105,25 @@ class TestNoveltyChecker:
 class TestPreferencePair:
     """Tests for preference pairing types."""
 
-    def test_rated_joke(self):
-        """RatedJoke stores joke data."""
-        joke = RatedJoke(id=1, content="Funny joke", stars=4)
-        assert joke.id == 1
-        assert joke.content == "Funny joke"
-        assert joke.stars == 4
+    def test_rated_item(self):
+        """StarRatedItem stores item data."""
+        item = StarRatedItem(id=1, content="Funny joke", score=4)
+        assert item.id == 1
+        assert item.content == "Funny joke"
+        assert item.score == 4
 
     def test_preference_pair_margin(self):
-        """PreferencePair margin is star difference."""
-        chosen = RatedJoke(id=1, content="Great joke", stars=5)
-        rejected = RatedJoke(id=2, content="Bad joke", stars=1)
-        pair = PreferencePair(chosen=chosen, rejected=rejected)
+        """PreferencePair margin is score difference."""
+        chosen = StarRatedItem(id=1, content="Great joke", score=5)
+        rejected = StarRatedItem(id=2, content="Bad joke", score=1)
+        pair = StarPreferencePair(chosen=chosen, rejected=rejected)
 
-        assert pair.margin == 4
+        assert pair.chosen.score - pair.rejected.score == 4
 
     def test_preference_pair_zero_margin(self):
-        """PreferencePair with same stars has zero margin."""
-        chosen = RatedJoke(id=1, content="Joke A", stars=3)
-        rejected = RatedJoke(id=2, content="Joke B", stars=3)
-        pair = PreferencePair(chosen=chosen, rejected=rejected)
+        """PreferencePair with same score has zero margin."""
+        chosen = StarRatedItem(id=1, content="Joke A", score=3)
+        rejected = StarRatedItem(id=2, content="Joke B", score=3)
+        pair = StarPreferencePair(chosen=chosen, rejected=rejected)
 
-        assert pair.margin == 0
+        assert pair.chosen.score - pair.rejected.score == 0

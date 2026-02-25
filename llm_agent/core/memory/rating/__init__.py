@@ -1,6 +1,7 @@
 """Rating service and backends for LLM-based content evaluation."""
 
 from .backends import AtomicFactsBackend
+from .batch import BatchRatingService, UnratedItem
 from .config import ConfigParser
 from .models import (
     BatchConfig,
@@ -21,6 +22,7 @@ __all__ = [
     "BatchConfig",
     "BatchItem",
     "BatchRequest",
+    "BatchRatingService",
     "ConfigParser",
     "Criteria",
     "CriteriaConfig",
@@ -29,5 +31,6 @@ __all__ = [
     "Request",
     "Result",
     "Service",
+    "UnratedItem",
     "stars_to_signal",
 ]
