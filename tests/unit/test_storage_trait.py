@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from llm_agent.core.traits.builtin.storage import StorageTrait
+from llm_gent.core.traits.builtin.storage import StorageTrait
 
 
 pytestmark = pytest.mark.unit
@@ -46,7 +46,7 @@ class TestStorageTrait:
         with pytest.raises(RuntimeError, match="StorageTrait not started"):
             _ = trait.storage
 
-    @patch("llm_agent.core.traits.builtin.storage.AgentStorage")
+    @patch("llm_gent.core.traits.builtin.storage.AgentStorage")
     def test_on_start_creates_storage(self, mock_agent_storage_class, mock_agent, mock_learn_trait):
         """on_start creates AgentStorage from LearnTrait's client."""
         # Setup agent to return mocked LearnTrait
@@ -60,7 +60,7 @@ class TestStorageTrait:
         trait.on_start()
 
         # Verify LearnTrait was required
-        from llm_agent.core.traits.builtin.learn import LearnTrait
+        from llm_gent.core.traits.builtin.learn import LearnTrait
 
         mock_agent.require_trait.assert_called_once_with(LearnTrait)
 
@@ -73,7 +73,7 @@ class TestStorageTrait:
         # Verify debug log
         mock_agent.lg.debug.assert_called_with("storage trait started")
 
-    @patch("llm_agent.core.traits.builtin.storage.AgentStorage")
+    @patch("llm_gent.core.traits.builtin.storage.AgentStorage")
     def test_storage_property_returns_storage_after_start(
         self, mock_agent_storage_class, mock_agent, mock_learn_trait
     ):
@@ -90,7 +90,7 @@ class TestStorageTrait:
 
         assert storage == mock_storage_instance
 
-    @patch("llm_agent.core.traits.builtin.storage.AgentStorage")
+    @patch("llm_gent.core.traits.builtin.storage.AgentStorage")
     def test_on_stop_clears_storage(self, mock_agent_storage_class, mock_agent, mock_learn_trait):
         """on_stop clears storage reference."""
         mock_agent.require_trait.return_value = mock_learn_trait
@@ -113,7 +113,7 @@ class TestStorageTrait:
         assert mock_agent.lg.debug.call_count == 2
         mock_agent.lg.debug.assert_any_call("storage trait stopped")
 
-    @patch("llm_agent.core.traits.builtin.storage.AgentStorage")
+    @patch("llm_gent.core.traits.builtin.storage.AgentStorage")
     def test_storage_property_raises_after_stop(
         self, mock_agent_storage_class, mock_agent, mock_learn_trait
     ):
@@ -132,7 +132,7 @@ class TestStorageTrait:
 
     def test_on_start_requires_learn_trait(self, mock_agent):
         """on_start raises if LearnTrait is not attached."""
-        from llm_agent.core.errors import TraitNotFoundError
+        from llm_gent.core.errors import TraitNotFoundError
 
         # Make require_trait raise TraitNotFoundError
         mock_agent.require_trait.side_effect = TraitNotFoundError("LearnTrait not found")

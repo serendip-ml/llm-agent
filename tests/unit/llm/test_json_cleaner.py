@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import AliasChoices, BaseModel, Field, ValidationError
 
-from llm_agent.core.llm.json_cleaner import JSONCleaner
+from llm_gent.core.llm.json_cleaner import JSONCleaner
 
 
 class TestJSONCleanerBasic:

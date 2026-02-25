@@ -2,7 +2,7 @@
 type: programmatic
 
 # Module containing Factory class (required)
-module: llm_agent.agents.jokester_p
+module: llm_gent.agents.jokester_p
 factory: Factory
 
 # Learning profile - where this agent's memory is stored

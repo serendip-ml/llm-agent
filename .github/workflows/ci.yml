@@ -44,7 +44,7 @@ jobs:
         run: python -m ruff check .
 
       - name: Type check
-        run: python -m mypy llm_agent/ --ignore-missing-imports
+        run: python -m mypy llm_gent/ --ignore-missing-imports
 
   test:
     name: Test
@@ -102,7 +102,7 @@ jobs:
           python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@develop"
 
       - name: Run tests with coverage
-        run: python -m pytest tests/ --cov=llm_agent --cov-report=xml --cov-report=term
+        run: python -m pytest tests/ --cov=llm_gent --cov-report=xml --cov-report=term
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

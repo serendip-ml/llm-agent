@@ -7,8 +7,8 @@ This file tests configuration models that are still in use.
 
 import pytest
 
-from llm_agent.core.traits.builtin.directive import Directive
-from llm_agent.runtime.server.config import (
+from llm_gent.core.traits.builtin.directive import Directive
+from llm_gent.runtime.server.config import (
     AgentConfigYAML,
     AgentServerConfig,
     LearnBackendConfig,

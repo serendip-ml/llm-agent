@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from llm_agent.agents.jokester_p.novelty import NoveltyCheck, NoveltyChecker
-from llm_agent.core.training import StarPreferencePair, StarRatedItem
+from llm_gent.agents.jokester_p.novelty import NoveltyCheck, NoveltyChecker
+from llm_gent.core.training import StarPreferencePair, StarRatedItem
 
 
 pytestmark = pytest.mark.unit

@@ -9,8 +9,8 @@ import pytest
 from appinfra.log import LogConfig, LoggerFactory
 from pydantic import BaseModel
 
-from llm_agent.core.llm.types import Message
-from llm_agent.core.traits.builtin.llm import LLMTrait
+from llm_gent.core.llm.types import Message
+from llm_gent.core.traits.builtin.llm import LLMTrait
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]

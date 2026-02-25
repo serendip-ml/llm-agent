@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from llm_agent.core.llm import CompletionResult, HTTPBackend, LLMError, Message
+from llm_gent.core.llm import CompletionResult, HTTPBackend, LLMError, Message
 
 
 pytestmark = pytest.mark.unit
@@ -17,7 +17,7 @@ class TestHTTPBackend:
     @pytest.fixture(autouse=True)
     def mock_httpx_client(self):
         """Mock httpx.Client for all tests to avoid real connections."""
-        with patch("llm_agent.core.llm.backend.httpx.Client") as mock_class:
+        with patch("llm_gent.core.llm.backend.httpx.Client") as mock_class:
             self.mock_client = MagicMock()
             mock_class.return_value = self.mock_client
             yield mock_class

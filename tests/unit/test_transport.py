@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from llm_agent.runtime.transport import (
+from llm_gent.runtime.transport import (
     Channel,
     Message,
     QueueChannel,

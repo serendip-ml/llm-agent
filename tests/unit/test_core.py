@@ -4,9 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from llm_agent.core.traits.builtin.llm import LLMConfig
-from llm_agent.runtime import AgentRegistry, AgentState, Core
-from llm_agent.runtime.transport import MessageType, Response
+from llm_gent.core.traits.builtin.llm import LLMConfig
+from llm_gent.runtime import AgentRegistry, AgentState, Core
+from llm_gent.runtime.transport import MessageType, Response
 
 
 pytestmark = pytest.mark.unit
@@ -30,7 +30,7 @@ def registry(mock_logger):
 @pytest.fixture
 def core(mock_logger, registry, llm_config):
     """Create Core with mocked log listener."""
-    with patch("llm_agent.runtime.core.LogQueueListener"):
+    with patch("llm_gent.runtime.core.LogQueueListener"):
         core = Core(
             lg=mock_logger,
             registry=registry,
@@ -44,7 +44,7 @@ class TestCoreInit:
 
     def test_init_creates_log_queue(self, mock_logger, registry, llm_config):
         """Core creates log queue and listener on init."""
-        with patch("llm_agent.runtime.core.LogQueueListener") as mock_listener_class:
+        with patch("llm_gent.runtime.core.LogQueueListener") as mock_listener_class:
             Core(lg=mock_logger, registry=registry, llm_config=llm_config)
             mock_listener_class.assert_called_once()
             mock_listener_class.return_value.start.assert_called_once()
@@ -52,7 +52,7 @@ class TestCoreInit:
     def test_init_with_learn_config(self, mock_logger, registry, llm_config):
         """Core accepts optional LearnConfig."""
         mock_learn_config = MagicMock()
-        with patch("llm_agent.runtime.core.LogQueueListener"):
+        with patch("llm_gent.runtime.core.LogQueueListener"):
             core = Core(
                 lg=mock_logger,
                 registry=registry,
@@ -64,7 +64,7 @@ class TestCoreInit:
     def test_init_with_variables(self, mock_logger, registry, llm_config):
         """Core accepts optional variables dict."""
         variables = {"API_KEY": "test-key"}
-        with patch("llm_agent.runtime.core.LogQueueListener"):
+        with patch("llm_gent.runtime.core.LogQueueListener"):
             core = Core(
                 lg=mock_logger,
                 registry=registry,
@@ -370,7 +370,7 @@ class TestCoreTerminateProcess:
 
     def test_terminate_sends_shutdown_message(self, core, registry):
         """Terminate sends shutdown message to agent."""
-        from llm_agent.runtime import AgentHandle
+        from llm_gent.runtime import AgentHandle
 
         handle = AgentHandle(name="test", config={})
         mock_channel = MagicMock()
@@ -385,7 +385,7 @@ class TestCoreTerminateProcess:
 
     def test_terminate_handles_channel_error(self, core, registry):
         """Terminate handles channel send errors gracefully."""
-        from llm_agent.runtime import AgentHandle
+        from llm_gent.runtime import AgentHandle
 
         handle = AgentHandle(name="test", config={})
         mock_channel = MagicMock()
@@ -399,7 +399,7 @@ class TestCoreTerminateProcess:
 
     def test_terminate_kills_stubborn_process(self, core, registry):
         """Terminate kills process that won't stop."""
-        from llm_agent.runtime import AgentHandle
+        from llm_gent.runtime import AgentHandle
 
         handle = AgentHandle(name="test", config={})
         mock_channel = MagicMock()
@@ -416,7 +416,7 @@ class TestCoreTerminateProcess:
 
     def test_terminate_clears_handle(self, core, registry):
         """Terminate clears process and channel from handle."""
-        from llm_agent.runtime import AgentHandle
+        from llm_gent.runtime import AgentHandle
 
         handle = AgentHandle(name="test", config={})
         handle.channel = MagicMock()
@@ -434,7 +434,7 @@ class TestCoreCleanupFailedStart:
 
     def test_cleanup_with_channel_only(self, core, registry):
         """Cleanup handles case where only channel was created."""
-        from llm_agent.runtime import AgentHandle
+        from llm_gent.runtime import AgentHandle
 
         handle = AgentHandle(name="test", config={})
         mock_channel = MagicMock()
@@ -448,7 +448,7 @@ class TestCoreCleanupFailedStart:
 
     def test_cleanup_with_process_only(self, core, registry):
         """Cleanup handles case where only process was created."""
-        from llm_agent.runtime import AgentHandle
+        from llm_gent.runtime import AgentHandle
 
         handle = AgentHandle(name="test", config={})
         handle.channel = None
@@ -463,7 +463,7 @@ class TestCoreCleanupFailedStart:
 
     def test_cleanup_handles_channel_close_error(self, core, registry):
         """Cleanup suppresses channel close errors."""
-        from llm_agent.runtime import AgentHandle
+        from llm_gent.runtime import AgentHandle
 
         handle = AgentHandle(name="test", config={})
         mock_channel = MagicMock()
@@ -476,7 +476,7 @@ class TestCoreCleanupFailedStart:
 
     def test_cleanup_kills_stubborn_process(self, core, registry):
         """Cleanup kills process that won't terminate."""
-        from llm_agent.runtime import AgentHandle
+        from llm_gent.runtime import AgentHandle
 
         handle = AgentHandle(name="test", config={})
         mock_process = MagicMock()
@@ -495,7 +495,7 @@ class TestCoreBuildRunnerConfig:
 
     def test_build_runner_config(self, core, registry):
         """Build runner config adds name to config dict."""
-        from llm_agent.runtime import AgentHandle
+        from llm_gent.runtime import AgentHandle
 
         handle = AgentHandle(
             name="test-agent",

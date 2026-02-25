@@ -14,7 +14,7 @@ preference pairs, and enables fine-tuning.
 ### Stack
 
 ```
-appinfra → llm-infer → llm-kelt → llm-agent
+appinfra → llm-infer → llm-kelt → llm-gent
 ```
 
 | Layer | Responsibility |
@@ -22,7 +22,7 @@ appinfra → llm-infer → llm-kelt → llm-agent
 | `appinfra` | Logging, configuration, tracing |
 | `llm-infer` | LLM serving, adapter loading |
 | `llm-kelt` | Facts, feedback, preferences, embeddings, training |
-| `llm-agent` | Agent coordination, LLM completion, conversation management |
+| `llm-gent` | Agent coordination, LLM completion, conversation management |
 
 ### Goals
 
@@ -53,7 +53,7 @@ appinfra → llm-infer → llm-kelt → llm-agent
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**What `llm-agent` provides:**
+**What `llm-gent` provides:**
 - `Agent` - Coordinator that wires LLM and learning together
 - `LLMBackend` - Protocol for LLM inference with adapter support
 - `HTTPBackend` - OpenAI-compatible HTTP implementation
@@ -200,7 +200,7 @@ class AgentConfig(BaseModel):
 
 Interface for LLM inference. Supports adapter loading for personalization.
 
-**Note:** This is the primary contribution of `llm-agent` - a clean protocol for LLM backends
+**Note:** This is the primary contribution of `llm-gent` - a clean protocol for LLM backends
 that can work with `llm-infer` or any OpenAI-compatible API.
 
 ```python
@@ -291,8 +291,8 @@ These are used by Agent but defined in `llm-kelt`. See llm-kelt documentation fo
 from llm_kelt import Client
 from llm_kelt.inference import Embedder, RAGArgs
 
-from llm_agent import Agent, AgentConfig
-from llm_agent.llm import HTTPBackend
+from llm_gent import Agent, AgentConfig
+from llm_gent.llm import HTTPBackend
 
 # Create LLM backend (connects to llm-infer or OpenAI-compatible API)
 llm = HTTPBackend(base_url="http://localhost:8000/v1")

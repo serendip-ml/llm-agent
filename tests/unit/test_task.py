@@ -5,15 +5,15 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel
 
-from llm_agent import (
+from llm_gent import (
     ShellTool,
     Task,
     TaskResult,
     ToolCallResult,
     ToolResult,
 )
-from llm_agent.core.tools.base import BaseTool
-from llm_agent.core.traits.builtin.tools import ToolsTrait
+from llm_gent.core.tools.base import BaseTool
+from llm_gent.core.traits.builtin.tools import ToolsTrait
 
 
 pytestmark = pytest.mark.unit
