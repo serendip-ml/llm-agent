@@ -9,7 +9,7 @@ from appinfra.app.tools import Tool, ToolConfig
 from appinfra.db.pg import PG
 from sqlalchemy import text
 
-from .rating import RatingService
+from llm_agent.core.memory.rating import BatchRatingService
 
 
 if TYPE_CHECKING:
@@ -403,7 +403,7 @@ class JokesterCLI(Tool):
             return 1
 
         try:
-            service = RatingService(
+            service = BatchRatingService(
                 lg=self.lg,
                 pg=self._pg,
                 llm_caller=llm_caller,
@@ -434,16 +434,16 @@ class JokesterCLI(Tool):
 
         return (prompt_template, batch_size, provider, model)
 
-    def _run_rating(self, service: RatingService, batch_size: int) -> int:
+    def _run_rating(self, service: BatchRatingService, batch_size: int) -> int:
         """Execute rating and print results."""
-        unrated = service.get_unrated_jokes(self.args.limit)
+        unrated = service.get_unrated(self.args.limit)
         if not unrated:
             print("No unrated jokes found.")
             return 0
 
-        print(f"\nUnrated jokes: {len(unrated)}")
+        print(f"\nUnrated jokes: ~{len(unrated)} (estimate)")
         print(f"Batch size: {batch_size}")
-        print(f"Estimated batches: {(len(unrated) + batch_size - 1) // batch_size}")
+        print(f"Estimated batches: ~{(len(unrated) + batch_size - 1) // batch_size}")
         print()
 
         total_rated = 0
@@ -453,9 +453,10 @@ class JokesterCLI(Tool):
             batch_count += 1
             for r in batch:
                 total_rated += 1
-                stars = "★" * r.stars + "☆" * (5 - r.stars)
+                clamped = max(0, min(5, r.score))
+                stars = "★" * clamped + "☆" * (5 - clamped)
                 joke = r.content[:90] + "..." if len(r.content) > 90 else r.content
-                print(f"{r.id}  ({r.stars})  {stars}  {joke}")
+                print(f"{r.id}  ({r.score})  {stars}  {joke}")
 
         print(f"\n✓ Rated: {total_rated}")
         print(f"  Batches: {batch_count}")

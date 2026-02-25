@@ -97,10 +97,10 @@ class JokesterTrainingProvider:
 
         # Filter by minimum stars
         min_stars = getattr(args, "min_stars", 4)
-        filtered = [j for j in all_jokes if j.stars >= min_stars]
+        filtered = [j for j in all_jokes if j.score >= min_stars]
 
         # Sort by stars descending
-        filtered.sort(key=lambda j: j.stars, reverse=True)
+        filtered.sort(key=lambda j: j.score, reverse=True)
 
         # Apply max cap
         max_examples = getattr(args, "max_examples", None)
