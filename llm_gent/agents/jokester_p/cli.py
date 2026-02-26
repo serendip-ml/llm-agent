@@ -143,8 +143,9 @@ class JokesterCLI(Tool):
             dist = stats.get("distribution", {})
             total = stats["count"]
             stars_str = self._format_star_distribution(dist, total)
-            # Show short md5 (first 8 chars) or "base" for no adapter
-            label = stats["md5"][:8] if stats["md5"] else "base"
+            # Show short md5 (first 2 + last 4 chars) or "base" for no adapter
+            md5 = stats["md5"]
+            label = f"{md5[:2]}..{md5[-4:]}" if md5 else "base"
             print(f"{label:20s}  {stats['count']:5d} jokes  avg={avg}  {stars_str}")
         print()
 

@@ -1,5 +1,7 @@
 """Agent framework with learning capabilities."""
 
+from importlib.metadata import PackageNotFoundError, version
+
 from llm_kelt.core.types import ScoredEntity
 from llm_kelt.memory.atomic import Fact
 
@@ -50,7 +52,10 @@ from .core.traits import (
 from .core.traits.factory import Factory as TraitFactory
 
 
-__version__ = "0.0.0"
+try:
+    __version__ = version("llm-gent")
+except PackageNotFoundError:
+    __version__ = "0.0.0.dev0"
 
 __all__ = [
     # Agents
