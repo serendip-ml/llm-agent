@@ -1,0 +1,42 @@
+default: local  # Options: local, anthropic, openai
+
+rate_limit:
+  per_minute: 60
+  backoff:
+    base: 1.0
+    max: 60.0
+
+backends:
+  local:
+    enabled: true
+    type: openai_compatible
+    base_url: "http://localhost:8000/v1"
+    model: auto
+    max_tokens: 4096
+    # No API key needed for local
+
+  vastai:
+    enabled: true
+    type: openai_compatible
+    base_url: "http://localhost:18000/v1"
+    model: auto
+    max_tokens: 4096
+    # No API key needed - proxied locally
+
+  anthropic:
+    enabled: true
+    type: anthropic
+    model: "claude-haiku-4-5"
+    models:
+      - "claude-sonnet-4-20250514"
+      - "claude-haiku-4-5"
+    # API key via ANTHROPIC_API_KEY environment variable
+    rate_limit:
+      per_minute: 30
+
+  openai:
+    enabled: false
+    type: openai
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4o"
+    # API key via OPENAI_API_KEY environment variable

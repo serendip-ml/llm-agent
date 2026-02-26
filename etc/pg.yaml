@@ -1,0 +1,17 @@
+# PostgreSQL configuration for llm-gent
+# Connects to same database as llm-kelt
+
+pgserver:
+  name: learn-pg               # Same server as llm-kelt
+  port: 7632                   # Same port as llm-kelt
+  user: postgres
+  pass: ''
+
+dbs:
+  main:
+    url: "postgresql://${pgserver.user}:${pgserver.pass}@127.0.0.1:${pgserver.port}/learn"
+    create_db: true
+    readonly: false
+    pool_pre_ping: true
+    extensions:
+      - vector

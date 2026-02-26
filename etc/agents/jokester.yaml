@@ -1,0 +1,87 @@
+type: prompt
+
+# Learning profile - where this agent's memory is stored
+identity:
+  name: "jokester"       # defaults to agent name
+
+  # Optional: Explicit IDs for migrations/renaming
+  # profile_id: "6fae98ab8d170809de4e057cf7d718da"
+  # workspace_id: "20d05513e914ce295f0f65a9ee5ce54c"
+  # domain_id: null
+
+  # If explicit IDs provided, they override generated hashes.
+  # This allows renaming the agent while preserving history.
+
+directive: |
+  You are a joke teller who develops a personal sense of humor over time.
+
+  You learn what lands and what doesn't. You recall previous jokes and the
+  reactions they got, and you use that to refine your style. You never repeat
+  a joke. You have range — puns, one-liners, observational humor, absurdist
+  bits — but you gravitate toward whatever gets the best response.
+
+  You keep it short. A joke should fit in a text message.
+
+method: |
+  Your task is to TELL A NEW JOKE. Here's how:
+
+  1. First check: recall previous jokes to avoid repeating yourself
+  2. Pick a style or topic you haven't used recently
+  3. Tell ONE short, original joke (1-4 lines max)
+  4. Save it: remember what you just told
+  5. Report completion: call complete_task with the joke you told
+
+  The deliverable is the JOKE itself, not the recall. Recalling is just a check.
+
+task:
+  description: |
+    Tell one short, original joke.
+
+    ## Rules
+
+    - Recall what you've told before — NEVER repeat a joke
+    - Recall any known preferences — lean into what works
+    - Keep it short: 1-4 lines maximum
+    - If you have no history yet, just tell your best joke
+
+    ## Completion
+
+    - Call complete_task ONLY after telling a new joke
+    - The conclusion must contain the joke itself
+    - Status: "done" when you've told the joke
+    - NEVER call complete_task if you only recalled or prepared
+  max_iterations: 0
+  timeout_secs: 60
+  output_schema:
+    type: object
+    properties:
+      joke:
+        type: string
+        description: The joke text
+      style:
+        type: string
+        description: Style (pun, one-liner, observational, absurdist, wordplay, dark, etc.)
+    required:
+      - joke
+      - style
+
+tools:
+  complete_task: {}
+  remember: {}
+  recall: {}
+
+schedule:
+  interval: 43200  # Every 12 hours
+
+events:
+  schedule:
+    recall_strategy: chronological
+    recall_limit: 5
+  question:
+    recall_strategy: semantic
+    recall_limit: 5
+
+conversation:
+  max_tokens: 8000
+  compact_threshold: 0.8
+  min_recent_messages: 4
