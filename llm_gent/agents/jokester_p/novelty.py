@@ -8,6 +8,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from llm_kelt.memory.atomic import EmbeddingFilter, Fact
+from sqlalchemy import select
+
+from .schema import TrainingMetadata
+
 
 if TYPE_CHECKING:
     from appinfra.log import Logger
@@ -31,10 +36,19 @@ class NoveltyChecker:
     similarity scores against a threshold to determine novelty.
     Fails closed: if the check fails, the joke is rejected to
     maintain the "never repeat" guarantee.
+
+    Supports reference model isolation: when a reference model (e.g., Haiku) is
+    configured, novelty checking stays within the same "space" - reference model
+    jokes only compare against other reference model jokes, and local model jokes
+    only compare against other local model jokes.
     """
 
     def __init__(
-        self, lg: Logger, learn_trait: LearnTrait, similarity_threshold: float = 0.85
+        self,
+        lg: Logger,
+        learn_trait: LearnTrait,
+        similarity_threshold: float = 0.85,
+        reference_model: str | None = None,
     ) -> None:
         """Initialize novelty checker.
 
@@ -42,28 +56,36 @@ class NoveltyChecker:
             lg: Logger instance.
             learn_trait: Learn trait for RAG recall.
             similarity_threshold: Min similarity for duplicate (0.0-1.0).
+            reference_model: Model name pattern for reference models (e.g., "claude-haiku-4-5").
         """
         self._lg = lg
         self._learn = learn_trait
         self._threshold = similarity_threshold
+        self._reference_model = reference_model
 
     @property
     def has_embedder(self) -> bool:
         """Whether embedder is available for novelty checking."""
         return self._learn.has_embedder
 
-    def check(self, joke_text: str) -> NoveltyCheck:
+    def check(self, joke_text: str, current_model: str | None = None) -> NoveltyCheck:
         """Check if joke is novel using embedding similarity.
 
         Args:
             joke_text: The joke text to check.
+            current_model: The model generating this joke (for reference model filtering).
 
         Returns:
             NoveltyCheck with is_novel, similarity score, and closest match.
         """
-        self._lg.debug("checking joke novelty...", extra={"joke": joke_text})
+        self._lg.debug(
+            "checking joke novelty...", extra={"joke": joke_text, "model": current_model}
+        )
         try:
-            similar_facts = self._learn.recall(query=joke_text, top_k=1, categories=["joke"])
+            filter = self._build_filter(current_model)
+            similar_facts = self._learn.recall(
+                query=joke_text, top_k=1, categories=["joke"], filter=filter
+            )
 
             if not similar_facts:
                 self._lg.debug("joke is novel (no existing jokes)", extra={"joke": joke_text})
@@ -77,6 +99,33 @@ class NoveltyChecker:
                 extra={"exception": e, "joke": joke_text},
             )
             return NoveltyCheck(is_novel=False, max_similarity=1.0, similar_joke=None)
+
+    def _build_filter(self, current_model: str | None) -> EmbeddingFilter | None:
+        """Build embedding filter for reference model isolation.
+
+        If reference_model is configured and current_model is provided:
+        - If current model IS the reference model: only search reference model jokes
+        - If current model is NOT the reference model: exclude reference model jokes
+        """
+        if not self._reference_model or not current_model:
+            return None
+
+        is_reference = self._reference_model in current_model
+
+        if is_reference:
+            # Reference model: only compare against other reference model jokes
+            subquery = select(TrainingMetadata.fact_id).where(
+                TrainingMetadata.base_model.ilike(f"%{self._reference_model}%")
+            )
+            self._lg.debug("filtering to reference model jokes only")
+        else:
+            # Local model: exclude reference model jokes
+            subquery = select(TrainingMetadata.fact_id).where(
+                TrainingMetadata.base_model.not_ilike(f"%{self._reference_model}%")
+            )
+            self._lg.debug("filtering to exclude reference model jokes")
+
+        return EmbeddingFilter().where(Fact.id.in_(subquery))
 
     def _evaluate_similarity(self, closest: Any) -> NoveltyCheck:
         """Evaluate similarity of joke against closest match."""

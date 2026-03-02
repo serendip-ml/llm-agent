@@ -92,7 +92,16 @@ class Factory(BaseFactory):
         """Create JokeGenerator with novelty checker."""
         llm_trait = agent.require_trait(LLMTrait)
         directive_trait = agent.get_trait(DirectiveTrait)
-        novelty_checker = NoveltyChecker(lg, learn_trait, config.get("similarity_threshold", 0.85))
+
+        reference_config = config.get("reference", {})
+        reference_model = reference_config.get("model") if reference_config else None
+
+        novelty_checker = NoveltyChecker(
+            lg,
+            learn_trait,
+            similarity_threshold=config.get("similarity_threshold", 0.85),
+            reference_model=reference_model,
+        )
 
         return JokeGenerator(
             lg=lg,
