@@ -101,41 +101,42 @@ class NoveltyChecker:
             return NoveltyCheck(is_novel=False, max_similarity=1.0, similar_joke=None)
 
     def _build_filter(self, current_model: str | None) -> EmbeddingFilter | None:
-        """Build embedding filter for reference model isolation.
-
-        If reference_model is configured and current_model is provided:
-        - If current model IS the reference model: only search reference model jokes
-        - If current model is NOT the reference model: exclude reference model jokes
-          (but include jokes without metadata, as they're likely local model jokes
-          where metadata recording failed)
-        """
-        if not self._reference_model or not current_model:
+        """Build embedding filter for reference model isolation."""
+        if not self._reference_model:
+            return None
+        if not current_model:
+            # Reference model configured but current_model not provided - this shouldn't
+            # happen in normal usage since current_model comes from LLM response
+            self._lg.warning(
+                "reference model isolation configured but current_model not provided, "
+                "skipping filter"
+            )
             return None
 
         is_reference = self._reference_model in current_model
-
         if is_reference:
-            # Reference model: only compare against other reference model jokes
-            subquery = select(TrainingMetadata.fact_id).where(
-                TrainingMetadata.base_model.ilike(f"%{self._reference_model}%")
-            )
-            self._lg.debug("filtering to reference model jokes only")
-            return EmbeddingFilter().where(Fact.id.in_(subquery))
-        else:
-            # Local model: exclude reference model jokes, but include jokes without
-            # metadata (orphaned facts where metadata recording failed)
-            ref_model_facts = select(TrainingMetadata.fact_id).where(
-                TrainingMetadata.base_model.ilike(f"%{self._reference_model}%")
-            )
-            all_facts_with_metadata = select(TrainingMetadata.fact_id)
-            self._lg.debug("filtering to exclude reference model jokes")
-            # Include facts that: (1) have non-reference metadata, OR (2) have no metadata
-            return EmbeddingFilter().where(
-                or_(
-                    Fact.id.not_in(ref_model_facts),
-                    ~Fact.id.in_(all_facts_with_metadata),
-                )
-            )
+            return self._build_reference_model_filter()
+        return self._build_local_model_filter()
+
+    def _build_reference_model_filter(self) -> EmbeddingFilter:
+        """Build filter for reference model: only compare against reference model jokes."""
+        subquery = select(TrainingMetadata.fact_id).where(
+            TrainingMetadata.base_model.ilike(f"%{self._reference_model}%")
+        )
+        self._lg.debug("filtering to reference model jokes only")
+        return EmbeddingFilter().where(Fact.id.in_(subquery))
+
+    def _build_local_model_filter(self) -> EmbeddingFilter:
+        """Build filter for local model: exclude reference jokes, include orphaned facts."""
+        ref_model_facts = select(TrainingMetadata.fact_id).where(
+            TrainingMetadata.base_model.ilike(f"%{self._reference_model}%")
+        )
+        all_facts_with_metadata = select(TrainingMetadata.fact_id)
+        self._lg.debug("filtering to exclude reference model jokes")
+        # Include facts that: (1) have non-reference metadata, OR (2) have no metadata
+        return EmbeddingFilter().where(
+            or_(Fact.id.not_in(ref_model_facts), ~Fact.id.in_(all_facts_with_metadata))
+        )
 
     def _evaluate_similarity(self, closest: Any) -> NoveltyCheck:
         """Evaluate similarity of joke against closest match."""
