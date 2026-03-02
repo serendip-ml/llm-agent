@@ -170,10 +170,28 @@ class JokeGenerator:
         self, context: list[str], retry_feedback: str
     ) -> tuple[Joke | None, str, AdapterInfo | None]:
         """Generate joke via LLM with structured output."""
+        import appinfra.time
+        from llm_infer.client.exceptions import BackendRequestError, BackendTimeoutError
+
         from ...core.llm.types import Message
 
         prompt = self._build_prompt(context, retry_feedback)
-        result = self._llm.complete([Message(role="user", content=prompt)], output_schema=Joke)
+        self._lg.debug("sending LLM request...")
+        start_t = appinfra.time.start()
+        try:
+            result = self._llm.complete([Message(role="user", content=prompt)], output_schema=Joke)
+        except (BackendTimeoutError, BackendRequestError) as e:
+            prompt_preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
+            self._lg.error(
+                "LLM request failed",
+                extra={
+                    "after": appinfra.time.since(start_t),
+                    "prompt": prompt_preview,
+                    "error": str(e),
+                },
+            )
+            return None, "unknown", None
+        self._lg.debug("LLM request completed", extra={"after": appinfra.time.since(start_t)})
 
         if result.parsed is None:
             self._lg.warning("LLM failed to generate structured joke")

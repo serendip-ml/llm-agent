@@ -89,8 +89,15 @@ class JokesterCLI(Tool):
 
         max_chars = getattr(self.args, "max_chars", 130)
         model = getattr(self.args, "model", None)
-        stats = self._get_rating_stats(exclude_haiku=True, max_chars=max_chars, model=model)
-        dist = self._get_rating_distribution(exclude_haiku=True, max_chars=max_chars, model=model)
+        context_key = self._get_context_key()
+        current_model = self._get_latest_model(context_key)
+
+        # Summary stats filter by current model, adapter breakdown shows all
+        summary_model = model or current_model
+        stats = self._get_rating_stats(exclude_haiku=True, max_chars=max_chars, model=summary_model)
+        dist = self._get_rating_distribution(
+            exclude_haiku=True, max_chars=max_chars, model=summary_model
+        )
 
         self._print_stats_header(max_chars, model)
         self._print_rating_summary(stats, dist)
@@ -116,38 +123,54 @@ class JokesterCLI(Tool):
 
     def _print_rating_summary(self, stats: dict[str, Any], dist: list[dict[str, Any]]) -> None:
         """Print rating counts and distribution."""
-        print(f"Total jokes:  {stats['total']}")
-        print(f"Rated:        {stats['rated']}")
-        print(f"Unrated:      {stats['unrated']}")
         avg = f"{stats['avg_stars']:.2f}" if stats["avg_stars"] else "N/A"
-        print(f"Avg stars:    {avg}")
-        print()
-        print("Rating Distribution:")
-        for row in dist:
-            stars_visual = "★" * row["stars"] + "☆" * (5 - row["stars"])
-            print(f"  {stars_visual}  {row['count']:4d}  ({row['pct']:.1f}%)")
+        print(f"Total: {stats['total']}  Rated: {stats['rated']}  Unrated: {stats['unrated']}")
+        dist_dict = {row["stars"]: row["count"] for row in dist}
+        total = stats["rated"] or 1
+        stars_str = self._format_star_distribution(dist_dict, total)
+        print(f"Distribution:  avg={avg}  {stars_str}")
 
     def _print_stats_by_adapter(
         self, max_chars: int | None = None, model: str | None = None
     ) -> None:
-        """Print stats broken down by adapter md5."""
+        """Print stats broken down by adapter md5, grouped by base model in tree view."""
         adapter_stats = self._get_stats_by_adapter(max_chars=max_chars, model=model)
         if not adapter_stats:
             return
 
+        by_model = self._group_stats_by_model(adapter_stats)
+        if not by_model:
+            return
+
         print("\n=== By Adapter ===\n")
+        for model_name, adapters in by_model.items():
+            print(model_name)
+            for i, stats in enumerate(adapters):
+                self._print_adapter_line(stats, is_last=(i == len(adapters) - 1))
+        print()
+
+    def _group_stats_by_model(
+        self, adapter_stats: list[dict[str, Any]]
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Group adapter stats by model name, filtering out zero-count entries."""
+        by_model: dict[str, list[dict[str, Any]]] = {}
         for stats in adapter_stats:
             if stats["count"] == 0:
                 continue
-            avg = f"{stats['avg_stars']:.2f}" if stats["avg_stars"] else "N/A"
-            dist = stats.get("distribution", {})
-            total = stats["count"]
-            stars_str = self._format_star_distribution(dist, total)
-            # Show short md5 (first 2 + last 4 chars) or "base" for no adapter
-            md5 = stats["md5"]
-            label = f"{md5[:2]}..{md5[-4:]}" if md5 else "base"
-            print(f"{label:20s}  {stats['count']:5d} jokes  avg={avg}  {stars_str}")
-        print()
+            model_name = stats.get("model_name") or "unknown"
+            if model_name not in by_model:
+                by_model[model_name] = []
+            by_model[model_name].append(stats)
+        return by_model
+
+    def _print_adapter_line(self, stats: dict[str, Any], is_last: bool) -> None:
+        """Print a single adapter stats line in tree format."""
+        prefix = "└── " if is_last else "├── "
+        avg = f"{stats['avg_stars']:.2f}" if stats["avg_stars"] else "N/A"
+        stars_str = self._format_star_distribution(stats.get("distribution", {}), stats["count"])
+        md5 = stats["md5"]
+        adapter_label = f"{md5[:2]}..{md5[-4:]}" if md5 else "(no adapter)"
+        print(f"{prefix}{adapter_label:16s}  {stats['count']:5d} jokes  avg={avg}  {stars_str}")
 
     def _format_star_distribution(self, dist: dict[int, int], total: int) -> str:
         """Format star distribution as: 5★:0(0.0%)  4★:18(0.2%)  3★:504(6.3%)  ..."""
@@ -204,7 +227,7 @@ class JokesterCLI(Tool):
         sql = self._build_adapter_stats_sql(chars_join, model_join, chars_filter, model_filter)
         with self._pg.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-            return self._build_adapter_results(conn, context_key, rows, params, max_chars, model)
+            return self._build_adapter_results(conn, context_key, rows, params, max_chars)
 
     def _build_adapter_stats_sql(
         self, chars_join: str, model_join: str, chars_filter: str, model_filter: str
@@ -212,6 +235,7 @@ class JokesterCLI(Tool):
         """Build SQL for adapter stats aggregation."""
         return text(f"""
             SELECT t.adapter_info->>'md5' as adapter_md5,
+                   t.base_model as model_name,
                    COUNT(*) as total, COUNT(afd.id) as rated,
                    AVG((afd.context->>'stars')::int) as avg_stars
             FROM atomic_facts af
@@ -220,7 +244,7 @@ class JokesterCLI(Tool):
             LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
             WHERE af.context_key = :context_key AND af.type = 'solution'
               {chars_filter} {model_filter}
-            GROUP BY t.adapter_info->>'md5'
+            GROUP BY t.base_model, t.adapter_info->>'md5'
             ORDER BY MIN(af.id)
         """)
 
@@ -231,18 +255,18 @@ class JokesterCLI(Tool):
         rows: list[Any],
         params: dict[str, Any],
         max_chars: int | None,
-        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build result dicts with distribution for each adapter."""
         results = []
         for row in rows:
-            md5, total, rated, avg_stars = row
+            md5, model_name, total, rated, avg_stars = row
             dist = self._query_adapter_distribution(
-                conn, context_key, md5, params, max_chars, model
+                conn, context_key, md5, model_name, params, max_chars
             )
             results.append(
                 {
                     "md5": md5,
+                    "model_name": model_name,
                     "count": total,
                     "rated": rated,
                     "avg_stars": avg_stars,
@@ -256,14 +280,14 @@ class JokesterCLI(Tool):
         conn: Any,
         context_key: str,
         adapter_md5: str | None,
+        base_model: str,
         base_params: dict[str, Any],
         max_chars: int | None = None,
-        model: str | None = None,
     ) -> dict[int, int]:
-        """Query star distribution for a specific adapter md5."""
+        """Query star distribution for a specific adapter md5 and base model."""
         params = dict(base_params)
+        params["base_model"] = base_model
         chars_join, chars_filter = self._build_chars_filter(max_chars, params)
-        model_join, model_filter = self._build_model_filter(model, params)
 
         if adapter_md5 is None:
             md5_filter = "AND t.adapter_info->>'md5' IS NULL"
@@ -276,10 +300,10 @@ class JokesterCLI(Tool):
             FROM atomic_facts af
             JOIN agent_jokester_training t ON t.fact_id = af.id
             {chars_join}
-            {model_join}
             JOIN atomic_feedback_details afd ON af.id = afd.fact_id
             WHERE af.context_key = :context_key AND af.type = 'solution'
-              {chars_filter} {model_filter} {md5_filter}
+              AND t.base_model = :base_model
+              {chars_filter} {md5_filter}
             GROUP BY (afd.context->>'stars')::int
         """)
         rows = conn.execute(sql, params).fetchall()

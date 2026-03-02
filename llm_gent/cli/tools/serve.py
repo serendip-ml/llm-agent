@@ -197,7 +197,7 @@ class ServeTool(Tool):
         from llm_gent.runtime.server.management import create_management_routes
 
         server: Server = (
-            ServerBuilder("agent-gateway")
+            ServerBuilder(self.lg, "agent-gateway")
             .with_config(config.server)
             .subprocess.with_ipc(request_q, response_q)
             .done()
