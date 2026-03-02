@@ -92,7 +92,18 @@ class Factory(BaseFactory):
         """Create JokeGenerator with novelty checker."""
         llm_trait = agent.require_trait(LLMTrait)
         directive_trait = agent.get_trait(DirectiveTrait)
-        novelty_checker = NoveltyChecker(lg, learn_trait, config.get("similarity_threshold", 0.85))
+
+        reference_config = config.get("reference", {})
+        reference_model = cls._normalize_reference_model(
+            lg, reference_config.get("model") if reference_config else None
+        )
+
+        novelty_checker = NoveltyChecker(
+            lg,
+            learn_trait,
+            similarity_threshold=config.get("similarity_threshold", 0.85),
+            reference_model=reference_model,
+        )
 
         return JokeGenerator(
             lg=lg,
@@ -102,6 +113,28 @@ class Factory(BaseFactory):
             max_retries=config.get("max_retries", 3),
             denylist=config.get("denylist", []),
         )
+
+    @classmethod
+    def _normalize_reference_model(cls, lg: Logger, value: object) -> str | None:
+        """Normalize reference_model config value to string or None.
+
+        Args:
+            lg: Logger instance.
+            value: Raw config value (could be any type).
+
+        Returns:
+            String model name or None if invalid/missing.
+        """
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value if value.strip() else None
+        # Non-string value - coerce with warning
+        lg.warning(
+            "reference.model should be a string, coercing",
+            extra={"value": value, "type": type(value).__name__},
+        )
+        return str(value) if value else None
 
     @classmethod
     def _create_rater(cls, agent: JokesterAgent, lg: Logger, config: DotDict) -> BatchRater | None:

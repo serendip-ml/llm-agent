@@ -215,7 +215,7 @@ class JokeGenerator:
             self._recent_failed.append((joke.text, None))
             return None
 
-        novelty = self._novelty.check(joke.text)
+        novelty = self._novelty.check(joke.text, current_model=model_name)
         if not novelty.is_novel:
             self._recent_failed.append((joke.text, novelty.similar_joke))
             return None

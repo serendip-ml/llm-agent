@@ -12,6 +12,12 @@ identity:
 max_retries: 0
 similarity_threshold: 0.85
 
+# Reference model for seeding jokes. Novelty checking stays within the same space:
+#   - Reference model jokes only compared against other reference model jokes
+#   - Local model jokes only compared against other local model jokes
+reference:
+  model: "claude-haiku-4-5"
+
 denylist:
   - hipster
   - millennial
