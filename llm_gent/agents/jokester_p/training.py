@@ -22,10 +22,11 @@ class JokesterTrainingProvider:
         self._pg = pg
         self._context_key = context_key
 
-    def add_args(self, parser: argparse.ArgumentParser) -> None:
+    def add_args(self, parser: argparse.ArgumentParser, method: str = "sft") -> None:
         """Add jokester-specific training arguments."""
         self._add_common_args(parser)
-        self._add_dpo_args(parser)
+        if method == "dpo":
+            self._add_dpo_args(parser)
 
     def _add_common_args(self, parser: argparse.ArgumentParser) -> None:
         """Add common training arguments (SFT and DPO)."""

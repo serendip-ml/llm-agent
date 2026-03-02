@@ -24,7 +24,7 @@ class AdapterNotFoundError(Exception):
 class TrainingDataProvider(Protocol):
     """Protocol for agents to provide training data."""
 
-    def add_args(self, parser: argparse.ArgumentParser) -> None:
+    def add_args(self, parser: argparse.ArgumentParser, method: str = "sft") -> None:
         """Add agent-specific arguments to the parser."""
         ...
 
@@ -77,16 +77,18 @@ class TrainTool(Tool):
         self._pg = PG(self.lg, db_config)
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
+        # Top-level args (apply to all methods)
+        self._add_common_args(parser)
+        self._add_training_args(parser)
+
         subparsers = parser.add_subparsers(dest="method", help="Training method")
 
         # SFT subcommand
         sft_parser = subparsers.add_parser("sft", help="Supervised fine-tuning")
-        self._add_common_args(sft_parser)
         self._add_agent_subcommand(sft_parser)
 
         # DPO subcommand
         dpo_parser = subparsers.add_parser("dpo", help="Direct preference optimization")
-        self._add_common_args(dpo_parser)
         self._add_agent_subcommand(dpo_parser)
 
     def _add_common_args(self, parser: argparse.ArgumentParser) -> None:
@@ -116,6 +118,23 @@ class TrainTool(Tool):
             action="store_true",
             help="Show what would be created without saving",
         )
+
+    def _add_training_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add training hyperparameter arguments."""
+        self._add_lora_args(parser)
+        self._add_optimizer_args(parser)
+
+    def _add_lora_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add LoRA configuration arguments."""
+        parser.add_argument("--lora-r", type=int, help="LoRA rank (default: 16)")
+        parser.add_argument("--lora-alpha", type=int, help="LoRA alpha (default: 2x rank)")
+        parser.add_argument("--lora-dropout", type=float, help="LoRA dropout (default: 0.05)")
+
+    def _add_optimizer_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add optimizer/training arguments."""
+        parser.add_argument("--lr", type=float, dest="learning_rate", help="Learning rate")
+        parser.add_argument("--epochs", type=int, help="Number of training epochs")
+        parser.add_argument("--batch-size", type=int, help="Batch size")
 
     def _add_agent_subcommand(self, parser: argparse.ArgumentParser) -> None:
         """Add 'agent' subcommand that takes agent name and args."""
@@ -177,7 +196,7 @@ class TrainTool(Tool):
 
         # Parse agent-specific args and merge into self.args
         agent_parser = argparse.ArgumentParser(prog=f"train {method} agent {agent_name}")
-        provider.add_args(agent_parser)
+        provider.add_args(agent_parser, method=method)
         agent_args = agent_parser.parse_args(self.args.agent_args)
         for key, value in vars(agent_args).items():
             setattr(self.args, key, value)
@@ -256,10 +275,9 @@ class TrainTool(Tool):
         return self._submit_manifest(factory, provider, "dpo", pairs)
 
     def _get_training_factory(self) -> TrainFactory:
-        """Get training factory with default profiles."""
+        """Get training factory - llm-kelt handles defaults."""
         path = self._get_registry_path()
-        profiles = self._get_default_profiles()
-        return TrainFactory(self.lg, Path(path), profiles)
+        return TrainFactory(self.lg, Path(path))
 
     def _get_registry_path(self) -> str:
         """Get adapter registry path from args, config, or default."""
@@ -276,21 +294,34 @@ class TrainTool(Tool):
 
         return os.environ.get("ADAPTER_REGISTRY_PATH", os.path.expanduser("~/.llm-kelt/adapters"))
 
-    def _get_default_profiles(self) -> DotDict | None:
-        """Get default training profiles from config."""
-        try:
-            training_config = self.app.config.learn.get("training", {})
-            profiles = training_config.get("default_profiles")
-            return DotDict(profiles) if profiles else None
-        except (AttributeError, KeyError):
-            return None
-
     def _get_adapter_name(self, provider: TrainingDataProvider, method: str) -> str:
         """Get adapter name from args or generate default."""
         if self.args.adapter:
             return str(self.args.adapter)
         context_key = provider.get_context_key()
         return f"{context_key}-{method}"
+
+    def _get_lora_overrides(self) -> dict[str, Any] | None:
+        """Get LoRA config overrides from command line args."""
+        overrides: dict[str, Any] = {}
+        if getattr(self.args, "lora_r", None) is not None:
+            overrides["r"] = self.args.lora_r
+        if getattr(self.args, "lora_alpha", None) is not None:
+            overrides["lora_alpha"] = self.args.lora_alpha
+        if getattr(self.args, "lora_dropout", None) is not None:
+            overrides["lora_dropout"] = self.args.lora_dropout
+        return overrides if overrides else None
+
+    def _get_training_overrides(self) -> dict[str, Any] | None:
+        """Get training config overrides from command line args."""
+        overrides: dict[str, Any] = {}
+        if getattr(self.args, "learning_rate", None) is not None:
+            overrides["learning_rate"] = self.args.learning_rate
+        if getattr(self.args, "epochs", None) is not None:
+            overrides["num_epochs"] = self.args.epochs
+        if getattr(self.args, "batch_size", None) is not None:
+            overrides["batch_size"] = self.args.batch_size
+        return overrides if overrides else None
 
     def _submit_manifest(
         self,
@@ -301,34 +332,54 @@ class TrainTool(Tool):
     ) -> int:
         """Create and submit training manifest."""
         adapter_name = self._get_adapter_name(provider, method)
-        context_key = provider.get_context_key()
-        description = provider.get_description(method, len(data))
+        if not self._handle_existing_manifest(factory, adapter_name):
+            return 1
 
-        # Check for existing pending manifest
+        manifest = self._create_manifest(factory, provider, adapter_name, method, data)
+        result = factory.manifest.submit(manifest)
+        path = Path(result.location) if getattr(result, "location", None) else None
+        self._print_submit_result(manifest, method, len(data), path)
+        return 0
+
+    def _handle_existing_manifest(self, factory: TrainFactory, adapter_name: str) -> bool:
+        """Check for existing manifest and prompt for replacement. Returns False to abort."""
         existing = factory.manifest.get_pending(adapter_name)
         if existing:
             if not self._confirm_replace(adapter_name):
                 print("Aborted.")
-                return 1
+                return False
             factory.manifest.remove_pending(adapter_name)
+        return True
 
-        parent = self._resolve_parent_adapter(factory)
-
-        manifest = factory.manifest.create(
+    def _create_manifest(
+        self,
+        factory: TrainFactory,
+        provider: TrainingDataProvider,
+        adapter_name: str,
+        method: Literal["sft", "dpo"],
+        data: list[dict[str, Any]],
+    ) -> Any:
+        """Create training manifest with all overrides."""
+        config = self._build_config_overrides()
+        return factory.manifest.create(
             adapter=adapter_name,
             method=method,
             model=self.args.model,
-            parent=parent,
+            parent=self._resolve_parent_adapter(factory),
             data=data,
-            context_key=context_key,
-            description=description,
+            context_key=provider.get_context_key(),
+            description=provider.get_description(method, len(data)),
+            config=config,
         )
 
-        result = factory.manifest.submit(manifest)
-        location = getattr(result, "location", None)
-        path = Path(location) if location else None
-        self._print_submit_result(manifest, method, len(data), path)
-        return 0
+    def _build_config_overrides(self) -> dict[str, Any] | None:
+        """Build config overrides from lora and training args."""
+        config: dict[str, Any] = {}
+        if lora := self._get_lora_overrides():
+            config["lora"] = lora
+        if training := self._get_training_overrides():
+            config.update(training)  # Training args go at top level of config
+        return config if config else None
 
     def _confirm_replace(self, adapter_name: str) -> bool:
         """Confirm replacement of existing manifest."""
