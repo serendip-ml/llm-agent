@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from llm_kelt.memory.atomic import EmbeddingFilter, Fact
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from .schema import TrainingMetadata
 
@@ -106,6 +106,8 @@ class NoveltyChecker:
         If reference_model is configured and current_model is provided:
         - If current model IS the reference model: only search reference model jokes
         - If current model is NOT the reference model: exclude reference model jokes
+          (but include jokes without metadata, as they're likely local model jokes
+          where metadata recording failed)
         """
         if not self._reference_model or not current_model:
             return None
@@ -118,14 +120,22 @@ class NoveltyChecker:
                 TrainingMetadata.base_model.ilike(f"%{self._reference_model}%")
             )
             self._lg.debug("filtering to reference model jokes only")
+            return EmbeddingFilter().where(Fact.id.in_(subquery))
         else:
-            # Local model: exclude reference model jokes
-            subquery = select(TrainingMetadata.fact_id).where(
-                TrainingMetadata.base_model.not_ilike(f"%{self._reference_model}%")
+            # Local model: exclude reference model jokes, but include jokes without
+            # metadata (orphaned facts where metadata recording failed)
+            ref_model_facts = select(TrainingMetadata.fact_id).where(
+                TrainingMetadata.base_model.ilike(f"%{self._reference_model}%")
             )
+            all_facts_with_metadata = select(TrainingMetadata.fact_id)
             self._lg.debug("filtering to exclude reference model jokes")
-
-        return EmbeddingFilter().where(Fact.id.in_(subquery))
+            # Include facts that: (1) have non-reference metadata, OR (2) have no metadata
+            return EmbeddingFilter().where(
+                or_(
+                    Fact.id.not_in(ref_model_facts),
+                    ~Fact.id.in_(all_facts_with_metadata),
+                )
+            )
 
     def _evaluate_similarity(self, closest: Any) -> NoveltyCheck:
         """Evaluate similarity of joke against closest match."""
