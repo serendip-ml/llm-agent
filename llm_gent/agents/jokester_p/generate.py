@@ -191,6 +191,7 @@ class JokeGenerator:
                 },
             )
             return None, "unknown", None
+        self._lg.debug("LLM request completed", extra={"after": appinfra.time.since(start_t)})
 
         if result.parsed is None:
             self._lg.warning("LLM failed to generate structured joke")

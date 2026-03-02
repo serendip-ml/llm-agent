@@ -227,7 +227,7 @@ class JokesterCLI(Tool):
         sql = self._build_adapter_stats_sql(chars_join, model_join, chars_filter, model_filter)
         with self._pg.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-            return self._build_adapter_results(conn, context_key, rows, params, max_chars, model)
+            return self._build_adapter_results(conn, context_key, rows, params, max_chars)
 
     def _build_adapter_stats_sql(
         self, chars_join: str, model_join: str, chars_filter: str, model_filter: str
@@ -255,7 +255,6 @@ class JokesterCLI(Tool):
         rows: list[Any],
         params: dict[str, Any],
         max_chars: int | None,
-        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build result dicts with distribution for each adapter."""
         results = []
