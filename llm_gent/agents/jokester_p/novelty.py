@@ -82,9 +82,9 @@ class NoveltyChecker:
             "checking joke novelty...", extra={"joke": joke_text, "model": current_model}
         )
         try:
-            filter = self._build_filter(current_model)
+            embedding_filter = self._build_filter(current_model)
             similar_facts = self._learn.recall(
-                query=joke_text, top_k=1, categories=["joke"], filter=filter
+                query=joke_text, top_k=1, categories=["joke"], embedding_filter=embedding_filter
             )
 
             if not similar_facts:

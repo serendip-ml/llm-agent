@@ -349,7 +349,7 @@ class LearnTrait(BaseTrait):
         top_k: int = 10,
         min_similarity: float = 0.5,
         categories: list[str] | None = None,
-        filter: EmbeddingFilter | None = None,
+        embedding_filter: EmbeddingFilter | None = None,
     ) -> list[ScoredEntity[Fact]]:
         """Search facts by semantic similarity.
 
@@ -357,8 +357,8 @@ class LearnTrait(BaseTrait):
             query: Text to search for similar facts.
             top_k: Maximum results.
             min_similarity: Minimum similarity threshold (0-1).
-            categories: Filter to these categories (None = all). Deprecated: use filter.
-            filter: EmbeddingFilter for flexible filtering (recommended).
+            categories: Filter to these categories (None = all). Deprecated: use embedding_filter.
+            embedding_filter: EmbeddingFilter for flexible filtering (recommended).
 
         Returns:
             List of ScoredEntity[Fact] sorted by similarity.
@@ -376,7 +376,7 @@ class LearnTrait(BaseTrait):
             top_k=top_k,
             min_similarity=min_similarity,
             categories=categories,
-            filter=filter,
+            filter=embedding_filter,
         )
 
     # =========================================================================
