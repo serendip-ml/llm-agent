@@ -29,6 +29,12 @@ class NoveltyCheck:
     similar_joke: str | None
 
 
+class IsolationError(Exception):
+    """Raised when reference model isolation cannot be enforced."""
+
+    pass
+
+
 class NoveltyChecker:
     """Checks joke novelty using embedding similarity.
 
@@ -105,15 +111,12 @@ class NoveltyChecker:
         if not self._reference_model:
             return None
         if not current_model:
-            # Reference model configured but current_model not provided - this shouldn't
-            # happen in normal usage since current_model comes from LLM response
-            self._lg.warning(
-                "reference model isolation configured but current_model not provided, "
-                "skipping filter"
+            # Fail closed: reference isolation requires knowing the current model
+            raise IsolationError(
+                "current_model is required when reference_model isolation is configured"
             )
-            return None
 
-        is_reference = self._reference_model in current_model
+        is_reference = self._reference_model.lower() in current_model.lower()
         if is_reference:
             return self._build_reference_model_filter()
         return self._build_local_model_filter()

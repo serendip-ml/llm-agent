@@ -2,12 +2,14 @@
 
 from .agent import JokesterAgent
 from .factory import Factory
+from .novelty import IsolationError
 from .schema import ModelUsage, TrainingMetadata
 
 
 __all__ = [
     "JokesterAgent",
     "Factory",
+    "IsolationError",
     "ModelUsage",
     "TrainingMetadata",
 ]
