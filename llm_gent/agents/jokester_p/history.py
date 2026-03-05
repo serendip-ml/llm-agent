@@ -79,6 +79,17 @@ class JokeHistory:
         self._history.append(JokeRecord(joke=joke, fact_id=fact_id))
         self._frequency[joke] += 1
 
+    def contains(self, joke: str) -> bool:
+        """Check if exact joke text exists in history.
+
+        Args:
+            joke: The joke text to check.
+
+        Returns:
+            True if joke exists in history.
+        """
+        return joke in self._frequency
+
     def get_for_prompt(self) -> list[tuple[JokeRecord, int]]:
         """Get jokes to include in prompt.
 

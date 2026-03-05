@@ -149,17 +149,24 @@ class JokeGenerator:
         Returns:
             GenerationAttempt with novelty result.
         """
-        novelty = self._novelty.check(joke.text, current_model=model_name, current_adapter=adapter)
-        if not novelty.is_novel:
-            return GenerationAttempt(
-                joke=None,
-                run_attempts=1,
-                cumulative_attempts=1,
-                model_name=model_name,
-                adapter=adapter,
-                novelty=novelty,
-            )
+        # Fast exact-match check against in-memory history first
+        if self._history.contains(joke.text):
+            self._history.record(joke.text)  # Bump frequency for prompt avoidance
+            novelty = NoveltyCheck(is_novel=False, max_similarity=1.0, similar_joke=joke.text)
+            return self._make_attempt(None, model_name, adapter, novelty)
 
+        novelty = self._novelty.check(joke.text, current_model=model_name, current_adapter=adapter)
+        result_joke = joke if novelty.is_novel else None
+        return self._make_attempt(result_joke, model_name, adapter, novelty)
+
+    def _make_attempt(
+        self,
+        joke: Joke | None,
+        model_name: str,
+        adapter: AdapterInfo | None,
+        novelty: NoveltyCheck,
+    ) -> GenerationAttempt:
+        """Build a GenerationAttempt for novelty check results."""
         return GenerationAttempt(
             joke=joke,
             run_attempts=1,
@@ -333,6 +340,12 @@ class JokeGenerator:
             self._lg.debug("joke denied by denylist", extra={"attempt": attempt})
             return None
 
+        # Fast exact-match check against in-memory history (catches parallel race conditions)
+        if self._history.contains(joke.text):
+            self._lg.debug("joke rejected by history cache", extra={"attempt": attempt})
+            self._history.record(joke.text)  # Bump frequency for prompt avoidance
+            return None
+
         novelty = self._novelty.check(joke.text, current_model=model_name, current_adapter=adapter)
         if not novelty.is_novel:
             # Record the existing joke we collided with (not the generated one)
@@ -369,7 +382,7 @@ class JokeGenerator:
 
         context_text = ""
         if context:
-            context_text = "Recent jokes you've told:\n" + "\n".join(f"- {j}" for j in context)
+            context_text = "\n\nRecent jokes you've told:\n" + "\n".join(f"- {j}" for j in context)
 
         avoid_text = ""
         jokes_to_avoid = self._history.get_for_prompt()
@@ -378,9 +391,8 @@ class JokeGenerator:
 
         retry_text = f"\n\n{retry_feedback}" if retry_feedback else ""
 
-        return f"""{directive}
-
-{context_text}{avoid_text}{retry_text}
+        return f"""{directive}{context_text}
+{avoid_text}{retry_text}
 
 Return your joke in JSON format with 'text' and 'style' fields."""
 

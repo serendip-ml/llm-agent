@@ -424,19 +424,11 @@ class JokesterAgent(Agent):
         return "Jokester agent does not support questions. Use run_once() to get a joke."
 
     def _get_recent_jokes(self, learn_trait: LearnTrait, limit: int) -> list[str]:
-        """Fetch recent jokes chronologically for style inspiration."""
-        try:
-            # Use the correct schema (hn_exp, not default)
-            kelt_config = self.config.get("kelt", {})
-            schema_config = kelt_config.get("schema", {})
-            schema_name = schema_config.get("name") or "public"
-
-            client = learn_trait.get_client_for_schema(schema_name)
-            facts = client.atomic.solutions.list_by_category("joke", limit=limit)
-            return [f.content for f in facts if f.content]
-        except Exception as e:
-            self._lg.debug("failed to fetch recent jokes", extra={"exception": e})
+        """Get recent jokes from in-memory history for style inspiration."""
+        if self._generator is None:
             return []
+        recent = list(self._generator._history._history)[-limit:]
+        return [r.joke for r in recent if r.joke]
 
     def record_feedback(self, message: str) -> None:
         """Record feedback about a joke.

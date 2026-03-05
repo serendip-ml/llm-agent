@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from appinfra import DotDict
 
+from llm_gent.agents.jokester_p.history import JokeHistory
 from llm_gent.agents.jokester_p.novelty import NoveltyCheck, NoveltyChecker
 from llm_gent.core.training import StarPreferencePair, StarRatedItem
 
@@ -176,3 +177,33 @@ class TestPreferencePair:
         pair = StarPreferencePair(chosen=chosen, rejected=rejected)
 
         assert pair.chosen.score - pair.rejected.score == 0
+
+
+class TestJokeHistory:
+    """Tests for JokeHistory."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create mock logger."""
+        return MagicMock()
+
+    def test_contains_empty_history(self, mock_logger):
+        """Contains returns False for empty history."""
+        history = JokeHistory(mock_logger)
+        assert history.contains("any joke") is False
+
+    def test_contains_after_record(self, mock_logger):
+        """Contains returns True after recording joke."""
+        history = JokeHistory(mock_logger)
+        history.record("Why did the chicken cross the road?")
+        assert history.contains("Why did the chicken cross the road?") is True
+        assert history.contains("Different joke") is False
+
+    def test_contains_bumps_frequency(self, mock_logger):
+        """Recording same joke multiple times bumps frequency."""
+        history = JokeHistory(mock_logger)
+        history.record("Same joke")
+        history.record("Same joke")
+        history.record("Same joke")
+        # Frequency should be 3, check via _frequency (internal but useful for test)
+        assert history._frequency["Same joke"] == 3

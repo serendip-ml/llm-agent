@@ -12,9 +12,7 @@ from typing import TYPE_CHECKING, Any
 from appinfra import DotDict
 from llm_infer.client.types import AdapterInfo
 from llm_kelt.memory.atomic import EmbeddingFilter, Fact
-from sqlalchemy import or_, select
-
-from .schema import TrainingMetadata
+from sqlalchemy import or_
 
 
 if TYPE_CHECKING:
@@ -158,8 +156,16 @@ class NoveltyChecker:
     ) -> NoveltyCheck:
         """Search for similar jokes and evaluate novelty."""
         try:
-            embedding_filter = self._build_filter(current_model, current_adapter)
             schema = self._resolve_search_schema(current_adapter)
+            embedding_filter = self._build_filter(current_model, current_adapter, schema)
+            self._lg.debug(
+                "novelty search",
+                extra={
+                    "schema": schema,
+                    "model": current_model,
+                    "has_filter": embedding_filter is not None,
+                },
+            )
             similar_facts = self._learn.recall(
                 query=joke_text,
                 top_k=1,
@@ -167,6 +173,7 @@ class NoveltyChecker:
                 embedding_filter=embedding_filter,
                 schema=schema,
             )
+            self._lg.debug("novelty search result", extra={"found": len(similar_facts)})
 
             if not similar_facts:
                 self._lg.debug("joke is novel (no existing jokes)", extra={"joke": joke_text})
@@ -207,25 +214,66 @@ class NoveltyChecker:
         # SQLite: "no such table"
         return "does not exist" in error_str or "no such table" in error_str
 
+    def _get_training_table(self, schema: str) -> Any:
+        """Get a schema-qualified training table reference."""
+        from sqlalchemy import Column, MetaData, String, Table
+        from sqlalchemy.dialects.postgresql import BIGINT, BOOLEAN
+
+        metadata = MetaData(schema=schema)
+        return Table(
+            "agent_jokester_training",
+            metadata,
+            Column("fact_id", BIGINT),
+            Column("base_model", String),
+            Column("adapter_version", String),
+            Column("is_base_model", BOOLEAN),
+        )
+
+    def _schema_fact_ids_query(self, schema: str, where_clause: str, **params: str | None) -> Any:
+        """Build schema-qualified subquery for fact_ids from training metadata."""
+        from sqlalchemy import select
+
+        t = self._get_training_table(schema)
+        conditions = self._parse_where_conditions(t, where_clause, params)
+        query = select(t.c.fact_id)
+        return query.where(*conditions).scalar_subquery() if conditions else query.scalar_subquery()
+
+    def _parse_where_conditions(
+        self, t: Any, where_clause: str, params: dict[str, Any]
+    ) -> list[Any]:
+        """Parse where clause string into SQLAlchemy conditions."""
+        import re
+
+        conditions = []
+        if "is_base_model = true" in where_clause.lower():
+            conditions.append(t.c.is_base_model == True)  # noqa: E712
+        if "base_model = :model" in where_clause:
+            conditions.append(t.c.base_model == params.get("model"))
+        if "adapter_version = :adapter" in where_clause:
+            conditions.append(t.c.adapter_version == params.get("adapter"))
+        if match := re.search(r"ILIKE '([^']+)'", where_clause):
+            conditions.append(t.c.base_model.ilike(match.group(1)))
+        return conditions
+
     def _build_filter(
-        self, current_model: str | None, current_adapter: AdapterInfo | None
+        self, current_model: str | None, current_adapter: AdapterInfo | None, schema: str
     ) -> EmbeddingFilter | None:
         """Build embedding filter based on isolation mode."""
         if self._mode == IsolationMode.OFF:
             return None
         if self._mode == IsolationMode.REFERENCE:
-            return self._build_reference_filter(current_model)
+            return self._build_reference_filter(current_model, schema)
         if self._mode == IsolationMode.MODEL:
-            return self._build_model_filter(current_model)
+            return self._build_model_filter(current_model, schema)
         if self._mode == IsolationMode.ADAPTER:
-            return self._build_adapter_filter(current_model, current_adapter)
+            return self._build_adapter_filter(current_model, current_adapter, schema)
         return None
 
     # =========================================================================
     # Reference mode: binary split (reference vs local)
     # =========================================================================
 
-    def _build_reference_filter(self, current_model: str | None) -> EmbeddingFilter:
+    def _build_reference_filter(self, current_model: str | None, schema: str) -> EmbeddingFilter:
         """Build filter for reference mode: reference vs local split."""
         if not self._reference_model:
             raise IsolationError("reference_model is required when mode is 'reference'")
@@ -234,42 +282,42 @@ class NoveltyChecker:
 
         is_reference = self._reference_model.lower() in current_model.lower()
         if is_reference:
-            return self._filter_reference_model_jokes()
-        return self._filter_local_model_jokes()
+            return self._filter_reference_model_jokes(schema)
+        return self._filter_local_model_jokes(schema)
 
-    def _filter_reference_model_jokes(self) -> EmbeddingFilter:
+    def _filter_reference_model_jokes(self, schema: str) -> EmbeddingFilter:
         """Filter to only reference model jokes."""
-        subquery = select(TrainingMetadata.fact_id).where(
-            TrainingMetadata.base_model.ilike(f"%{self._reference_model}%")
+        subquery = self._schema_fact_ids_query(
+            schema, f"base_model ILIKE '%{self._reference_model}%'"
         )
-        self._lg.debug("filtering to reference model jokes only")
+        self._lg.debug("filtering to reference model jokes only", extra={"schema": schema})
         return EmbeddingFilter().where(Fact.id.in_(subquery))
 
-    def _filter_local_model_jokes(self) -> EmbeddingFilter:
+    def _filter_local_model_jokes(self, schema: str) -> EmbeddingFilter:
         """Filter to local model jokes (exclude reference, include orphaned facts)."""
-        ref_model_facts = select(TrainingMetadata.fact_id).where(
-            TrainingMetadata.base_model.ilike(f"%{self._reference_model}%")
+        ref_subquery = self._schema_fact_ids_query(
+            schema, f"base_model ILIKE '%{self._reference_model}%'"
         )
-        all_facts_with_metadata = select(TrainingMetadata.fact_id)
-        self._lg.debug("filtering to exclude reference model jokes")
+        all_subquery = self._schema_fact_ids_query(schema, "1=1")
+        self._lg.debug("filtering to exclude reference model jokes", extra={"schema": schema})
         # Include facts that: (1) have non-reference metadata, OR (2) have no metadata
         return EmbeddingFilter().where(
-            or_(Fact.id.not_in(ref_model_facts), ~Fact.id.in_(all_facts_with_metadata))
+            or_(Fact.id.not_in(ref_subquery), ~Fact.id.in_(all_subquery))
         )
 
     # =========================================================================
     # Model mode: per-model isolation
     # =========================================================================
 
-    def _build_model_filter(self, current_model: str | None) -> EmbeddingFilter:
+    def _build_model_filter(self, current_model: str | None, schema: str) -> EmbeddingFilter:
         """Build filter for model mode: each model sees only its own jokes."""
         if not current_model:
             raise IsolationError("current_model is required when mode is 'model'")
 
-        subquery = select(TrainingMetadata.fact_id).where(
-            TrainingMetadata.base_model == current_model
+        subquery = self._schema_fact_ids_query(schema, "base_model = :model", model=current_model)
+        self._lg.debug(
+            "filtering to same model jokes", extra={"model": current_model, "schema": schema}
         )
-        self._lg.debug("filtering to same model jokes", extra={"model": current_model})
         return EmbeddingFilter().where(Fact.id.in_(subquery))
 
     # =========================================================================
@@ -277,24 +325,28 @@ class NoveltyChecker:
     # =========================================================================
 
     def _build_adapter_filter(
-        self, current_model: str | None, current_adapter: AdapterInfo | None
+        self, current_model: str | None, current_adapter: AdapterInfo | None, schema: str
     ) -> EmbeddingFilter:
         """Build filter for adapter mode: each adapter sees only its own jokes."""
         adapter_name = current_adapter.actual if current_adapter else None
 
         if adapter_name:
             # Fine-tuned model: only see jokes from same adapter
-            subquery = select(TrainingMetadata.fact_id).where(
-                TrainingMetadata.adapter_version == adapter_name
+            subquery = self._schema_fact_ids_query(
+                schema, "adapter_version = :adapter", adapter=adapter_name
             )
-            self._lg.debug("filtering to same adapter jokes", extra={"adapter": adapter_name})
+            self._lg.debug(
+                "filtering to same adapter jokes", extra={"adapter": adapter_name, "schema": schema}
+            )
         else:
             # Base model (no adapter): only see jokes from same base model
-            subquery = select(TrainingMetadata.fact_id).where(
-                TrainingMetadata.is_base_model == True,  # noqa: E712
-                TrainingMetadata.base_model == current_model,
+            subquery = self._schema_fact_ids_query(
+                schema, "is_base_model = true AND base_model = :model", model=current_model
             )
-            self._lg.debug("filtering to same base model jokes", extra={"model": current_model})
+            self._lg.debug(
+                "filtering to same base model jokes",
+                extra={"model": current_model, "schema": schema},
+            )
 
         return EmbeddingFilter().where(Fact.id.in_(subquery))
 
