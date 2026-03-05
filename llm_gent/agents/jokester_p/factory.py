@@ -17,9 +17,9 @@ from ...core.traits.builtin.storage import StorageTrait
 from .agent import JokesterAgent
 from .cli import JokesterCLI
 from .generate import JokeGenerator
+from .history import JokeHistory
 from .novelty import NoveltyChecker
 from .rating import BatchRater
-from .schema import ModelUsage, TrainingMetadata
 from .storage import Storage
 
 
@@ -63,14 +63,17 @@ class Factory(BaseFactory):
         config = agent.config
 
         storage_trait = agent.require_trait(StorageTrait)
-        storage_trait.storage.register_table(ModelUsage)
-        storage_trait.storage.register_table(TrainingMetadata)
+        # Agent tables are created lazily in Storage when first needed
 
         learn_trait = agent.require_trait(LearnTrait)
         cls._validate_embedder(lg, learn_trait)
 
+        kelt_config = config.get("kelt", {})
+        schema_config = kelt_config.get("schema", {})
+        schema_name = schema_config.get("name") or "public"
+
         generator = cls._create_generator(agent, lg, config, learn_trait)
-        storage = Storage(lg, storage_trait, learn_trait, agent.name)
+        storage = Storage(lg, storage_trait, learn_trait, agent.name, schema_name)
         rater = cls._create_rater(agent, lg, config)
 
         return Components(generator=generator, storage=storage, rater=rater)
@@ -93,17 +96,19 @@ class Factory(BaseFactory):
         llm_trait = agent.require_trait(LLMTrait)
         directive_trait = agent.get_trait(DirectiveTrait)
 
-        reference_config = config.get("reference", {})
-        reference_model = cls._normalize_reference_model(
-            lg, reference_config.get("model") if reference_config else None
-        )
-
-        novelty_checker = NoveltyChecker(
+        kelt_config = config.get("kelt", {})
+        schema_config = kelt_config.get("schema", {})
+        novelty_checker = cls._create_novelty_checker(
             lg,
             learn_trait,
-            similarity_threshold=config.get("similarity_threshold", 0.85),
-            reference_model=reference_model,
+            config.get("novelty", {}),
+            kelt_config.get("reference", {}),
+            schema_config.get("name"),
         )
+
+        # Create joke history from RAG config
+        rag_config = config.get("novelty", {}).get("rag", {})
+        joke_history = JokeHistory.from_config(lg, rag_config)
 
         return JokeGenerator(
             lg=lg,
@@ -112,24 +117,54 @@ class Factory(BaseFactory):
             directive_trait=directive_trait,
             max_retries=config.get("max_retries", 3),
             denylist=config.get("denylist", []),
+            joke_history=joke_history,
         )
 
     @classmethod
+    def _create_novelty_checker(
+        cls,
+        lg: Logger,
+        learn_trait: LearnTrait,
+        novelty_config: DotDict,
+        reference_config: DotDict,
+        current_schema: str | None,
+    ) -> NoveltyChecker:
+        """Create NoveltyChecker from config."""
+        resolved_config = cls._resolve_novelty_config(
+            lg, novelty_config, reference_config, current_schema
+        )
+        return NoveltyChecker(lg, learn_trait, resolved_config)
+
+    @classmethod
+    def _resolve_novelty_config(
+        cls,
+        lg: Logger,
+        novelty_config: DotDict,
+        reference_config: DotDict,
+        current_schema: str | None,
+    ) -> DotDict:
+        """Resolve and validate novelty config, merging reference from kelt config."""
+        resolved = DotDict(novelty_config)
+        resolved["current_schema"] = current_schema or "public"
+
+        if reference_config:
+            model = cls._normalize_reference_model(lg, reference_config.get("model"))
+            resolved["reference"] = DotDict(
+                {
+                    "model": model,
+                    "schema": reference_config.get("schema"),
+                }
+            )
+
+        return resolved
+
+    @classmethod
     def _normalize_reference_model(cls, lg: Logger, value: object) -> str | None:
-        """Normalize reference_model config value to string or None.
-
-        Args:
-            lg: Logger instance.
-            value: Raw config value (could be any type).
-
-        Returns:
-            String model name or None if invalid/missing.
-        """
+        """Normalize reference_model config value to string or None."""
         if value is None:
             return None
         if isinstance(value, str):
             return value if value.strip() else None
-        # Non-string value - coerce with warning
         lg.warning(
             "reference.model should be a string, coercing",
             extra={"value": value, "type": type(value).__name__},

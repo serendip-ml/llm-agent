@@ -56,7 +56,7 @@ class BatchRater:
 
     Usage:
         rater = BatchRater(lg, rating_trait, batch_size=5)
-        rater.queue(fact_id, joke_text)  # Auto-flushes when batch is full
+        rater.queue(fact_id, joke_text, schema="hn_exp")  # Auto-flushes when batch is full
         rater.flush()  # Flush remaining before exit
     """
 
@@ -71,14 +71,14 @@ class BatchRater:
         self._rating = rating_trait
         self._batch_size = batch_size
         self._fact_type = fact_type
-        self._queue: list[tuple[int, str]] = []
+        self._queue: list[tuple[int, str, str | None]] = []
 
-    def queue(self, fact_id: int, content: str) -> None:
+    def queue(self, fact_id: int, content: str, schema: str | None = None) -> None:
         """Queue a fact for rating. Flushes when batch is full."""
-        self._queue.append((fact_id, content))
+        self._queue.append((fact_id, content, schema))
         self._lg.debug(
             "queued for batch rating",
-            extra={"fact_id": fact_id, "queue_size": len(self._queue)},
+            extra={"fact_id": fact_id, "queue_size": len(self._queue), "schema": schema},
         )
         if len(self._queue) >= self._batch_size:
             self.flush()
@@ -88,26 +88,37 @@ class BatchRater:
         if not self._queue:
             return 0
 
-        items = self._queue[:]
+        # Group by schema for batch processing
+        items_by_schema: dict[str | None, list[tuple[int, str]]] = {}
+        for fact_id, content, schema in self._queue:
+            if schema not in items_by_schema:
+                items_by_schema[schema] = []
+            items_by_schema[schema].append((fact_id, content))
+
+        total_rated = 0
 
         try:
-            rated = self._rating.rate_items(items, self._fact_type)
+            for schema, items in items_by_schema.items():
+                rated = self._rating.rate_items(items, self._fact_type, schema)
+                total_rated += rated
+                self._log_batch_results(items, rated, schema)
             self._queue.clear()
-            self._log_batch_results(items, rated)
-            return rated
+            return total_rated
         except Exception as e:
             self._lg.warning("batch rating failed", extra={"exception": e})
             return 0
 
-    def _log_batch_results(self, items: list[tuple[int, str]], rated: int) -> None:
+    def _log_batch_results(
+        self, items: list[tuple[int, str]], rated: int, schema: str | None
+    ) -> None:
         """Log batch completion and individual ratings."""
         self._lg.debug(
             "flushed batch for rating",
-            extra={"count": len(items), "rated": rated},
+            extra={"count": len(items), "rated": rated, "schema": schema},
         )
 
         for fact_id, content in items:
-            stars = self._rating.get_fact_rating(fact_id)
+            stars = self._rating.get_fact_rating(fact_id, schema)
             if stars is not None:
                 clamped = max(0, min(5, stars))
                 stars_visual = "★" * clamped + "☆" * (5 - clamped)

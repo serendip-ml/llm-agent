@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from appinfra.app.tools import Tool, ToolConfig
 from appinfra.db.pg import PG
+from llm_kelt.training import Factory as TrainFactory
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 
 from llm_gent.core.memory.rating import BatchRatingService
 
@@ -28,9 +32,12 @@ class JokesterCLI(Tool):
         config = ToolConfig(name="jokester-p", help_text="Jokester agent CLI commands")
         super().__init__(parent, config)
         self._pg: PG | None = None
+        self._current_schema: str = "public"
+        self._reference_schema: str | None = None
+        self._train_factory: TrainFactory | None = None
 
     def configure(self) -> None:
-        """Set up database connection."""
+        """Set up database connection and schema info."""
         if not hasattr(self.app, "config"):
             raise RuntimeError("App does not have config")
 
@@ -39,11 +46,70 @@ class JokesterCLI(Tool):
             raise RuntimeError("Database configuration not found in learn.db")
 
         self._pg = PG(self.lg, db_config)
+        self._load_schema_config()
+        self._load_train_factory()
+
+    def _load_schema_config(self) -> None:
+        """Load schema configuration from agent config."""
+        agent_config = self._get_agent_config()
+        if agent_config is None:
+            return
+
+        kelt_config = agent_config.get("kelt", {})
+        schema_config = kelt_config.get("schema", {})
+        self._current_schema = schema_config.get("name") or "public"
+
+        reference_config = kelt_config.get("reference", {})
+        if reference_config:
+            self._reference_schema = reference_config.get("schema")
+
+    def _load_train_factory(self) -> None:
+        """Load TrainFactory for adapter manifest lookups."""
+        learn_config = getattr(self.app.config, "learn", None)
+        if learn_config is None:
+            return
+        adapters_config = getattr(learn_config, "adapters", None)
+        if adapters_config is None:
+            return
+        lora_config = getattr(adapters_config, "lora", None)
+        if lora_config is None:
+            return
+        base_path = getattr(lora_config, "base_path", None)
+        if base_path:
+            self._train_factory = TrainFactory(self.lg, Path(base_path))
+
+    def _get_adapter_parent(self, md5: str) -> str | None:
+        """Look up parent adapter md5 from manifest."""
+        if self._train_factory is None:
+            return None
+        manifest = self._train_factory.manifest.get_manifest(md5)
+        if manifest and manifest.parent:
+            return manifest.parent.md5
+        return None
+
+    def _schema_prefix(self, schema: str | None = None) -> str:
+        """Get schema prefix for table names. Uses current schema if not specified."""
+        s = schema or self._current_schema
+        return f"{s}." if s and s != "public" else ""
+
+    def _discover_schemas(self) -> list[str]:
+        """Discover all schemas that have agent_jokester_training table."""
+        assert self._pg is not None
+        sql = text("""
+            SELECT table_schema
+            FROM information_schema.tables
+            WHERE table_name = 'agent_jokester_training'
+            ORDER BY table_schema
+        """)
+        with self._pg.connect() as conn:
+            rows = conn.execute(sql).fetchall()
+        return [row[0] for row in rows]
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
         subparsers = parser.add_subparsers(dest="command", help="Command to run")
         self._add_stats_args(subparsers)
         self._add_rate_args(subparsers)
+        self._add_audit_args(subparsers)
 
     def _add_stats_args(self, subparsers: Any) -> None:
         """Add stats command arguments."""
@@ -59,6 +125,11 @@ class JokesterCLI(Tool):
             type=str,
             help="Filter by model (case-insensitive, supports * wildcard, e.g. 'qwen*14b')",
         )
+        p.add_argument(
+            "--schema",
+            type=str,
+            help="Filter to specific schema (default: show all schemas)",
+        )
 
     def _add_rate_args(self, subparsers: Any) -> None:
         """Add rate command arguments."""
@@ -70,6 +141,24 @@ class JokesterCLI(Tool):
         p.add_argument(
             "--dry-run", action="store_true", help="Show what would be rated without sending to LLM"
         )
+        p.add_argument(
+            "--schema", type=str, help="Rate jokes in specific schema (default: all schemas)"
+        )
+
+    def _add_audit_args(self, subparsers: Any) -> None:
+        """Add audit command arguments."""
+        p = subparsers.add_parser("audit", help="Audit data integrity (check for duplicates)")
+        p.add_argument("--schema", type=str, help="Audit specific schema (default: all schemas)")
+        p.add_argument(
+            "--fix", action="store_true", help="Delete duplicate jokes (keeps first occurrence)"
+        )
+        p.add_argument(
+            "--show-dups",
+            type=int,
+            default=0,
+            metavar="N",
+            help="Show top N duplicate jokes (default: 0)",
+        )
 
     def run(self, **kwargs: Any) -> int:
         command = self.args.command
@@ -78,99 +167,406 @@ class JokesterCLI(Tool):
             return self._cmd_stats()
         elif command == "rate":
             return self._cmd_rate()
+        elif command == "audit":
+            return self._cmd_audit()
         else:
             print("Usage: agent jokester-p <command>")
-            print("Commands: stats, rate")
+            print("Commands: stats, rate, audit")
             return 1
 
     def _cmd_stats(self) -> int:
         """Show joke rating statistics."""
         assert self._pg is not None
 
-        max_chars = getattr(self.args, "max_chars", 130)
+        max_chars = getattr(self.args, "max_chars", 140)
         model = getattr(self.args, "model", None)
-        context_key = self._get_context_key()
-        current_model = self._get_latest_model(context_key)
+        schema_filter = getattr(self.args, "schema", None)
 
-        # Summary stats filter by current model, adapter breakdown shows all
-        summary_model = model or current_model
-        stats = self._get_rating_stats(exclude_haiku=True, max_chars=max_chars, model=summary_model)
-        dist = self._get_rating_distribution(
-            exclude_haiku=True, max_chars=max_chars, model=summary_model
-        )
+        # Get schemas to query
+        schemas = self._get_schemas_to_query(schema_filter)
+        if not schemas:
+            print("No schemas found with joke data.")
+            return 0
 
-        self._print_stats_header(max_chars, model)
-        self._print_rating_summary(stats, dist)
-        self._print_stats_by_adapter(max_chars=max_chars, model=model)
-        if not model:  # Only show haiku stats when not filtering by model
-            self._print_haiku_stats(max_chars=max_chars)
+        self._print_stats_header(max_chars, model, schema_filter, schemas)
+        self._print_stats_by_adapter(schemas, max_chars=max_chars, model=model)
+        self._print_haiku_stats(max_chars=max_chars)  # Always show reference for comparison
 
         return 0
 
-    def _print_stats_header(self, max_chars: int, model_filter: str | None = None) -> None:
-        """Print stats header with model and adapter info."""
-        context_key = self._get_context_key()
-        model = self._get_latest_model(context_key) or "unknown"
-        adapter = self._get_latest_adapter_from_jokes(context_key)
-        print("\n=== Jokester-p Stats ===\n")
-        filter_info = f"<{max_chars} chars"
-        if model_filter:
-            filter_info += f", model~'{model_filter}'"
-        print(f"Model:   {model}, {filter_info}")
-        if adapter:
-            print(f"Adapter: {adapter['name']} (md5: {adapter['md5']})")
-        print()
+    def _cmd_audit(self) -> int:
+        """Audit data integrity - check for duplicate jokes."""
+        assert self._pg is not None
 
-    def _print_rating_summary(self, stats: dict[str, Any], dist: list[dict[str, Any]]) -> None:
-        """Print rating counts and distribution."""
-        avg = f"{stats['avg_stars']:.2f}" if stats["avg_stars"] else "N/A"
-        print(f"Total: {stats['total']}  Rated: {stats['rated']}  Unrated: {stats['unrated']}")
-        dist_dict = {row["stars"]: row["count"] for row in dist}
-        total = stats["rated"] or 1
-        stars_str = self._format_star_distribution(dist_dict, total)
-        print(f"Distribution:  avg={avg}  {stars_str}")
+        schema_filter = getattr(self.args, "schema", None)
+        fix = getattr(self.args, "fix", False)
+        show_dups = getattr(self.args, "show_dups", 0)
+
+        schemas = self._get_schemas_to_query(schema_filter)
+        if not schemas:
+            print("No schemas found with joke data.")
+            return 0
+
+        print("\n=== Duplicate Audit ===\n")
+        total_dups = 0
+        has_issues = False
+
+        for schema in schemas:
+            dups = self._audit_schema(schema, show_dups)
+            if dups:
+                has_issues = True
+                total_dups += sum(d["duplicates"] for d in dups)
+                if fix:
+                    self._fix_duplicates_in_schema(schema, dups)
+
+        if has_issues:
+            print(f"\n{'FIXED' if fix else 'FAILED'}: {total_dups} total duplicates found")
+            return 0 if fix else 1
+        else:
+            print("✓ PASSED: No duplicates found")
+            return 0
+
+    def _audit_schema(self, schema: str, show_dups: int = 0) -> list[dict[str, Any]]:
+        """Audit a single schema for duplicates. Returns list of duplicate info."""
+        assert self._pg is not None
+        context_key = self._get_context_key()
+
+        rows = self._query_duplicate_stats(schema, context_key)
+        if rows is None:
+            return []
+
+        results = self._print_audit_results(schema, rows)
+
+        if show_dups > 0 and results:
+            self._show_top_duplicates(schema, context_key, show_dups)
+
+        return results
+
+    def _query_duplicate_stats(self, schema: str, context_key: str) -> list[Any] | None:
+        """Query duplicate statistics per model/adapter."""
+        assert self._pg is not None
+        prefix = self._schema_prefix(schema)
+        sql = text(f"""
+            SELECT
+                t.base_model,
+                CASE WHEN t.is_base_model THEN '(base)'
+                     ELSE COALESCE(LEFT(t.adapter_info->>'md5', 4) || '..' ||
+                          RIGHT(t.adapter_info->>'md5', 4), '(base)') END as adapter,
+                COUNT(*) as total,
+                COUNT(*) - COUNT(DISTINCT af.content) as duplicates
+            FROM {prefix}agent_jokester_training t
+            JOIN {prefix}atomic_facts af ON af.id = t.fact_id
+            WHERE af.context_key = :context_key
+            GROUP BY t.base_model,
+                CASE WHEN t.is_base_model THEN '(base)'
+                     ELSE COALESCE(LEFT(t.adapter_info->>'md5', 4) || '..' ||
+                          RIGHT(t.adapter_info->>'md5', 4), '(base)') END
+            ORDER BY t.base_model, adapter
+        """)
+        try:
+            with self._pg.connect() as conn:
+                return list(conn.execute(sql, {"context_key": context_key}).fetchall())
+        except ProgrammingError:
+            return None
+
+    def _print_audit_results(self, schema: str, rows: list[Any]) -> list[dict[str, Any]]:
+        """Print audit results and return list of entries with duplicates."""
+        results = []
+        print(f"{schema}")
+        for row in rows:
+            model, adapter, total, dups = row
+            dup_pct = dups * 100 / total if total else 0
+            if dups == 0:
+                print(f"  ✅ {model} {adapter}: {total} jokes")
+            else:
+                status = "🔴" if dup_pct > 10 else "🟡" if dup_pct > 5 else "🟢"
+                print(f"  {status} {model} {adapter}: {total} jokes, {dups} dups ({dup_pct:.1f}%)")
+            if dups > 0:
+                results.append(
+                    {
+                        "schema": schema,
+                        "model": model,
+                        "adapter": adapter,
+                        "total": total,
+                        "duplicates": dups,
+                    }
+                )
+        return results
+
+    def _show_top_duplicates(self, schema: str, context_key: str, limit: int) -> None:
+        """Show the most common duplicate jokes."""
+        assert self._pg is not None
+        prefix = self._schema_prefix(schema)
+
+        sql = text(f"""
+            SELECT af.content, COUNT(*) as cnt
+            FROM {prefix}atomic_facts af
+            WHERE af.context_key = :context_key
+            GROUP BY af.content
+            HAVING COUNT(*) > 1
+            ORDER BY cnt DESC
+            LIMIT :limit
+        """)
+
+        with self._pg.connect() as conn:
+            rows = conn.execute(sql, {"context_key": context_key, "limit": limit}).fetchall()
+
+        if rows:
+            print(f"\n  Top duplicates in {schema}:")
+            for content, cnt in rows:
+                preview = content[:60] + "..." if len(content) > 60 else content
+                print(f"    {cnt}x: {preview}")
+
+    def _fix_duplicates_in_schema(self, schema: str, dups: list[dict[str, Any]]) -> None:
+        """Delete duplicate jokes, keeping only the first occurrence."""
+        assert self._pg is not None
+        dup_ids = self._find_duplicate_fact_ids(schema)
+        if not dup_ids:
+            return
+        self._delete_facts_by_ids(schema, dup_ids)
+        print(f"  ✓ Deleted {len(dup_ids)} duplicate jokes from {schema}")
+
+    def _find_duplicate_fact_ids(self, schema: str) -> list[int]:
+        """Find fact IDs that are duplicates (excludes first occurrence)."""
+        assert self._pg is not None
+        context_key = self._get_context_key()
+        prefix = self._schema_prefix(schema)
+        sql = text(f"""
+            WITH ranked AS (
+                SELECT af.id, ROW_NUMBER() OVER (PARTITION BY af.content ORDER BY af.id) as rn
+                FROM {prefix}atomic_facts af
+                WHERE af.context_key = :context_key
+            )
+            SELECT id FROM ranked WHERE rn > 1
+        """)
+        with self._pg.connect() as conn:
+            rows = conn.execute(sql, {"context_key": context_key}).fetchall()
+        return [r[0] for r in rows]
+
+    def _delete_facts_by_ids(self, schema: str, fact_ids: list[int]) -> None:
+        """Delete facts and all dependent records by IDs."""
+        assert self._pg is not None
+        prefix = self._schema_prefix(schema)
+        dependent_tables = [
+            "agent_jokester_training",
+            "agent_jokester_model_usage",
+            "atomic_feedback_details",
+            "atomic_solution_details",
+            "embeddings",
+        ]
+        with self._pg.connect() as conn:
+            for table in dependent_tables:
+                try:
+                    sql = text(f"DELETE FROM {prefix}{table} WHERE fact_id = ANY(:ids)")
+                    conn.execute(sql, {"ids": fact_ids})
+                except ProgrammingError:
+                    pass  # Table might not exist
+            conn.execute(
+                text(f"DELETE FROM {prefix}atomic_facts WHERE id = ANY(:ids)"), {"ids": fact_ids}
+            )
+            conn.commit()
+
+    def _get_schemas_to_query(self, schema_filter: str | None) -> list[str]:
+        """Get list of schemas to query based on filter."""
+        all_schemas = self._discover_schemas()
+        if schema_filter:
+            # Always include the requested schema (even if empty/no tables yet)
+            schemas = [schema_filter]
+            # Add reference schema if configured and has data
+            if (
+                self._reference_schema
+                and self._reference_schema != schema_filter
+                and self._reference_schema in all_schemas
+            ):
+                schemas.append(self._reference_schema)
+            return schemas
+        return all_schemas
+
+    def _is_recently_active(self, last_created: Any, seconds: int = 300) -> bool:
+        """Check if last_created timestamp is within the last N seconds."""
+        if last_created is None:
+            return False
+        now = datetime.now(UTC)
+        if last_created.tzinfo is None:
+            last_created = last_created.replace(tzinfo=UTC)
+        return bool((now - last_created) < timedelta(seconds=seconds))
+
+    def _format_active_line(self, line: str, is_active: bool) -> str:
+        """Wrap line in bold bright cyan if active."""
+        if is_active:
+            return f"\033[1;96m{line}\033[0m"  # Bold + bright cyan
+        return line
+
+    def _print_stats_header(
+        self,
+        max_chars: int,
+        model_filter: str | None,
+        schema_filter: str | None,
+        schemas: list[str],
+    ) -> None:
+        """Print stats header with filter info."""
+        print("\n=== Jokester-p Stats ===\n")
+        filters = [f"<{max_chars} chars"]
+        if model_filter:
+            filters.append(f"model~'{model_filter}'")
+        if schema_filter:
+            filters.append(f"schema={schema_filter}")
+        else:
+            filters.append(f"schemas={','.join(schemas)}")
+        print(f"Filters: {', '.join(filters)}")
+        print()
 
     def _print_stats_by_adapter(
-        self, max_chars: int | None = None, model: str | None = None
+        self,
+        schemas: list[str],
+        max_chars: int | None = None,
+        model: str | None = None,
     ) -> None:
-        """Print stats broken down by adapter md5, grouped by base model in tree view."""
-        adapter_stats = self._get_stats_by_adapter(max_chars=max_chars, model=model)
-        if not adapter_stats:
+        """Print stats broken down by adapter, grouped by model and schema."""
+        all_stats = self._collect_adapter_stats(schemas, max_chars, model)
+        if not all_stats:
+            print("No joke data found.")
             return
 
-        by_model = self._group_stats_by_model(adapter_stats)
-        if not by_model:
+        print("=== By Adapter ===\n")
+        by_schema = self._group_stats_by_schema_model(all_stats)
+        if not by_schema:
             return
-
-        print("\n=== By Adapter ===\n")
-        for model_name, adapters in by_model.items():
-            print(model_name)
-            for i, stats in enumerate(adapters):
-                self._print_adapter_line(stats, is_last=(i == len(adapters) - 1))
+        for schema, models in by_schema.items():
+            print(schema)
+            model_items = list(models.items())
+            for i, (model_name, adapters) in enumerate(model_items):
+                is_last_model = i == len(model_items) - 1
+                model_prefix = "└── " if is_last_model else "├── "
+                print(f"{model_prefix}{model_name}")
+                self._print_adapter_tree(adapters, is_last_model)
         print()
 
-    def _group_stats_by_model(
+    def _collect_adapter_stats(
+        self, schemas: list[str], max_chars: int | None, model: str | None
+    ) -> list[dict[str, Any]]:
+        """Collect and enrich adapter stats from all schemas."""
+        all_stats: list[dict[str, Any]] = []
+        for schema in schemas:
+            schema_stats = self._get_stats_by_adapter_in_schema(
+                schema, max_chars=max_chars, model=model
+            )
+            all_stats.extend(schema_stats)
+
+        # Enrich with parent info for tree display
+        for stats in all_stats:
+            md5 = stats.get("md5")
+            if md5:
+                stats["parent_md5"] = self._get_adapter_parent(md5)
+        return all_stats
+
+    def _print_adapter_tree(self, adapters: list[dict[str, Any]], is_last_model: bool) -> None:
+        """Print adapters as a tree based on parent-child relationships."""
+        base_model_stats = [s for s in adapters if not s.get("md5")]
+        adapter_stats = [s for s in adapters if s.get("md5")]
+        by_md5, children = self._build_adapter_tree_maps(adapter_stats)
+
+        # Print base model first, then adapter roots
+        roots = children.get(None, [])
+        total_items = len(base_model_stats) + len(roots)
+        item_idx = 0
+
+        for stats in base_model_stats:
+            item_idx += 1
+            self._print_base_model_stats(stats, is_last_model, item_idx == total_items)
+
+        for root_md5 in roots:
+            item_idx += 1
+            self._print_adapter_node(
+                root_md5, by_md5, children, is_last_model, item_idx == total_items, depth=0
+            )
+
+    def _build_adapter_tree_maps(
         self, adapter_stats: list[dict[str, Any]]
-    ) -> dict[str, list[dict[str, Any]]]:
-        """Group adapter stats by model name, filtering out zero-count entries."""
-        by_model: dict[str, list[dict[str, Any]]] = {}
+    ) -> tuple[dict[str, dict[str, Any]], dict[str | None, list[str]]]:
+        """Build lookup maps for adapter tree: by_md5 and children."""
+        by_md5 = {s["md5"]: s for s in adapter_stats}
+        children: dict[str | None, list[str]] = {None: []}
+        for stats in adapter_stats:
+            md5 = stats["md5"]
+            parent = stats.get("parent_md5")
+            # If parent not in this adapter list, treat as root
+            if parent and parent not in by_md5:
+                parent = None
+            if parent not in children:
+                children[parent] = []
+            children[parent].append(md5)
+        return by_md5, children
+
+    def _print_base_model_stats(
+        self, stats: dict[str, Any], is_last_model: bool, is_last: bool
+    ) -> None:
+        """Print base model stats (no adapter)."""
+        model_indent = "    " if is_last_model else "│   "
+        prefix = "└── " if is_last else "├── "
+        tree_part = f"{model_indent}{prefix}(base model)"
+        padded_tree = f"{tree_part:<24}"
+
+        avg = f"{stats['avg_stars']:.2f}" if stats["avg_stars"] else "N/A"
+        stars_str = self._format_star_distribution(stats.get("distribution", {}), stats["count"])
+        line = f"{padded_tree} {stats['count']:5d} jokes  avg={avg}  {stars_str}"
+        is_active = self._is_recently_active(stats.get("last_created"))
+        print(self._format_active_line(line, is_active))
+
+    def _print_adapter_node(
+        self,
+        md5: str,
+        by_md5: dict[str, dict[str, Any]],
+        children: dict[str | None, list[str]],
+        is_last_model: bool,
+        is_last: bool,
+        depth: int,
+    ) -> None:
+        """Print a single adapter node and its children recursively."""
+        stats = by_md5.get(md5)
+        if not stats:
+            return
+
+        # Build indentation - align data columns by using fixed-width tree portion
+        model_indent = "    " if is_last_model else "│   "
+        depth_indent = "    " * depth
+        prefix = "└── " if is_last else "├── "
+        adapter_label = f"{md5[:2]}..{md5[-4:]}"
+
+        # Calculate padding to align data columns (target: 24 chars for tree portion)
+        tree_part = f"{model_indent}{depth_indent}{prefix}{adapter_label}"
+        padded_tree = f"{tree_part:<24}"
+
+        avg = f"{stats['avg_stars']:.2f}" if stats["avg_stars"] else "N/A"
+        stars_str = self._format_star_distribution(stats.get("distribution", {}), stats["count"])
+        line = f"{padded_tree} {stats['count']:5d} jokes  avg={avg}  {stars_str}"
+        is_active = self._is_recently_active(stats.get("last_created"))
+        print(self._format_active_line(line, is_active))
+
+        # Print children
+        child_list = children.get(md5, [])
+        for j, child_md5 in enumerate(child_list):
+            child_is_last = j == len(child_list) - 1
+            self._print_adapter_node(
+                child_md5, by_md5, children, is_last_model, child_is_last, depth + 1
+            )
+
+    def _group_stats_by_schema_model(
+        self, adapter_stats: list[dict[str, Any]]
+    ) -> dict[str, dict[str, list[dict[str, Any]]]]:
+        """Group stats by schema -> model -> adapters."""
+        by_schema: dict[str, dict[str, list[dict[str, Any]]]] = {}
         for stats in adapter_stats:
             if stats["count"] == 0:
                 continue
+            schema = stats.get("schema") or "unknown"
             model_name = stats.get("model_name") or "unknown"
-            if model_name not in by_model:
-                by_model[model_name] = []
-            by_model[model_name].append(stats)
-        return by_model
-
-    def _print_adapter_line(self, stats: dict[str, Any], is_last: bool) -> None:
-        """Print a single adapter stats line in tree format."""
-        prefix = "└── " if is_last else "├── "
-        avg = f"{stats['avg_stars']:.2f}" if stats["avg_stars"] else "N/A"
-        stars_str = self._format_star_distribution(stats.get("distribution", {}), stats["count"])
-        md5 = stats["md5"]
-        adapter_label = f"{md5[:2]}..{md5[-4:]}" if md5 else "(no adapter)"
-        print(f"{prefix}{adapter_label:16s}  {stats['count']:5d} jokes  avg={avg}  {stars_str}")
+            if schema not in by_schema:
+                by_schema[schema] = {}
+            if model_name not in by_schema[schema]:
+                by_schema[schema][model_name] = []
+            by_schema[schema][model_name].append(stats)
+        return by_schema
 
     def _format_star_distribution(self, dist: dict[int, int], total: int) -> str:
         """Format star distribution as: 5★:0(0.0%)  4★:18(0.2%)  3★:504(6.3%)  ..."""
@@ -199,49 +595,69 @@ class JokesterCLI(Tool):
     def _get_latest_adapter_from_jokes(self, context_key: str) -> dict[str, Any] | None:
         """Get adapter info from most recent joke."""
         assert self._pg is not None
-        sql = text("""
+        prefix = self._schema_prefix()
+        sql = text(f"""
             SELECT t.adapter_info
-            FROM agent_jokester_training t
-            JOIN atomic_facts af ON t.fact_id = af.id
+            FROM {prefix}agent_jokester_training t
+            JOIN {prefix}atomic_facts af ON t.fact_id = af.id
             WHERE af.context_key = :context_key AND t.adapter_info IS NOT NULL
             ORDER BY af.id DESC
             LIMIT 1
         """)
-        with self._pg.connect() as conn:
-            row = conn.execute(sql, {"context_key": context_key}).fetchone()
-        if not row or not row[0]:
+        try:
+            with self._pg.connect() as conn:
+                row = conn.execute(sql, {"context_key": context_key}).fetchone()
+            if not row or not row[0]:
+                return None
+            info = row[0]
+            return {"name": info.get("actual") or info.get("requested"), "md5": info.get("md5")}
+        except ProgrammingError:
+            # Table doesn't exist yet (empty schema)
             return None
-        info = row[0]
-        return {"name": info.get("actual") or info.get("requested"), "md5": info.get("md5")}
 
-    def _get_stats_by_adapter(
-        self, max_chars: int | None = None, model: str | None = None
+    def _get_stats_by_adapter_in_schema(
+        self, schema: str, max_chars: int | None = None, model: str | None = None
     ) -> list[dict[str, Any]]:
-        """Get rating stats grouped by adapter md5."""
+        """Get rating stats grouped by adapter md5 for a specific schema."""
         assert self._pg is not None
         context_key = self._get_context_key()
+        prefix = self._schema_prefix(schema)
         params: dict[str, Any] = {"context_key": context_key}
-        chars_join, chars_filter = self._build_chars_filter(max_chars, params)
-        model_join, model_filter = self._build_model_filter(model, params)
+        chars_join, chars_filter = self._build_chars_filter(max_chars, params, prefix)
+        model_join, model_filter = self._build_model_filter(model, params, prefix)
 
-        sql = self._build_adapter_stats_sql(chars_join, model_join, chars_filter, model_filter)
-        with self._pg.connect() as conn:
-            rows = conn.execute(sql, params).fetchall()
-            return self._build_adapter_results(conn, context_key, rows, params, max_chars)
+        sql = self._build_adapter_stats_sql(
+            prefix, chars_join, model_join, chars_filter, model_filter
+        )
+        try:
+            with self._pg.connect() as conn:
+                rows = conn.execute(sql, params).fetchall()
+                return self._build_adapter_results(
+                    conn, context_key, rows, params, max_chars, prefix, schema
+                )
+        except ProgrammingError:
+            # Table doesn't exist yet (empty schema)
+            return []
 
     def _build_adapter_stats_sql(
-        self, chars_join: str, model_join: str, chars_filter: str, model_filter: str
+        self,
+        prefix: str,
+        chars_join: str,
+        model_join: str,
+        chars_filter: str,
+        model_filter: str,
     ) -> Any:
         """Build SQL for adapter stats aggregation."""
         return text(f"""
             SELECT t.adapter_info->>'md5' as adapter_md5,
                    t.base_model as model_name,
                    COUNT(*) as total, COUNT(afd.id) as rated,
-                   AVG((afd.context->>'stars')::int) as avg_stars
-            FROM atomic_facts af
-            JOIN agent_jokester_training t ON t.fact_id = af.id
+                   AVG((afd.context->>'stars')::int) as avg_stars,
+                   MAX(af.created_at) as last_created
+            FROM {prefix}atomic_facts af
+            JOIN {prefix}agent_jokester_training t ON t.fact_id = af.id
             {chars_join} {model_join}
-            LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            LEFT JOIN {prefix}atomic_feedback_details afd ON af.id = afd.fact_id
             WHERE af.context_key = :context_key AND af.type = 'solution'
               {chars_filter} {model_filter}
             GROUP BY t.base_model, t.adapter_info->>'md5'
@@ -255,22 +671,26 @@ class JokesterCLI(Tool):
         rows: list[Any],
         params: dict[str, Any],
         max_chars: int | None,
+        prefix: str,
+        schema: str,
     ) -> list[dict[str, Any]]:
         """Build result dicts with distribution for each adapter."""
         results = []
         for row in rows:
-            md5, model_name, total, rated, avg_stars = row
+            md5, model_name, total, rated, avg_stars, last_created = row
             dist = self._query_adapter_distribution(
-                conn, context_key, md5, model_name, params, max_chars
+                conn, context_key, md5, model_name, params, max_chars, prefix
             )
             results.append(
                 {
                     "md5": md5,
                     "model_name": model_name,
+                    "schema": schema,
                     "count": total,
                     "rated": rated,
                     "avg_stars": avg_stars,
                     "distribution": dist,
+                    "last_created": last_created,
                 }
             )
         return results
@@ -283,11 +703,12 @@ class JokesterCLI(Tool):
         base_model: str,
         base_params: dict[str, Any],
         max_chars: int | None = None,
+        prefix: str = "",
     ) -> dict[int, int]:
         """Query star distribution for a specific adapter md5 and base model."""
         params = dict(base_params)
         params["base_model"] = base_model
-        chars_join, chars_filter = self._build_chars_filter(max_chars, params)
+        chars_join, chars_filter = self._build_chars_filter(max_chars, params, prefix)
 
         if adapter_md5 is None:
             md5_filter = "AND t.adapter_info->>'md5' IS NULL"
@@ -297,10 +718,10 @@ class JokesterCLI(Tool):
 
         sql = text(f"""
             SELECT (afd.context->>'stars')::int as stars, COUNT(*) as cnt
-            FROM atomic_facts af
-            JOIN agent_jokester_training t ON t.fact_id = af.id
+            FROM {prefix}atomic_facts af
+            JOIN {prefix}agent_jokester_training t ON t.fact_id = af.id
             {chars_join}
-            JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            JOIN {prefix}atomic_feedback_details afd ON af.id = afd.fact_id
             WHERE af.context_key = :context_key AND af.type = 'solution'
               AND t.base_model = :base_model
               {chars_filter} {md5_filter}
@@ -312,41 +733,50 @@ class JokesterCLI(Tool):
     def _get_latest_model(self, context_key: str) -> str | None:
         """Get base model name from most recent joke."""
         assert self._pg is not None
-        sql = text("""
+        prefix = self._schema_prefix()
+        sql = text(f"""
             SELECT t.base_model
-            FROM agent_jokester_training t
-            JOIN atomic_facts af ON t.fact_id = af.id
+            FROM {prefix}agent_jokester_training t
+            JOIN {prefix}atomic_facts af ON t.fact_id = af.id
             WHERE af.context_key = :context_key
             ORDER BY af.id DESC
             LIMIT 1
         """)
-        with self._pg.connect() as conn:
-            row = conn.execute(sql, {"context_key": context_key}).fetchone()
-        return row[0] if row else None
+        try:
+            with self._pg.connect() as conn:
+                row = conn.execute(sql, {"context_key": context_key}).fetchone()
+            return row[0] if row else None
+        except ProgrammingError:
+            # Table doesn't exist yet (empty schema)
+            return None
 
     def _query_haiku_stats(self, max_chars: int | None = None) -> dict[str, Any]:
-        """Query stats for Haiku-generated jokes."""
+        """Query stats for Haiku-generated jokes from reference schema."""
         assert self._pg is not None
+
+        # If no reference schema configured, return empty
+        if not self._reference_schema:
+            return {"total": 0, "rated": 0, "avg_stars": None, "dist": {}}
+
+        prefix = self._schema_prefix(self._reference_schema)
         context_key = self._get_context_key()
         params: dict[str, Any] = {"context_key": context_key}
-        chars_join, chars_filter = self._build_chars_filter(max_chars, params)
+        chars_join, chars_filter = self._build_chars_filter(max_chars, params, prefix)
 
         sql = text(f"""
             SELECT COUNT(*) as total, COUNT(afd.id) as rated,
                    AVG((afd.context->>'stars')::int) as avg_stars
-            FROM atomic_facts af
-            JOIN agent_jokester_model_usage u ON u.fact_id = af.id
+            FROM {prefix}atomic_facts af
+            JOIN {prefix}agent_jokester_model_usage u ON u.fact_id = af.id
             {chars_join}
-            LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            LEFT JOIN {prefix}atomic_feedback_details afd ON af.id = afd.fact_id
             WHERE af.context_key = :context_key AND af.type = 'solution'
               AND u.model_name LIKE '%haiku%' {chars_filter}
         """)
         with self._pg.connect() as conn:
             row = conn.execute(sql, params).fetchone()
             total, rated, avg_stars = row[0], row[1], row[2]
-            dist = self._query_haiku_distribution(
-                conn, context_key, chars_join, chars_filter, max_chars
-            )
+            dist = self._query_haiku_distribution(conn, context_key, max_chars, prefix)
 
         return {"total": total, "rated": rated, "avg_stars": avg_stars, "dist": dist}
 
@@ -354,20 +784,18 @@ class JokesterCLI(Tool):
         self,
         conn: Any,
         context_key: str,
-        chars_join: str,
-        chars_filter: str,
-        max_chars: int | None = None,
+        max_chars: int | None,
+        prefix: str,
     ) -> dict[int, int]:
-        """Query star distribution for Haiku jokes."""
+        """Query star distribution for Haiku jokes from reference schema."""
         params: dict[str, Any] = {"context_key": context_key}
-        if max_chars:
-            params["max_chars"] = max_chars
+        chars_join, chars_filter = self._build_chars_filter(max_chars, params, prefix)
         sql = text(f"""
             SELECT (afd.context->>'stars')::int as stars, COUNT(*) as cnt
-            FROM atomic_facts af
-            JOIN agent_jokester_model_usage u ON u.fact_id = af.id
+            FROM {prefix}atomic_facts af
+            JOIN {prefix}agent_jokester_model_usage u ON u.fact_id = af.id
             {chars_join}
-            JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            JOIN {prefix}atomic_feedback_details afd ON af.id = afd.fact_id
             WHERE af.context_key = :context_key AND af.type = 'solution'
               AND u.model_name LIKE '%haiku%' {chars_filter}
             GROUP BY (afd.context->>'stars')::int
@@ -376,7 +804,7 @@ class JokesterCLI(Tool):
         return {r[0]: r[1] for r in rows}
 
     def _build_chars_filter(
-        self, max_chars: int | None, params: dict[str, Any] | None = None
+        self, max_chars: int | None, params: dict[str, Any] | None = None, prefix: str = ""
     ) -> tuple[str, str]:
         """Build JOIN and WHERE clause for character length filtering.
 
@@ -386,12 +814,12 @@ class JokesterCLI(Tool):
             return "", ""
         if params is not None:
             params["max_chars"] = max_chars
-        chars_join = "JOIN atomic_solution_details asd ON asd.fact_id = af.id"
+        chars_join = f"JOIN {prefix}atomic_solution_details asd ON asd.fact_id = af.id"
         chars_filter = "AND length(asd.answer_text) < :max_chars"
         return chars_join, chars_filter
 
     def _build_model_filter(
-        self, model: str | None, params: dict[str, Any] | None = None
+        self, model: str | None, params: dict[str, Any] | None = None, prefix: str = ""
     ) -> tuple[str, str]:
         """Build JOIN and WHERE clause for model filtering.
 
@@ -407,7 +835,7 @@ class JokesterCLI(Tool):
             if "%" not in pattern:
                 pattern = f"%{pattern}%"
             params["model_pattern"] = pattern
-        model_join = "JOIN agent_jokester_model_usage mu ON mu.fact_id = af.id"
+        model_join = f"JOIN {prefix}agent_jokester_model_usage mu ON mu.fact_id = af.id"
         model_filter = "AND LOWER(mu.model_name) LIKE :model_pattern"
         return model_join, model_filter
 
@@ -420,27 +848,72 @@ class JokesterCLI(Tool):
             return 1
 
         prompt_template, batch_size, provider, model = rate_config
-        dry_run = getattr(self.args, "dry_run", False)
+        schemas = self._get_schemas_to_query(getattr(self.args, "schema", None))
+        if not schemas:
+            print("No schemas found with joke data.")
+            return 0
 
-        llm_caller = self._create_llm_caller(dry_run=dry_run)
+        llm_caller = self._create_llm_caller(dry_run=getattr(self.args, "dry_run", False))
         if llm_caller is None:
             print("Error: Could not create LLM caller")
             return 1
 
         try:
-            service = BatchRatingService(
-                lg=self.lg,
-                pg=self._pg,
-                llm_caller=llm_caller,
-                prompt_template=prompt_template,
-                context_key=self._get_context_key(),
-                batch_size=batch_size,
-                provider=provider,
-                model=model,
+            total = self._rate_all_schemas(
+                schemas, llm_caller, prompt_template, batch_size, provider, model
             )
-            return self._run_rating(service, batch_size)
+            if total == 0:
+                print("No unrated jokes found.")
+            return 0
         finally:
             llm_caller.close()
+
+    def _rate_all_schemas(
+        self,
+        schemas: list[str],
+        llm_caller: LLMCaller,
+        prompt_template: str,
+        batch_size: int,
+        provider: str,
+        model: str,
+    ) -> int:
+        """Rate jokes across all schemas. Returns total count rated."""
+        total = 0
+        for schema in schemas:
+            total += self._rate_schema(
+                schema, llm_caller, prompt_template, batch_size, provider, model
+            )
+        return total
+
+    def _rate_schema(
+        self,
+        schema: str,
+        llm_caller: LLMCaller,
+        prompt_template: str,
+        batch_size: int,
+        provider: str,
+        model: str,
+    ) -> int:
+        """Rate jokes in a specific schema. Returns count of rated jokes."""
+        assert self._pg is not None
+        service = BatchRatingService(
+            lg=self.lg,
+            pg=self._pg,
+            llm_caller=llm_caller,
+            prompt_template=prompt_template,
+            context_key=self._get_context_key(),
+            batch_size=batch_size,
+            provider=provider,
+            model=model,
+            schema=schema,
+        )
+        unrated = service.get_unrated(self.args.limit)
+        if not unrated:
+            return 0
+
+        print(f"\n=== {schema} ===")
+        print(f"Unrated jokes: ~{len(unrated)}")
+        return self._run_rating(service, batch_size)
 
     def _load_rate_config(self) -> tuple[str, int, str, str] | None:
         """Load rating config. Returns (prompt, batch_size, provider, model) or None."""
@@ -460,17 +933,7 @@ class JokesterCLI(Tool):
         return (prompt_template, batch_size, provider, model)
 
     def _run_rating(self, service: BatchRatingService, batch_size: int) -> int:
-        """Execute rating and print results."""
-        unrated = service.get_unrated(self.args.limit)
-        if not unrated:
-            print("No unrated jokes found.")
-            return 0
-
-        print(f"\nUnrated jokes: ~{len(unrated)} (estimate)")
-        print(f"Batch size: {batch_size}")
-        print(f"Estimated batches: ~{(len(unrated) + batch_size - 1) // batch_size}")
-        print()
-
+        """Execute rating and print results. Returns count of rated jokes."""
         total_rated = 0
         batch_count = 0
 
@@ -483,10 +946,10 @@ class JokesterCLI(Tool):
                 joke = r.content[:90] + "..." if len(r.content) > 90 else r.content
                 print(f"{r.id}  ({r.score})  {stars}  {joke}")
 
-        print(f"\n✓ Rated: {total_rated}")
-        print(f"  Batches: {batch_count}")
+        if total_rated > 0:
+            print(f"\n✓ Rated: {total_rated} ({batch_count} batches)")
 
-        return 0
+        return total_rated
 
     def _get_context_key(self) -> str:
         """Get context_key from agent identity config."""
@@ -495,7 +958,13 @@ class JokesterCLI(Tool):
         agent_config = self._get_agent_config()
         if agent_config is None:
             raise RuntimeError("Could not load agent config")
-        identity_config = agent_config.get("identity", {})
+
+        # Identity can be at top level or under kelt.identity
+        identity_config = agent_config.get("identity")
+        if not identity_config:
+            kelt_config = agent_config.get("kelt", {})
+            identity_config = kelt_config.get("identity", {})
+
         identity = Identity.from_config(identity_config)
         return identity.context_key
 
@@ -554,29 +1023,49 @@ class JokesterCLI(Tool):
     ) -> dict[str, Any]:
         """Get rating statistics using lateral subquery for latest feedback per fact."""
         assert self._pg is not None
+        prefix = self._schema_prefix()
         context_key = self._get_context_key()
-        haiku_filter = self._build_haiku_filter(exclude_haiku)
         params: dict[str, Any] = {"context_key": context_key}
-        chars_join, chars_filter = self._build_chars_filter(max_chars, params)
-        model_join, model_filter = self._build_model_filter(model, params)
 
-        sql = text(f"""
+        sql = self._build_rating_stats_sql(prefix, exclude_haiku, max_chars, model, params)
+        try:
+            with self._pg.connect() as conn:
+                result = conn.execute(sql, params).fetchone()
+            return self._parse_rating_stats_result(result)
+        except ProgrammingError:
+            # Table doesn't exist yet (empty schema)
+            return {"total": 0, "rated": 0, "unrated": 0, "avg_stars": None}
+
+    def _build_rating_stats_sql(
+        self,
+        prefix: str,
+        exclude_haiku: bool,
+        max_chars: int | None,
+        model: str | None,
+        params: dict[str, Any],
+    ) -> Any:
+        """Build SQL for rating stats query."""
+        haiku_filter = self._build_haiku_filter(exclude_haiku, prefix)
+        chars_join, chars_filter = self._build_chars_filter(max_chars, params, prefix)
+        model_join, model_filter = self._build_model_filter(model, params, prefix)
+
+        return text(f"""
             SELECT COUNT(*) as total,
                    COUNT(*) FILTER (WHERE afd.id IS NOT NULL) as rated,
                    COUNT(*) FILTER (WHERE afd.id IS NULL) as unrated,
                    AVG((afd.context->>'stars')::int) as avg_stars
-            FROM atomic_facts af
-            {chars_join}
-            {model_join}
+            FROM {prefix}atomic_facts af
+            {chars_join} {model_join}
             LEFT JOIN LATERAL (
-                SELECT afd2.id, afd2.context FROM atomic_feedback_details afd2
+                SELECT afd2.id, afd2.context FROM {prefix}atomic_feedback_details afd2
                 WHERE afd2.fact_id = af.id ORDER BY afd2.id DESC LIMIT 1
             ) afd ON true
             WHERE af.context_key = :context_key AND af.type = 'solution'
               {haiku_filter} {chars_filter} {model_filter}
         """)
-        with self._pg.connect() as conn:
-            result = conn.execute(sql, params).fetchone()
+
+    def _parse_rating_stats_result(self, result: Any) -> dict[str, Any]:
+        """Parse rating stats query result into dict."""
         return {
             "total": result[0],
             "rated": result[1],
@@ -584,12 +1073,12 @@ class JokesterCLI(Tool):
             "avg_stars": float(result[3]) if result[3] else None,
         }
 
-    def _build_haiku_filter(self, exclude_haiku: bool) -> str:
+    def _build_haiku_filter(self, exclude_haiku: bool, prefix: str = "") -> str:
         """Build WHERE clause to exclude Haiku jokes."""
         if not exclude_haiku:
             return ""
-        return """AND NOT EXISTS (
-            SELECT 1 FROM agent_jokester_model_usage u
+        return f"""AND NOT EXISTS (
+            SELECT 1 FROM {prefix}agent_jokester_model_usage u
             WHERE u.fact_id = af.id AND u.model_name LIKE '%haiku%'
         )"""
 
@@ -601,17 +1090,18 @@ class JokesterCLI(Tool):
     ) -> list[dict[str, Any]]:
         """Get rating distribution using DISTINCT ON for latest rating per fact."""
         assert self._pg is not None
+        prefix = self._schema_prefix()
         context_key = self._get_context_key()
-        haiku_filter = self._build_haiku_filter(exclude_haiku)
+        haiku_filter = self._build_haiku_filter(exclude_haiku, prefix)
         params: dict[str, Any] = {"context_key": context_key}
-        chars_join, chars_filter = self._build_chars_filter(max_chars, params)
-        model_join, model_filter = self._build_model_filter(model, params)
+        chars_join, chars_filter = self._build_chars_filter(max_chars, params, prefix)
+        model_join, model_filter = self._build_model_filter(model, params, prefix)
 
         sql = text(f"""
             WITH latest_ratings AS (
                 SELECT DISTINCT ON (af.id) (afd.context->>'stars')::int as stars
-                FROM atomic_facts af
-                JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+                FROM {prefix}atomic_facts af
+                JOIN {prefix}atomic_feedback_details afd ON af.id = afd.fact_id
                 {chars_join}
                 {model_join}
                 WHERE af.context_key = :context_key AND af.type = 'solution'
@@ -622,6 +1112,10 @@ class JokesterCLI(Tool):
                    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) as pct
             FROM latest_ratings GROUP BY stars ORDER BY stars DESC
         """)
-        with self._pg.connect() as conn:
-            rows = conn.execute(sql, params).fetchall()
-        return [{"stars": r[0], "count": r[1], "pct": float(r[2])} for r in rows]
+        try:
+            with self._pg.connect() as conn:
+                rows = conn.execute(sql, params).fetchall()
+            return [{"stars": r[0], "count": r[1], "pct": float(r[2])} for r in rows]
+        except ProgrammingError:
+            # Table doesn't exist yet (empty schema)
+            return []

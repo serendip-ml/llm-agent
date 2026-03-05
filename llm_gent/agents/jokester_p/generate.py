@@ -6,13 +6,14 @@ novelty validation, denylist filtering, and retry logic.
 
 from __future__ import annotations
 
-from collections import deque
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from llm_infer.client.types import AdapterInfo
 from pydantic import AliasChoices, BaseModel, Field
 
+from .history import JokeHistory, JokeRecord
 from .novelty import NoveltyCheck, NoveltyChecker
 
 
@@ -26,8 +27,8 @@ if TYPE_CHECKING:
 class Joke(BaseModel):
     """Structured joke output."""
 
-    text: str = Field(validation_alias=AliasChoices("text", "joke"))
-    style: str  # pun, one-liner, observational, absurdist, wordplay, dark, etc.
+    text: str = Field(min_length=1, validation_alias=AliasChoices("text", "joke"))
+    style: str = Field(min_length=1)  # pun, one-liner, observational, absurdist, etc.
 
 
 @dataclass
@@ -81,6 +82,7 @@ class JokeGenerator:
         directive_trait: DirectiveTrait | None = None,
         max_retries: int = 3,
         denylist: list[str] | None = None,
+        joke_history: JokeHistory | None = None,
     ) -> None:
         """Initialize joke generator.
 
@@ -91,6 +93,7 @@ class JokeGenerator:
             directive_trait: Optional directive trait for system prompt.
             max_retries: Maximum retry attempts (default: 3).
             denylist: Words/phrases to filter (case-insensitive).
+            joke_history: Tracker for joke history (default: recent mode).
         """
         self._lg = lg
         self._llm = llm_trait
@@ -99,8 +102,7 @@ class JokeGenerator:
         self._max_retries = max_retries
         self._denylist = [term.lower() for term in (denylist or [])]
         self._cumulative_attempts = 0
-        # Track (generated_joke, similar_existing_joke) pairs for smarter retries
-        self._recent_failed: deque[tuple[str, str | None]] = deque(maxlen=10)
+        self._history = joke_history or JokeHistory(lg)
 
     def generate(self, context: list[str]) -> GenerationAttempt:
         """Generate a novel joke with retry loop.
@@ -130,6 +132,43 @@ class JokeGenerator:
             adapter=None,
         )
 
+    def record_success(self, joke_text: str, fact_id: int) -> None:
+        """Record successful joke so future generations avoid it."""
+        self._history.record(joke_text, fact_id)
+
+    def check_novelty(
+        self, joke: Joke, model_name: str, adapter: AdapterInfo | None
+    ) -> GenerationAttempt:
+        """Check novelty for a pre-generated joke.
+
+        Args:
+            joke: The joke to check.
+            model_name: Model that generated the joke.
+            adapter: Adapter info if applicable.
+
+        Returns:
+            GenerationAttempt with novelty result.
+        """
+        novelty = self._novelty.check(joke.text, current_model=model_name, current_adapter=adapter)
+        if not novelty.is_novel:
+            return GenerationAttempt(
+                joke=None,
+                run_attempts=1,
+                cumulative_attempts=1,
+                model_name=model_name,
+                adapter=adapter,
+                novelty=novelty,
+            )
+
+        return GenerationAttempt(
+            joke=joke,
+            run_attempts=1,
+            cumulative_attempts=1,
+            model_name=model_name,
+            adapter=adapter,
+            novelty=novelty,
+        )
+
     def _success_attempt(
         self,
         attempt: int,
@@ -138,8 +177,7 @@ class JokeGenerator:
         adapter: AdapterInfo | None,
         novelty: NoveltyCheck | None,
     ) -> GenerationAttempt:
-        """Build successful generation attempt and reset state."""
-        self._recent_failed.clear()
+        """Build successful generation attempt."""
         cumulative = self._cumulative_attempts
         self._cumulative_attempts = 0
         return GenerationAttempt(
@@ -199,6 +237,88 @@ class JokeGenerator:
 
         return result.parsed, result.model, result.adapter
 
+    async def generate_async(self, context: list[str]) -> GenerationAttempt:
+        """Generate a novel joke with retry loop (async version).
+
+        Same as generate() but uses async I/O for concurrent requests.
+        Use with asyncio.gather() for parallel generation.
+
+        Args:
+            context: Recent successful jokes for style inspiration.
+
+        Returns:
+            GenerationAttempt with result and metadata.
+        """
+        max_attempts = self._max_retries + 1
+
+        for attempt in range(1, max_attempts + 1):
+            if attempt > 1:
+                self._lg.debug("retrying joke generation...", extra={"attempt": attempt})
+
+            result = await self._try_single_attempt_async(context, attempt)
+            if result is not None:
+                return self._success_attempt(attempt, *result)
+
+        self._lg.debug("failed to generate novel joke", extra={"attempts": max_attempts})
+        return GenerationAttempt(
+            joke=None,
+            run_attempts=max_attempts,
+            cumulative_attempts=self._cumulative_attempts,
+            model_name="unknown",
+            adapter=None,
+        )
+
+    async def _try_single_attempt_async(
+        self, context: list[str], attempt: int
+    ) -> tuple[Joke, str, AdapterInfo | None, NoveltyCheck | None] | None:
+        """Try to generate a single novel joke (async version)."""
+        self._cumulative_attempts += 1
+        retry_feedback = "" if attempt == 1 else "Try a completely different style."
+
+        joke, model_name, adapter = await self._call_llm_async(context, retry_feedback)
+
+        if joke is None:
+            self._lg.warning("LLM failed to generate joke", extra={"attempt": attempt})
+            return None
+
+        # Run sync validation in thread to avoid blocking event loop
+        return await asyncio.to_thread(self._validate, joke, model_name, adapter, attempt)
+
+    async def _call_llm_async(
+        self, context: list[str], retry_feedback: str
+    ) -> tuple[Joke | None, str, AdapterInfo | None]:
+        """Generate joke via LLM with structured output (async version)."""
+        import appinfra.time
+        from llm_infer.client.exceptions import BackendRequestError, BackendTimeoutError
+
+        from ...core.llm.types import Message
+
+        prompt = self._build_prompt(context, retry_feedback)
+        self._lg.debug("sending LLM request...")
+        start_t = appinfra.time.start()
+        try:
+            result = await self._llm.complete_async(
+                [Message(role="user", content=prompt)], output_schema=Joke
+            )
+        except (BackendTimeoutError, BackendRequestError) as e:
+            prompt_preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
+            self._lg.error(
+                "LLM request failed",
+                extra={
+                    "after": appinfra.time.since(start_t),
+                    "prompt": prompt_preview,
+                    "error": str(e),
+                },
+            )
+            return None, "unknown", None
+        self._lg.debug("LLM request completed", extra={"after": appinfra.time.since(start_t)})
+
+        if result.parsed is None:
+            self._lg.warning("LLM failed to generate structured joke")
+            return None, result.model, result.adapter
+
+        return result.parsed, result.model, result.adapter
+
     def _validate(
         self, joke: Joke, model_name: str, adapter: AdapterInfo | None, attempt: int
     ) -> tuple[Joke, str, AdapterInfo | None, NoveltyCheck | None] | None:
@@ -207,17 +327,17 @@ class JokeGenerator:
             self._lg.debug(
                 "joke incomplete (question without punchline)", extra={"attempt": attempt}
             )
-            self._recent_failed.append((joke.text, None))
             return None
 
         if self._contains_denied(joke.text):
             self._lg.debug("joke denied by denylist", extra={"attempt": attempt})
-            self._recent_failed.append((joke.text, None))
             return None
 
-        novelty = self._novelty.check(joke.text, current_model=model_name)
+        novelty = self._novelty.check(joke.text, current_model=model_name, current_adapter=adapter)
         if not novelty.is_novel:
-            self._recent_failed.append((joke.text, novelty.similar_joke))
+            # Record the existing joke we collided with (not the generated one)
+            if novelty.similar_joke:
+                self._history.record(novelty.similar_joke, novelty.similar_fact)
             return None
 
         return joke, model_name, adapter, novelty
@@ -252,9 +372,9 @@ class JokeGenerator:
             context_text = "Recent jokes you've told:\n" + "\n".join(f"- {j}" for j in context)
 
         avoid_text = ""
-        if self._recent_failed:
-            recent = list(self._recent_failed)[-5:]
-            avoid_text = self._format_avoid_section(recent)
+        jokes_to_avoid = self._history.get_for_prompt()
+        if jokes_to_avoid:
+            avoid_text = self._format_avoid_section(jokes_to_avoid)
 
         retry_text = f"\n\n{retry_feedback}" if retry_feedback else ""
 
@@ -264,17 +384,20 @@ class JokeGenerator:
 
 Return your joke in JSON format with 'text' and 'style' fields."""
 
-    def _format_avoid_section(self, recent: list[tuple[str, str | None]]) -> str:
-        """Format the avoid section with detailed similarity info."""
+    def _format_avoid_section(self, jokes: list[tuple[JokeRecord, int]]) -> str:
+        """Format the avoid section with jokes to avoid.
+
+        Args:
+            jokes: List of (JokeRecord, count) tuples.
+        """
         lines = [
             "\n\nDO NOT generate jokes similar to these - they are too close to existing jokes:"
         ]
-        for generated, existing in recent:
-            if existing:
-                lines.append(f'- You tried: "{generated}"')
-                lines.append(f'  Too similar to existing: "{existing}"')
+        for record, count in jokes:
+            if count > 1:
+                lines.append(f'- BLOCKED {count}x: "{record.joke}"')
             else:
-                lines.append(f'- Rejected: "{generated}"')
+                lines.append(f'- "{record.joke}"')
         lines.append(
             "\nGenerate something with a COMPLETELY different topic, setup, and punchline."
         )

@@ -241,46 +241,52 @@ def _generate_pairs(
     target: int,
     no_reuse: bool,
 ) -> list[StarPreferencePair]:
-    """Generate pairs by cycling through chosen pool until target or exhausted."""
+    """Generate pairs by iterating rejected pool once (O(n) instead of O(n*m))."""
+    if not chosen_pool or not rejected_pool:
+        return []
+
     pairs: list[StarPreferencePair] = []
-    used_rejected: set[int] = set()
     used_chosen: set[int] = set()
     chosen_idx = 0
-    max_iterations = len(chosen_pool) * len(rejected_pool)
 
-    while len(pairs) < target and len(used_rejected) < len(rejected_pool):
-        chosen = chosen_pool[chosen_idx % len(chosen_pool)]
-        chosen_idx += 1
-
-        if no_reuse and chosen.id in used_chosen:
-            if chosen_idx >= max_iterations:
-                break
-            continue
-
-        match = _find_match(chosen, rejected_pool, used_rejected, margin)
-        if match:
-            pairs.append(PreferencePair(chosen=chosen, rejected=match))
-            used_rejected.add(match.id)
-            used_chosen.add(chosen.id)
-
-        if chosen_idx >= max_iterations:
+    # Iterate rejected once - each rejected item is used at most once
+    for rejected in rejected_pool:
+        if len(pairs) >= target:
             break
+
+        # Find a chosen that can pair with this rejected
+        match = _find_chosen_match(rejected, chosen_pool, used_chosen, margin, no_reuse, chosen_idx)
+        if match:
+            chosen, new_idx = match
+            pairs.append(PreferencePair(chosen=chosen, rejected=rejected))
+            if no_reuse:
+                used_chosen.add(chosen.id)
+            chosen_idx = new_idx
 
     return pairs
 
 
-def _find_match(
-    chosen: StarRatedItem,
-    pool: list[StarRatedItem],
+def _find_chosen_match(
+    rejected: StarRatedItem,
+    chosen_pool: list[StarRatedItem],
     used: set[int],
     margin: int,
-) -> StarRatedItem | None:
-    """Find first unused rejected item that meets margin requirement."""
-    for rejected in pool:
+    no_reuse: bool,
+    start_idx: int,
+) -> tuple[StarRatedItem, int] | None:
+    """Find a chosen item that can pair with this rejected item.
+
+    Returns (chosen, next_idx) or None if no match found.
+    """
+    # Try from start_idx first (for cycling through chosen in order)
+    pool_size = len(chosen_pool)
+    for offset in range(pool_size):
+        idx = (start_idx + offset) % pool_size
+        chosen = chosen_pool[idx]
         if (
-            rejected.id not in used
-            and rejected.id != chosen.id
-            and chosen.score - rejected.score >= margin
+            chosen.score - rejected.score >= margin
+            and chosen.id != rejected.id
+            and (not no_reuse or chosen.id not in used)
         ):
-            return rejected
+            return chosen, (idx + 1) % pool_size
     return None

@@ -3,12 +3,21 @@
 from unittest.mock import MagicMock
 
 import pytest
+from appinfra import DotDict
 
 from llm_gent.agents.jokester_p.novelty import NoveltyCheck, NoveltyChecker
 from llm_gent.core.training import StarPreferencePair, StarRatedItem
 
 
 pytestmark = pytest.mark.unit
+
+
+def _novelty_config(threshold: float = 0.85, mode: str | None = None) -> DotDict:
+    """Create novelty config for tests."""
+    config = DotDict({"similarity": {"threshold": threshold}})
+    if mode:
+        config["mode"] = mode
+    return config
 
 
 class TestNoveltyCheck:
@@ -46,7 +55,7 @@ class TestNoveltyChecker:
 
     def test_has_embedder_delegates_to_trait(self, mock_logger, mock_learn_trait):
         """has_embedder property delegates to learn trait."""
-        checker = NoveltyChecker(mock_logger, mock_learn_trait, similarity_threshold=0.85)
+        checker = NoveltyChecker(mock_logger, mock_learn_trait, _novelty_config())
         assert checker.has_embedder is True
 
         mock_learn_trait.has_embedder = False
@@ -55,7 +64,7 @@ class TestNoveltyChecker:
     def test_check_novel_no_existing_jokes(self, mock_logger, mock_learn_trait):
         """Check returns novel when no existing jokes found."""
         mock_learn_trait.recall.return_value = []
-        checker = NoveltyChecker(mock_logger, mock_learn_trait, similarity_threshold=0.85)
+        checker = NoveltyChecker(mock_logger, mock_learn_trait, _novelty_config())
 
         result = checker.check("Why did the chicken cross the road?")
 
@@ -70,7 +79,7 @@ class TestNoveltyChecker:
         similar.entity.content = "Different joke"
         mock_learn_trait.recall.return_value = [similar]
 
-        checker = NoveltyChecker(mock_logger, mock_learn_trait, similarity_threshold=0.85)
+        checker = NoveltyChecker(mock_logger, mock_learn_trait, _novelty_config())
         result = checker.check("Why did the chicken cross the road?")
 
         assert result.is_novel is True
@@ -84,7 +93,7 @@ class TestNoveltyChecker:
         similar.entity.content = "Very similar joke"
         mock_learn_trait.recall.return_value = [similar]
 
-        checker = NoveltyChecker(mock_logger, mock_learn_trait, similarity_threshold=0.85)
+        checker = NoveltyChecker(mock_logger, mock_learn_trait, _novelty_config())
         result = checker.check("Why did the chicken cross the road?")
 
         assert result.is_novel is False
@@ -95,11 +104,51 @@ class TestNoveltyChecker:
         """Check returns not novel on error (fail closed)."""
         mock_learn_trait.recall.side_effect = Exception("Database error")
 
-        checker = NoveltyChecker(mock_logger, mock_learn_trait, similarity_threshold=0.85)
+        checker = NoveltyChecker(mock_logger, mock_learn_trait, _novelty_config())
         result = checker.check("Why did the chicken cross the road?")
 
         assert result.is_novel is False
         assert result.max_similarity == 1.0
+
+    def test_check_novel_when_table_not_exists(self, mock_logger, mock_learn_trait):
+        """Check returns novel when metadata table doesn't exist (lazy creation)."""
+        # Simulate PostgreSQL "relation does not exist" error
+        mock_learn_trait.recall.side_effect = Exception(
+            'relation "playground.agent_jokester_training" does not exist'
+        )
+
+        checker = NoveltyChecker(mock_logger, mock_learn_trait, _novelty_config())
+        result = checker.check("Why did the chicken cross the road?")
+
+        # Should treat as novel (no existing jokes), not fail closed
+        assert result.is_novel is True
+        assert result.max_similarity == 0.0
+        assert result.similar_joke is None
+
+    def test_check_novel_when_table_not_exists_sqlite(self, mock_logger, mock_learn_trait):
+        """Check returns novel on SQLite 'no such table' error."""
+        mock_learn_trait.recall.side_effect = Exception("no such table: agent_jokester_training")
+
+        checker = NoveltyChecker(mock_logger, mock_learn_trait, _novelty_config())
+        result = checker.check("Why did the chicken cross the road?")
+
+        assert result.is_novel is True
+        assert result.max_similarity == 0.0
+
+    def test_check_rejects_empty_text(self, mock_logger, mock_learn_trait):
+        """Check rejects empty joke text without calling embedder."""
+        checker = NoveltyChecker(mock_logger, mock_learn_trait, _novelty_config())
+
+        # Empty string
+        result = checker.check("")
+        assert result.is_novel is False
+        assert result.max_similarity == 1.0
+        mock_learn_trait.recall.assert_not_called()
+
+        # Whitespace only
+        result = checker.check("   ")
+        assert result.is_novel is False
+        mock_learn_trait.recall.assert_not_called()
 
 
 class TestPreferencePair:

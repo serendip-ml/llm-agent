@@ -49,6 +49,7 @@ class BatchRatingService:
         provider: str = "local",
         model: str = "auto",
         fact_type: str = "solution",
+        schema: str | None = None,
     ) -> None:
         self._lg = lg
         self._pg = pg
@@ -59,14 +60,22 @@ class BatchRatingService:
         self._provider = provider
         self._model = model
         self._fact_type = fact_type
+        self._schema = schema
+
+    def _schema_prefix(self) -> str:
+        """Get schema prefix for table names."""
+        if self._schema and self._schema != "public":
+            return f"{self._schema}."
+        return ""
 
     def get_unrated(self, limit: int | None = None) -> list[UnratedItem]:
         """Get unrated facts from the database."""
+        prefix = self._schema_prefix()
         limit_clause = "LIMIT :limit" if limit is not None else ""
         sql = text(f"""
             SELECT af.id, af.content
-            FROM atomic_facts af
-            LEFT JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            FROM {prefix}atomic_facts af
+            LEFT JOIN {prefix}atomic_feedback_details afd ON af.id = afd.fact_id
             WHERE af.context_key = :context_key
               AND af.type = :fact_type
               AND afd.id IS NULL
@@ -145,8 +154,9 @@ class BatchRatingService:
 
     def _save_rating(self, result: Result) -> bool:
         """Save a rating to the database."""
-        sql = text("""
-            INSERT INTO atomic_feedback_details
+        prefix = self._schema_prefix()
+        sql = text(f"""
+            INSERT INTO {prefix}atomic_feedback_details
                 (fact_id, signal, strength, provider_type, context, provider)
             VALUES (:fact_id, :signal, :strength, :provider_type, CAST(:context AS jsonb), :provider)
             ON CONFLICT (fact_id) DO NOTHING
