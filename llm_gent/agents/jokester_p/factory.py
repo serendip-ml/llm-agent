@@ -21,6 +21,7 @@ from .history import JokeHistory
 from .novelty import NoveltyChecker
 from .rating import BatchRater
 from .storage import Storage
+from .variety import VarietyChecker
 
 
 @dataclass
@@ -92,46 +93,31 @@ class Factory(BaseFactory):
     def _create_generator(
         cls, agent: JokesterAgent, lg: Logger, config: DotDict, learn_trait: LearnTrait
     ) -> JokeGenerator:
-        """Create JokeGenerator with novelty checker."""
-        llm_trait = agent.require_trait(LLMTrait)
-        directive_trait = agent.get_trait(DirectiveTrait)
-
+        """Create JokeGenerator with novelty and variety checkers."""
         kelt_config = config.get("kelt", {})
-        schema_config = kelt_config.get("schema", {})
-        novelty_checker = cls._create_novelty_checker(
-            lg,
-            learn_trait,
-            config.get("novelty", {}),
-            kelt_config.get("reference", {}),
-            schema_config.get("name"),
-        )
-
-        # Create joke history from RAG config
-        rag_config = config.get("novelty", {}).get("rag", {})
-        joke_history = JokeHistory.from_config(lg, rag_config)
+        novelty_config = config.get("novelty", {})
 
         return JokeGenerator(
             lg=lg,
-            llm_trait=llm_trait,
-            novelty_checker=novelty_checker,
-            directive_trait=directive_trait,
+            llm_trait=agent.require_trait(LLMTrait),
+            novelty_checker=cls._create_novelty_checker(
+                lg, learn_trait, novelty_config, kelt_config
+            ),
+            variety_checker=VarietyChecker(lg, novelty_config.get("variety", {})),
+            directive_trait=agent.get_trait(DirectiveTrait),
             max_retries=config.get("max_retries", 3),
             denylist=config.get("denylist", []),
-            joke_history=joke_history,
+            joke_history=JokeHistory.from_config(lg, novelty_config.get("rag", {})),
         )
 
     @classmethod
     def _create_novelty_checker(
-        cls,
-        lg: Logger,
-        learn_trait: LearnTrait,
-        novelty_config: DotDict,
-        reference_config: DotDict,
-        current_schema: str | None,
+        cls, lg: Logger, learn_trait: LearnTrait, novelty_config: DotDict, kelt_config: DotDict
     ) -> NoveltyChecker:
         """Create NoveltyChecker from config."""
+        schema_config = kelt_config.get("schema", {})
         resolved_config = cls._resolve_novelty_config(
-            lg, novelty_config, reference_config, current_schema
+            lg, novelty_config, kelt_config.get("reference", {}), schema_config.get("name")
         )
         return NoveltyChecker(lg, learn_trait, resolved_config)
 

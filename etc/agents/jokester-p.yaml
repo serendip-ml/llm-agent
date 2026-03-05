@@ -23,6 +23,15 @@ novelty:
     mode: avoid_most_frequent  # or "recent" for current behavior
     attach: 5          # top N most frequent to include in prompt
     history: 100       # track last N collisions
+  variety:
+    ngram:
+      enabled: true    # reject jokes with same first N words as recent jokes
+      n: 2             # number of words to check (e.g., "Why don't scientists")
+      history: 20      # remember last N openings
+    levenshtein:
+      enabled: true    # reject jokes too similar to recent (fuzzy match)
+      threshold: 0.7   # similarity threshold (0-1, higher = stricter)
+      history: 10      # remember last N full jokes
 
 denylist:
   - hipster

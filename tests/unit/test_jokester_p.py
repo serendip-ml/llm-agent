@@ -7,6 +7,7 @@ from appinfra import DotDict
 
 from llm_gent.agents.jokester_p.history import JokeHistory
 from llm_gent.agents.jokester_p.novelty import NoveltyCheck, NoveltyChecker
+from llm_gent.agents.jokester_p.variety import VarietyChecker
 from llm_gent.core.training import StarPreferencePair, StarRatedItem
 
 
@@ -207,3 +208,58 @@ class TestJokeHistory:
         history.record("Same joke")
         # Frequency should be 3, check via _frequency (internal but useful for test)
         assert history._frequency["Same joke"] == 3
+
+
+class TestVarietyChecker:
+    """Tests for VarietyChecker."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create mock logger."""
+        return MagicMock()
+
+    def test_disabled_when_no_config(self, mock_logger):
+        """Checker is disabled with empty config."""
+        checker = VarietyChecker(mock_logger, DotDict({}))
+        assert checker.enabled is False
+        result = checker.check("any joke")
+        assert result.is_varied is True
+
+    def test_ngram_rejects_same_opening(self, mock_logger):
+        """N-gram check rejects jokes with same opening."""
+        config = DotDict({"ngram": {"enabled": True, "n": 2, "history": 10}})
+        checker = VarietyChecker(mock_logger, config)
+
+        checker.record("Why don't scientists trust atoms?")
+        result = checker.check("Why don't programmers like nature?")
+        assert result.is_varied is False
+        assert "why don't" in result.reason.lower()
+
+    def test_ngram_allows_different_opening(self, mock_logger):
+        """N-gram check allows jokes with different openings."""
+        config = DotDict({"ngram": {"enabled": True, "n": 3, "history": 10}})
+        checker = VarietyChecker(mock_logger, config)
+
+        checker.record("Why don't scientists trust atoms?")
+        result = checker.check("I told my wife she was drawing her eyebrows too high.")
+        assert result.is_varied is True
+
+    def test_levenshtein_rejects_similar(self, mock_logger):
+        """Levenshtein check rejects very similar jokes."""
+        # Only enable levenshtein (no ngram) to test levenshtein specifically
+        config = DotDict({"levenshtein": {"enabled": True, "threshold": 0.7, "history": 10}})
+        checker = VarietyChecker(mock_logger, config)
+
+        checker.record("The chicken crossed the road to get to the other side.")
+        result = checker.check("The chicken crossed the street to get to the other side.")
+        assert result.is_varied is False
+        assert "similar" in result.reason.lower()
+
+    def test_levenshtein_allows_different(self, mock_logger):
+        """Levenshtein check allows sufficiently different jokes."""
+        config = DotDict({"levenshtein": {"enabled": True, "threshold": 0.8, "history": 10}})
+        checker = VarietyChecker(mock_logger, config)
+
+        checker.record("Why did the chicken cross the road?")
+        result = checker.check("I used to hate facial hair, but then it grew on me.")
+        assert result.is_varied is True

@@ -15,6 +15,7 @@ from pydantic import AliasChoices, BaseModel, Field
 
 from .history import JokeHistory, JokeRecord
 from .novelty import NoveltyCheck, NoveltyChecker
+from .variety import VarietyChecker
 
 
 if TYPE_CHECKING:
@@ -79,6 +80,7 @@ class JokeGenerator:
         lg: Logger,
         llm_trait: LLMTrait,
         novelty_checker: NoveltyChecker,
+        variety_checker: VarietyChecker | None = None,
         directive_trait: DirectiveTrait | None = None,
         max_retries: int = 3,
         denylist: list[str] | None = None,
@@ -90,6 +92,7 @@ class JokeGenerator:
             lg: Logger instance.
             llm_trait: LLM trait for generation.
             novelty_checker: Checker for joke novelty.
+            variety_checker: Checker for structural variety.
             directive_trait: Optional directive trait for system prompt.
             max_retries: Maximum retry attempts (default: 3).
             denylist: Words/phrases to filter (case-insensitive).
@@ -98,6 +101,7 @@ class JokeGenerator:
         self._lg = lg
         self._llm = llm_trait
         self._novelty = novelty_checker
+        self._variety = variety_checker
         self._directive = directive_trait
         self._max_retries = max_retries
         self._denylist = [term.lower() for term in (denylist or [])]
@@ -329,31 +333,45 @@ class JokeGenerator:
     def _validate(
         self, joke: Joke, model_name: str, adapter: AdapterInfo | None, attempt: int
     ) -> tuple[Joke, str, AdapterInfo | None, NoveltyCheck | None] | None:
-        """Validate joke against denylist, completeness, and novelty checks."""
-        if self._is_incomplete(joke.text):
-            self._lg.debug(
-                "joke incomplete (question without punchline)", extra={"attempt": attempt}
-            )
-            return None
-
-        if self._contains_denied(joke.text):
-            self._lg.debug("joke denied by denylist", extra={"attempt": attempt})
-            return None
-
-        # Fast exact-match check against in-memory history (catches parallel race conditions)
-        if self._history.contains(joke.text):
-            self._lg.debug("joke rejected by history cache", extra={"attempt": attempt})
-            self._history.record(joke.text)  # Bump frequency for prompt avoidance
+        """Validate joke against denylist, completeness, variety, and novelty checks."""
+        if not self._passes_basic_checks(joke.text, attempt):
             return None
 
         novelty = self._novelty.check(joke.text, current_model=model_name, current_adapter=adapter)
         if not novelty.is_novel:
-            # Record the existing joke we collided with (not the generated one)
             if novelty.similar_joke:
                 self._history.record(novelty.similar_joke, novelty.similar_fact)
             return None
 
+        if self._variety:
+            self._variety.record(joke.text)
         return joke, model_name, adapter, novelty
+
+    def _passes_basic_checks(self, text: str, attempt: int) -> bool:
+        """Run basic validation checks (completeness, denylist, history, variety)."""
+        if self._is_corrupted(text):
+            self._lg.debug("joke rejected - corrupted output", extra={"attempt": attempt})
+            return False
+        if self._is_incomplete(text):
+            self._lg.debug(
+                "joke incomplete (question without punchline)", extra={"attempt": attempt}
+            )
+            return False
+        if self._contains_denied(text):
+            self._lg.debug("joke denied by denylist", extra={"attempt": attempt})
+            return False
+        if self._history.contains(text):
+            self._lg.debug("joke rejected by history cache", extra={"attempt": attempt})
+            self._history.record(text)
+            return False
+        if self._variety:
+            variety = self._variety.check(text)
+            if not variety.is_varied:
+                self._lg.debug(
+                    "joke rejected by variety", extra={"attempt": attempt, "reason": variety.reason}
+                )
+                return False
+        return True
 
     def _is_incomplete(self, text: str) -> bool:
         """Check if joke is incomplete (question without punchline)."""
@@ -368,6 +386,13 @@ class JokeGenerator:
         last_q = text.rfind("?")
         after_q = text[last_q + 1 :].strip()
         return len(after_q) == 0
+
+    def _is_corrupted(self, text: str) -> bool:
+        """Check if joke contains non-ASCII garbage (e.g., Chinese text from model confusion)."""
+        # Allow basic ASCII printable + common punctuation only
+        # Reject if >10% of chars are non-ASCII (allows occasional smart quotes, etc.)
+        non_ascii = sum(1 for c in text if ord(c) > 127)
+        return non_ascii > len(text) * 0.1
 
     def _contains_denied(self, text: str) -> bool:
         """Check if text contains denied words/phrases."""
@@ -389,12 +414,29 @@ class JokeGenerator:
         if jokes_to_avoid:
             avoid_text = self._format_avoid_section(jokes_to_avoid)
 
+        openings_text = ""
+        if self._variety:
+            blocked = self._variety.get_blocked_openings()
+            if blocked:
+                openings_text = self._format_blocked_openings(blocked)
+
         retry_text = f"\n\n{retry_feedback}" if retry_feedback else ""
 
         return f"""{directive}{context_text}
-{avoid_text}{retry_text}
+{avoid_text}{openings_text}{retry_text}
 
 Return your joke in JSON format with 'text' and 'style' fields."""
+
+    def _format_blocked_openings(self, openings: list[str]) -> str:
+        """Format blocked openings for the prompt.
+
+        Args:
+            openings: List of opening phrases to avoid.
+        """
+        # Dedupe and format as capitalized
+        unique = list(dict.fromkeys(openings))  # preserve order, remove dupes
+        formatted = [f'"{o.title()}"' for o in unique]
+        return f"\n\nDO NOT start your joke with: {', '.join(formatted)}"
 
     def _format_avoid_section(self, jokes: list[tuple[JokeRecord, int]]) -> str:
         """Format the avoid section with jokes to avoid.
