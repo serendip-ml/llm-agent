@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 from llm_infer.client.types import AdapterInfo
-from llm_kelt import Client as KeltClient
+from llm_kelt.scoped_client import ScopedClient
 
 from .schema import ModelUsage, TrainingMetadata
 
@@ -124,7 +124,7 @@ class Storage:
         self._record_joke_metadata_in_schema(fact_id, model_name, attempts, adapter, schema)
         return fact_id, schema
 
-    def _get_client_for_adapter(self, adapter: AdapterInfo | None) -> KeltClient:
+    def _get_client_for_adapter(self, adapter: AdapterInfo | None) -> ScopedClient:
         """Get kelt client for the adapter's schema.
 
         Args:
@@ -161,14 +161,18 @@ class Storage:
         self._lg.debug("agent tables ensured in schema", extra={"schema": schema})
 
     def _create_table_if_not_exists(self, conn: object, schema: str, table_class: type) -> None:
-        """Create a table in the specified schema if it doesn't exist."""
-        table = table_class.__table__  # type: ignore[attr-defined]
-        original_schema = table.schema
-        try:
-            table.schema = schema
-            table.create(conn, checkfirst=True)
-        finally:
-            table.schema = original_schema
+        """Create a table in the specified schema if it doesn't exist.
+
+        Uses to_metadata() to create a schema-specific copy of the table,
+        avoiding mutation of the shared table definition (race condition safe).
+        """
+        from sqlalchemy import MetaData
+
+        original_table = table_class.__table__  # type: ignore[attr-defined]
+        # Create a new metadata with the target schema and copy the table into it
+        temp_metadata = MetaData(schema=schema)
+        schema_table = original_table.to_metadata(temp_metadata)
+        schema_table.create(conn, checkfirst=True)
 
     def record_joke_metadata(
         self,

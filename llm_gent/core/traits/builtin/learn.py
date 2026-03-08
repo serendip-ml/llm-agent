@@ -14,6 +14,7 @@ from llm_kelt.core.types import ScoredEntity
 from llm_kelt.inference import ContextBuilder, Embedder
 from llm_kelt.memory.atomic import EmbeddingFilter, Fact
 from llm_kelt.memory.isolation import ClientContext
+from llm_kelt.scoped_client import ScopedClient
 from llm_kelt.training import Factory as TrainFactory
 
 from ...llm.types import CompletionResult
@@ -223,7 +224,7 @@ class LearnTrait(BaseTrait):
     # Schema-aware client access
     # =========================================================================
 
-    def get_client_for_schema(self, schema: str) -> KeltClient:
+    def get_client_for_schema(self, schema: str) -> ScopedClient:
         """Get a scoped client for a specific schema.
 
         Uses the new with_schema() API for per-operation schema selection.
@@ -238,7 +239,7 @@ class LearnTrait(BaseTrait):
         Raises:
             RuntimeError: If trait not started.
         """
-        return self.kelt.with_schema(schema)  # type: ignore[return-value]
+        return self.kelt.with_schema(schema)
 
     def resolve_schema_for_adapter(self, adapter_info: AdapterInfo) -> str:
         """Resolve the schema for an adapter by looking up its manifest.

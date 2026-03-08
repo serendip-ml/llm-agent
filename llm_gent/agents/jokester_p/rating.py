@@ -88,25 +88,46 @@ class BatchRater:
         if not self._queue:
             return 0
 
-        # Group by schema for batch processing
+        items_by_schema = self._group_by_schema()
+        total_rated, processed_schemas = self._process_schemas(items_by_schema)
+
+        # Remove successfully processed items from queue
+        if processed_schemas:
+            self._queue = [
+                (fid, content, s) for fid, content, s in self._queue if s not in processed_schemas
+            ]
+
+        return total_rated
+
+    def _group_by_schema(self) -> dict[str | None, list[tuple[int, str]]]:
+        """Group queued items by schema for batch processing."""
         items_by_schema: dict[str | None, list[tuple[int, str]]] = {}
         for fact_id, content, schema in self._queue:
             if schema not in items_by_schema:
                 items_by_schema[schema] = []
             items_by_schema[schema].append((fact_id, content))
+        return items_by_schema
 
+    def _process_schemas(
+        self, items_by_schema: dict[str | None, list[tuple[int, str]]]
+    ) -> tuple[int, list[str | None]]:
+        """Process items grouped by schema. Returns (total_rated, processed_schemas)."""
         total_rated = 0
+        processed_schemas: list[str | None] = []
 
-        try:
-            for schema, items in items_by_schema.items():
+        for schema, items in items_by_schema.items():
+            try:
                 rated = self._rating.rate_items(items, self._fact_type, schema)
                 total_rated += rated
                 self._log_batch_results(items, rated, schema)
-            self._queue.clear()
-            return total_rated
-        except Exception as e:
-            self._lg.warning("batch rating failed", extra={"exception": e})
-            return 0
+                processed_schemas.append(schema)
+            except Exception as e:
+                self._lg.warning(
+                    "batch rating failed for schema",
+                    extra={"schema": schema, "exception": e},
+                )
+
+        return total_rated, processed_schemas
 
     def _log_batch_results(
         self, items: list[tuple[int, str]], rated: int, schema: str | None
