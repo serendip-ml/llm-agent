@@ -1,7 +1,7 @@
 default: local  # Options: local, anthropic, openai
 
 rate_limit:
-  per_minute: 60
+  per_minute: 240
   backoff:
     base: 1.0
     max: 60.0

@@ -109,6 +109,11 @@ class TrainTool(Tool):
             help="Existing adapter (md5) to train on top of",
         )
         parser.add_argument(
+            "--schema",
+            type=str,
+            help="Schema for this adapter's data (default: from agent's kelt.schema)",
+        )
+        parser.add_argument(
             "--registry-path",
             type=str,
             help="Path to adapter registry (default: from config or ~/.llm-kelt/adapters)",
@@ -235,11 +240,11 @@ class TrainTool(Tool):
         return JokesterTrainingProvider(self.lg, self._pg, context_key)
 
     def _resolve_context_key(self, config: DotDict) -> str:
-        """Resolve context key from agent config."""
-        if "identity" in config:
-            identity = config["identity"]
-            if isinstance(identity, dict) and "name" in identity:
-                return str(identity["name"])
+        """Resolve context key from agent config (kelt.identity.name)."""
+        kelt_config = config.get("kelt", {})
+        identity = kelt_config.get("identity", {})
+        if isinstance(identity, dict) and "name" in identity:
+            return str(identity["name"])
         return "unknown"
 
     def _run_sft(self, provider: TrainingDataProvider) -> int:
@@ -368,9 +373,29 @@ class TrainTool(Tool):
             parent=self._resolve_parent_adapter(factory),
             data=data,
             context_key=provider.get_context_key(),
+            schema_name=self._resolve_schema(),
             description=provider.get_description(method, len(data)),
             config=config,
         )
+
+    def _resolve_schema(self) -> str | None:
+        """Resolve schema from --schema arg or agent's kelt.schema config."""
+        if schema := getattr(self.args, "schema", None):
+            return str(schema)
+
+        # Fall back to agent's kelt.schema
+        agent_name = getattr(self.args, "agent_name", None)
+        if not agent_name:
+            return None
+
+        agent_config = self.app.config.agents.get(agent_name)
+        if not agent_config:
+            return None
+
+        kelt_config = agent_config.get("kelt", {})
+        schema_config = kelt_config.get("schema", {})
+        schema_name = schema_config.get("name")
+        return str(schema_name) if schema_name else None
 
     def _build_config_overrides(self) -> dict[str, Any] | None:
         """Build config overrides from lora and training args."""
@@ -393,17 +418,47 @@ class TrainTool(Tool):
     def _resolve_parent_adapter(self, factory: TrainFactory) -> Any:
         """Resolve parent adapter from --from-adapter arg.
 
+        Supports abbreviated md5 format (e.g., "40..9d18").
+
         Raises:
             AdapterNotFoundError: If the specified adapter doesn't exist.
+            ValueError: If abbreviated md5 is ambiguous.
         """
         from_adapter = getattr(self.args, "from_adapter", None)
         if not from_adapter:
             return None
 
-        parent = factory.manifest.find_adapter(from_adapter)
+        # Expand abbreviated md5 if needed
+        md5 = self._expand_adapter_md5(from_adapter, factory)
+
+        parent = factory.manifest.find_adapter(md5)
         if parent is None:
             raise AdapterNotFoundError(from_adapter)
         return parent
+
+    def _expand_adapter_md5(self, value: str, factory: TrainFactory) -> str:
+        """Expand abbreviated md5 (XX..XXXX) to full md5."""
+        import re
+
+        match = re.match(r"^([0-9a-f]{2})\.\.([0-9a-f]{4})$", value, re.IGNORECASE)
+        if not match:
+            return value  # Already full md5 or name
+
+        prefix, suffix = match.groups()
+
+        # Search completed manifests for matching md5
+        matches: list[str] = []
+        for manifest in factory.manifest.list_completed():
+            if manifest.output and manifest.output.adapter:
+                md5 = manifest.output.adapter.md5
+                if md5 and md5.startswith(prefix) and md5.endswith(suffix):
+                    matches.append(md5)
+
+        if len(matches) == 0:
+            raise AdapterNotFoundError(f"{prefix}..{suffix}")
+        if len(matches) > 1:
+            raise ValueError(f"Ambiguous adapter '{prefix}..{suffix}' matches: {matches}")
+        return matches[0]
 
     def _print_sft_summary(
         self, examples: list[dict[str, str]], provider: TrainingDataProvider

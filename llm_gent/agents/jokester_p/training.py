@@ -25,22 +25,18 @@ class JokesterTrainingProvider:
     def add_args(self, parser: argparse.ArgumentParser, method: str = "sft") -> None:
         """Add jokester-specific training arguments."""
         self._add_common_args(parser)
-        if method == "dpo":
+        if method == "sft":
+            self._add_sft_args(parser)
+        elif method == "dpo":
             self._add_dpo_args(parser)
 
     def _add_common_args(self, parser: argparse.ArgumentParser) -> None:
         """Add common training arguments (SFT and DPO)."""
         parser.add_argument(
-            "--min-stars",
-            type=int,
-            default=4,
-            help="Minimum star rating for SFT (default: 4)",
-        )
-        parser.add_argument(
             "--max-chars",
             type=int,
-            default=130,
-            help="Maximum joke length in characters (default: 130)",
+            default=140,
+            help="Maximum joke length in characters (default: 140)",
         )
         parser.add_argument(
             "--filter-model",
@@ -48,10 +44,24 @@ class JokesterTrainingProvider:
             help="Filter jokes by source model (substring match)",
         )
         parser.add_argument(
+            "--filter-schema",
+            type=str,
+            help="Schema to get training data from (default: agent's kelt.schema)",
+        )
+        parser.add_argument(
             "--max",
             type=int,
             dest="max_examples",
             help="Maximum examples to include",
+        )
+
+    def _add_sft_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add SFT-specific training arguments."""
+        parser.add_argument(
+            "--min-stars",
+            type=int,
+            default=4,
+            help="Minimum star rating (default: 4)",
         )
 
     def _add_dpo_args(self, parser: argparse.ArgumentParser) -> None:
@@ -89,7 +99,8 @@ class JokesterTrainingProvider:
 
     def get_sft_examples(self, args: argparse.Namespace) -> list[dict[str, str]]:
         """Get SFT training examples from high-rated jokes."""
-        service = PairingService(self._lg, self._pg, self._context_key)
+        filter_schema = getattr(args, "filter_schema", None)
+        service = PairingService(self._lg, self._pg, self._context_key, schema=filter_schema)
         filter_model = getattr(args, "filter_model", None)
         all_jokes = service.get_rated_jokes(
             max_chars=args.max_chars,
@@ -113,35 +124,31 @@ class JokesterTrainingProvider:
 
     def get_dpo_pairs(self, args: argparse.Namespace) -> list[dict[str, Any]]:
         """Get DPO preference pairs."""
-        service = PairingService(self._lg, self._pg, self._context_key)
-
-        margin = getattr(args, "margin", None) or 2
-        filter_model = getattr(args, "filter_model", None)
-        min_pairs = getattr(args, "min_pairs", None)
-        max_pairs = getattr(args, "max_pairs", None)
-        no_reuse = getattr(args, "no_reuse", False)
-        chosen_filter = StarFilter.parse(getattr(args, "chosen_stars", None))
-        rejected_filter = StarFilter.parse(getattr(args, "rejected_stars", None))
+        filter_schema = getattr(args, "filter_schema", None)
+        service = PairingService(self._lg, self._pg, self._context_key, schema=filter_schema)
 
         result = service.create_pairs(
-            margin=margin,
+            margin=getattr(args, "margin", None) or 2,
             max_chars=args.max_chars,
-            model=filter_model,
-            min_pairs=min_pairs,
-            max_pairs=max_pairs,
-            no_reuse=no_reuse,
-            chosen_stars=chosen_filter,
-            rejected_stars=rejected_filter,
+            model=getattr(args, "filter_model", None),
+            min_pairs=getattr(args, "min_pairs", None),
+            max_pairs=getattr(args, "max_pairs", None),
+            no_reuse=getattr(args, "no_reuse", False),
+            chosen_stars=StarFilter.parse(getattr(args, "chosen_stars", None)),
+            rejected_stars=StarFilter.parse(getattr(args, "rejected_stars", None)),
         )
 
-        # Convert to DPO format
+        return self._format_dpo_pairs(result.pairs)
+
+    def _format_dpo_pairs(self, pairs: list[Any]) -> list[dict[str, Any]]:
+        """Convert preference pairs to DPO format."""
         return [
             {
                 "prompt": "Tell me a joke.",
                 "chosen": p.chosen.content,
                 "rejected": p.rejected.content,
             }
-            for p in result.pairs
+            for p in pairs
         ]
 
     def get_context_key(self) -> str:

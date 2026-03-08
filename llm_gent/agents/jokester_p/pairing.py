@@ -18,6 +18,8 @@ from llm_gent.core.training import (
     pair_by_threshold,
 )
 
+from .storage import _validate_schema_name
+
 
 if TYPE_CHECKING:
     from appinfra.db.pg import PG
@@ -35,21 +37,29 @@ class PairingService:
     to create preference pairs for DPO training.
     """
 
-    def __init__(self, lg: Logger, pg: PG, context_key: str) -> None:
+    def __init__(self, lg: Logger, pg: PG, context_key: str, schema: str | None = None) -> None:
         self._lg = lg
         self._pg = pg
         self._context_key = context_key
+        self._schema = schema
+
+    def _schema_prefix(self) -> str:
+        """Get schema prefix for table names."""
+        if self._schema and self._schema != "public":
+            return f"{_validate_schema_name(self._schema)}."
+        return ""
 
     def get_rated_jokes(
         self, max_chars: int | None = None, model: str | None = None
     ) -> list[StarRatedItem]:
         """Get all rated jokes sorted by stars (desc)."""
+        prefix = self._schema_prefix()
         joins_sql, filters_sql, params = self._build_rated_jokes_filters(max_chars, model)
         sql = text(f"""
             SELECT DISTINCT ON (af.id)
                 af.id, af.content, (afd.context->>'stars')::int as stars
-            FROM atomic_facts af
-            JOIN atomic_feedback_details afd ON af.id = afd.fact_id
+            FROM {prefix}atomic_facts af
+            JOIN {prefix}atomic_feedback_details afd ON af.id = afd.fact_id
             {joins_sql}
             WHERE af.context_key = :context_key
               AND afd.context->>'stars' IS NOT NULL {filters_sql}
@@ -61,23 +71,80 @@ class PairingService:
         rated.sort(key=lambda item: (-item.score, item.id))
         return rated
 
+    def _resolve_model_pattern(self, model: str, prefix: str) -> tuple[str, bool]:
+        """Resolve model filter pattern, expanding abbreviated md5 if needed.
+
+        Supports formats:
+            - "qwen2.5-7b" -> ("%qwen2.5-7b%", False) - model name substring
+            - "08e43bfcb746" -> ("%08e43bfcb746%", True) - full md5
+            - "08..b746" -> expands to full md5, errors if not unique
+
+        Returns:
+            (pattern, is_adapter) tuple
+        """
+        import re
+
+        # Check for abbreviated md5 format: XX..XXXX
+        abbrev_match = re.match(r"^([0-9a-f]{2})\.\.([0-9a-f]{4})$", model, re.IGNORECASE)
+        if abbrev_match:
+            prefix_part, suffix_part = abbrev_match.groups()
+            full_md5 = self._expand_abbreviated_md5(prefix_part, suffix_part, prefix)
+            return f"%{full_md5}%", True
+
+        # Check for full md5 format: 12 hex chars
+        if re.match(r"^[0-9a-f]{12}$", model, re.IGNORECASE):
+            return f"%{model}%", True
+
+        # Regular model name
+        return f"%{model}%", False
+
+    def _expand_abbreviated_md5(
+        self, prefix_part: str, suffix_part: str, schema_prefix: str
+    ) -> str:
+        """Expand abbreviated md5 to full, error if not unique."""
+        sql = text(f"""
+            SELECT DISTINCT adapter_info->>'md5' as md5
+            FROM {schema_prefix}agent_jokester_training
+            WHERE adapter_info->>'md5' LIKE :pattern
+        """)
+        pattern = f"{prefix_part}%{suffix_part}"
+
+        with self._pg.connect() as conn:
+            rows = conn.execute(sql, {"pattern": pattern}).fetchall()
+
+        if len(rows) == 0:
+            raise ValueError(f"No adapter found matching '{prefix_part}..{suffix_part}'")
+        if len(rows) > 1:
+            matches = [r[0] for r in rows]
+            raise ValueError(
+                f"Ambiguous adapter '{prefix_part}..{suffix_part}' matches multiple: {matches}"
+            )
+
+        return str(rows[0][0])
+
     def _build_rated_jokes_filters(
         self, max_chars: int | None, model: str | None
     ) -> tuple[str, str, dict[str, object]]:
         """Build SQL fragments and params for rated jokes query."""
+        prefix = self._schema_prefix()
         joins: list[str] = []
         filters: list[str] = []
         params: dict[str, object] = {"context_key": self._context_key}
 
         if max_chars:
-            joins.append("JOIN atomic_solution_details asd ON asd.fact_id = af.id")
+            joins.append(f"JOIN {prefix}atomic_solution_details asd ON asd.fact_id = af.id")
             filters.append("AND length(asd.answer_text) < :max_chars")
             params["max_chars"] = max_chars
 
         if model:
-            joins.append("JOIN agent_jokester_model_usage u ON u.fact_id = af.id")
-            filters.append("AND u.model_name LIKE :model_pattern")
-            params["model_pattern"] = f"%{model}%"
+            model_pattern, is_adapter = self._resolve_model_pattern(model, prefix)
+            joins.append(f"JOIN {prefix}agent_jokester_model_usage u ON u.fact_id = af.id")
+            if is_adapter:
+                joins.append(f"JOIN {prefix}agent_jokester_training t ON t.fact_id = af.id")
+                filters.append("AND t.adapter_info->>'md5' LIKE :model_pattern")
+            else:
+                filters.append("AND u.model_name LIKE :model_pattern")
+            params["model_pattern"] = model_pattern
 
         return "\n            ".join(joins), " ".join(filters), params
 
