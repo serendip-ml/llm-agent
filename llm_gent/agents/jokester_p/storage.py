@@ -355,6 +355,7 @@ class Storage:
         self, md5: str | None, schema: str, max_chars: int | None = None
     ) -> str:
         """Build SQL for adapter count query."""
+        schema = _validate_schema_name(schema)
         md5_clause = "AND adapter_info->>'md5' = :md5" if md5 else ""
         chars_join = (
             f"JOIN {schema}.atomic_solution_details asd ON asd.fact_id = t.fact_id"
@@ -406,6 +407,7 @@ class Storage:
 
     def _build_base_model_count_sql(self, schema: str, max_chars: int | None = None) -> str:
         """Build SQL for base model count query."""
+        schema = _validate_schema_name(schema)
         chars_join = (
             f"JOIN {schema}.atomic_solution_details asd ON asd.fact_id = t.fact_id"
             if max_chars

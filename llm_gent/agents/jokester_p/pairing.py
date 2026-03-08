@@ -18,6 +18,8 @@ from llm_gent.core.training import (
     pair_by_threshold,
 )
 
+from .storage import _validate_schema_name
+
 
 if TYPE_CHECKING:
     from appinfra.db.pg import PG
@@ -44,7 +46,7 @@ class PairingService:
     def _schema_prefix(self) -> str:
         """Get schema prefix for table names."""
         if self._schema and self._schema != "public":
-            return f"{self._schema}."
+            return f"{_validate_schema_name(self._schema)}."
         return ""
 
     def get_rated_jokes(

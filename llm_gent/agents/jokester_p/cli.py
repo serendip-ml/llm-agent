@@ -15,6 +15,8 @@ from sqlalchemy.exc import ProgrammingError
 
 from llm_gent.core.memory.rating import BatchRatingService
 
+from .storage import _validate_schema_name
+
 
 if TYPE_CHECKING:
     from ...core.llm import LLMCaller
@@ -94,7 +96,9 @@ class JokesterCLI(Tool):
     def _schema_prefix(self, schema: str | None = None) -> str:
         """Get schema prefix for table names. Uses current schema if not specified."""
         s = schema or self._current_schema
-        return f"{s}." if s and s != "public" else ""
+        if s and s != "public":
+            return f"{_validate_schema_name(s)}."
+        return ""
 
     def _discover_schemas(self) -> list[str]:
         """Discover all schemas that have agent_jokester_training table."""
