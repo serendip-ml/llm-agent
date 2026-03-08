@@ -33,7 +33,7 @@ class JokesterCLI(Tool):
         super().__init__(parent, config)
         self._pg: PG | None = None
         self._current_schema: str = "public"
-        self._reference_schema: str | None = None
+        self._reference_schemas: list[str] = []
         self._train_factory: TrainFactory | None = None
 
     def configure(self) -> None:
@@ -61,7 +61,11 @@ class JokesterCLI(Tool):
 
         reference_config = kelt_config.get("reference", {})
         if reference_config:
-            self._reference_schema = reference_config.get("schema")
+            schema_val = reference_config.get("schema")
+            if isinstance(schema_val, list):
+                self._reference_schemas = schema_val
+            elif schema_val:
+                self._reference_schemas = [schema_val]
 
     def _load_train_factory(self) -> None:
         """Load TrainFactory for adapter manifest lookups."""
@@ -121,6 +125,11 @@ class JokesterCLI(Tool):
             help="Only count jokes under this character length (default: 140)",
         )
         p.add_argument(
+            "--max-samples",
+            type=int,
+            help="Limit to first N samples per adapter (for fair comparison)",
+        )
+        p.add_argument(
             "--model",
             type=str,
             help="Filter by model (case-insensitive, supports * wildcard, e.g. 'qwen*14b')",
@@ -129,6 +138,11 @@ class JokesterCLI(Tool):
             "--schema",
             type=str,
             help="Filter to specific schema (default: show all schemas)",
+        )
+        p.add_argument(
+            "--compact",
+            action="store_true",
+            help="Compact table view: models x training stage (base/sft/dpo)",
         )
 
     def _add_rate_args(self, subparsers: Any) -> None:
@@ -179,8 +193,10 @@ class JokesterCLI(Tool):
         assert self._pg is not None
 
         max_chars = getattr(self.args, "max_chars", 140)
+        max_samples = getattr(self.args, "max_samples", None)
         model = getattr(self.args, "model", None)
         schema_filter = getattr(self.args, "schema", None)
+        compact = getattr(self.args, "compact", False)
 
         # Get schemas to query
         schemas = self._get_schemas_to_query(schema_filter)
@@ -188,9 +204,15 @@ class JokesterCLI(Tool):
             print("No schemas found with joke data.")
             return 0
 
-        self._print_stats_header(max_chars, model, schema_filter, schemas)
-        self._print_stats_by_adapter(schemas, max_chars=max_chars, model=model)
-        self._print_haiku_stats(max_chars=max_chars)  # Always show reference for comparison
+        self._print_stats_header(max_chars, model, schema_filter, schemas, max_samples)
+
+        if compact:
+            self._print_compact_stats(schemas, max_chars, max_samples, model)
+        else:
+            self._print_stats_by_adapter(
+                schemas, max_chars=max_chars, max_samples=max_samples, model=model
+            )
+            self._print_haiku_stats(max_chars=max_chars, max_samples=max_samples)
 
         return 0
 
@@ -372,13 +394,10 @@ class JokesterCLI(Tool):
         if schema_filter:
             # Always include the requested schema (even if empty/no tables yet)
             schemas = [schema_filter]
-            # Add reference schema if configured and has data
-            if (
-                self._reference_schema
-                and self._reference_schema != schema_filter
-                and self._reference_schema in all_schemas
-            ):
-                schemas.append(self._reference_schema)
+            # Add reference schemas if configured and have data
+            for ref_schema in self._reference_schemas:
+                if ref_schema != schema_filter and ref_schema in all_schemas:
+                    schemas.append(ref_schema)
             return schemas
         return all_schemas
 
@@ -403,10 +422,13 @@ class JokesterCLI(Tool):
         model_filter: str | None,
         schema_filter: str | None,
         schemas: list[str],
+        max_samples: int | None = None,
     ) -> None:
         """Print stats header with filter info."""
         print("\n=== Jokester-p Stats ===\n")
         filters = [f"<{max_chars} chars"]
+        if max_samples:
+            filters.append(f"first {max_samples} samples")
         if model_filter:
             filters.append(f"model~'{model_filter}'")
         if schema_filter:
@@ -416,14 +438,157 @@ class JokesterCLI(Tool):
         print(f"Filters: {', '.join(filters)}")
         print()
 
+    def _print_compact_stats(
+        self,
+        schemas: list[str],
+        max_chars: int | None,
+        max_samples: int | None,
+        model: str | None,
+    ) -> None:
+        """Print compact table view: models x training stage."""
+        all_stats = self._collect_adapter_stats(schemas, max_chars, max_samples, model)
+        if not all_stats:
+            print("No joke data found.")
+            return
+
+        # Group by schema (exclude reference schemas - they go in combined table)
+        ref_set = set(self._reference_schemas)
+        by_schema: dict[str, list[dict[str, Any]]] = {}
+        for s in all_stats:
+            by_schema.setdefault(s["schema"], []).append(s)
+
+        # Print non-reference schemas first
+        for schema, stats_list in by_schema.items():
+            if schema not in ref_set:
+                self._print_compact_table(schema, stats_list)
+
+        # Print combined reference table at bottom
+        ref_stats = self._collect_reference_stats(max_chars, max_samples)
+        if ref_stats:
+            self._print_reference_table(ref_stats)
+
+    def _collect_reference_stats(
+        self, max_chars: int | None, max_samples: int | None
+    ) -> list[dict[str, Any]]:
+        """Collect stats from all reference schemas."""
+        ref_stats: list[dict[str, Any]] = []
+        for ref_schema in self._reference_schemas:
+            try:
+                stats = self._query_haiku_stats(ref_schema, max_chars, max_samples)
+                if stats["total"] > 0:
+                    ref_stats.append(
+                        {
+                            "model": ref_schema,
+                            "avg_stars": stats["avg_stars"],
+                            "total": stats["total"],
+                        }
+                    )
+            except Exception:
+                continue
+        return ref_stats
+
+    def _print_compact_table(self, schema: str, stats_list: list[dict[str, Any]]) -> None:
+        """Print a single compact table for a schema."""
+        from rich.console import Console
+        from rich.table import Table
+
+        model_data, max_depth, active_cells = self._build_compact_model_data(stats_list)
+        sorted_models = self._sort_models_by_size(model_data.keys())
+
+        table = Table(title=schema, show_header=True, header_style="bold", title_justify="left")
+        for m in sorted_models:
+            table.add_column(m, justify="right")
+
+        for depth in range(max_depth + 1):
+            row = []
+            for m in sorted_models:
+                val = model_data[m].get(depth)
+                if val:
+                    cell = f"{val:.2f}"
+                    if (m, depth) in active_cells:
+                        cell = f"[bold bright_cyan]{cell}[/bold bright_cyan]"
+                    row.append(cell)
+                else:
+                    row.append("--")
+            table.add_row(*row)
+
+        Console().print(table)
+
+    def _print_reference_table(self, ref_stats: list[dict[str, Any]]) -> None:
+        """Print simple reference table with schema names and averages."""
+        from rich.console import Console
+        from rich.table import Table
+
+        table = Table(
+            title="haiku (reference)", show_header=True, header_style="bold", title_justify="left"
+        )
+        table.add_column("Schema", justify="left")
+        table.add_column("Avg", justify="right")
+        table.add_column("Samples", justify="right")
+
+        for s in ref_stats:
+            name = s.get("model", "unknown")
+            avg = s.get("avg_stars", 0)
+            total = s.get("total", 0)
+            table.add_row(name, f"{avg:.2f}", str(total))
+
+        Console().print(table)
+
+    def _build_compact_model_data(
+        self, stats_list: list[dict[str, Any]]
+    ) -> tuple[dict[str, dict[int, float | None]], int, set[tuple[str, int]]]:
+        """Build model -> depth -> avg_stars mapping for compact view.
+
+        Returns:
+            Tuple of (model_data, max_depth, active_cells) where active_cells
+            is a set of (size, depth) tuples that are recently active.
+        """
+        import re
+
+        model_data: dict[str, dict[int, float | None]] = {}
+        active_cells: set[tuple[str, int]] = set()
+        max_depth = 0
+
+        for s in stats_list:
+            # Try both "model" (reference stats) and "model_name" (adapter stats)
+            model_name = s.get("model") or s.get("model_name") or ""
+            size_match = re.search(r"(\d+\.?\d*b)", model_name.lower())
+            size = size_match.group(1) if size_match else model_name.split("-")[0]
+
+            # Determine depth: 0=base, 1=first ft, 2=second ft, etc.
+            depth = s.get("depth", 0)
+            max_depth = max(max_depth, depth)
+
+            # Track if this cell is active (recently updated - default 300s window)
+            if self._is_recently_active(s.get("last_created")):
+                active_cells.add((size, depth))
+
+            model_data.setdefault(size, {})
+            avg = s.get("avg_stars")
+            if avg and (model_data[size].get(depth) is None or avg > model_data[size][depth]):
+                model_data[size][depth] = avg
+
+        return model_data, max_depth, active_cells
+
+    def _sort_models_by_size(self, models: Any) -> list[str]:
+        """Sort model names by numeric size."""
+        import re
+
+        def size_key(s: str) -> float:
+            m = re.match(r"(\d+\.?\d*)", s)
+            return float(m.group(1)) if m else 999
+
+        return sorted(models, key=size_key)
+
     def _print_stats_by_adapter(
         self,
         schemas: list[str],
         max_chars: int | None = None,
+        max_samples: int | None = None,
         model: str | None = None,
     ) -> None:
         """Print stats broken down by adapter, grouped by model and schema."""
-        all_stats = self._collect_adapter_stats(schemas, max_chars, model)
+        all_stats = self._collect_adapter_stats(schemas, max_chars, max_samples, model)
         if not all_stats:
             print("No joke data found.")
             return
@@ -443,22 +608,40 @@ class JokesterCLI(Tool):
         print()
 
     def _collect_adapter_stats(
-        self, schemas: list[str], max_chars: int | None, model: str | None
+        self, schemas: list[str], max_chars: int | None, max_samples: int | None, model: str | None
     ) -> list[dict[str, Any]]:
         """Collect and enrich adapter stats from all schemas."""
         all_stats: list[dict[str, Any]] = []
         for schema in schemas:
             schema_stats = self._get_stats_by_adapter_in_schema(
-                schema, max_chars=max_chars, model=model
+                schema, max_chars=max_chars, max_samples=max_samples, model=model
             )
             all_stats.extend(schema_stats)
 
-        # Enrich with parent info for tree display
+        # Enrich with parent info and depth for tree display
         for stats in all_stats:
             md5 = stats.get("md5")
             if md5:
                 stats["parent_md5"] = self._get_adapter_parent(md5)
+
+        # Calculate depth for each adapter (base=0, first ft=1, etc.)
+        self._calculate_adapter_depths(all_stats)
         return all_stats
+
+    def _calculate_adapter_depths(self, all_stats: list[dict[str, Any]]) -> None:
+        """Calculate depth for each adapter in the lineage."""
+        md5_to_stats = {s.get("md5"): s for s in all_stats if s.get("md5")}
+
+        for stats in all_stats:
+            if stats.get("md5") is None:
+                stats["depth"] = 0  # Base model
+            else:
+                depth = 1
+                parent = stats.get("parent_md5")
+                while parent and parent in md5_to_stats:
+                    depth += 1
+                    parent = md5_to_stats[parent].get("parent_md5")
+                stats["depth"] = depth
 
     def _print_adapter_tree(self, adapters: list[dict[str, Any]], is_last_model: bool) -> None:
         """Print adapters as a tree based on parent-child relationships."""
@@ -577,19 +760,27 @@ class JokesterCLI(Tool):
             parts.append(f"{stars}★:{count}({pct:.1f}%)")
         return "  ".join(parts)
 
-    def _print_haiku_stats(self, max_chars: int | None = None) -> None:
-        """Print stats for Haiku-generated jokes separately."""
+    def _print_haiku_stats(
+        self, max_chars: int | None = None, max_samples: int | None = None
+    ) -> None:
+        """Print stats for Haiku-generated jokes from reference schemas."""
         assert self._pg is not None
-
-        stats = self._query_haiku_stats(max_chars)
-        if stats["total"] == 0:
+        if not self._reference_schemas:
             return
 
         chars_label = f", <{max_chars} chars" if max_chars else ""
         print(f"=== Haiku (Reference{chars_label}) ===\n")
-        avg_str = f"{float(stats['avg_stars']):.2f}" if stats["avg_stars"] else "N/A"
-        stars_str = self._format_star_distribution(stats["dist"], stats["rated"])
-        print(f"{'haiku':20s}  {stats['total']:5d} jokes  avg={avg_str}  {stars_str}")
+
+        for ref_schema in self._reference_schemas:
+            try:
+                stats = self._query_haiku_stats(ref_schema, max_chars, max_samples)
+            except ProgrammingError:
+                continue  # Schema doesn't exist yet
+            if stats["total"] == 0:
+                continue
+            avg_str = f"{float(stats['avg_stars']):.2f}" if stats["avg_stars"] else "N/A"
+            stars_str = self._format_star_distribution(stats["dist"], stats["rated"])
+            print(f"{ref_schema:20s}  {stats['total']:5d} jokes  avg={avg_str}  {stars_str}")
         print()
 
     def _get_latest_adapter_from_jokes(self, context_key: str) -> dict[str, Any] | None:
@@ -616,7 +807,11 @@ class JokesterCLI(Tool):
             return None
 
     def _get_stats_by_adapter_in_schema(
-        self, schema: str, max_chars: int | None = None, model: str | None = None
+        self,
+        schema: str,
+        max_chars: int | None = None,
+        max_samples: int | None = None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get rating stats grouped by adapter md5 for a specific schema."""
         assert self._pg is not None
@@ -625,9 +820,10 @@ class JokesterCLI(Tool):
         params: dict[str, Any] = {"context_key": context_key}
         chars_join, chars_filter = self._build_chars_filter(max_chars, params, prefix)
         model_join, model_filter = self._build_model_filter(model, params, prefix)
+        samples_filter = self._build_samples_filter(max_samples, params)
 
         sql = self._build_adapter_stats_sql(
-            prefix, chars_join, model_join, chars_filter, model_filter
+            prefix, chars_join, model_join, chars_filter, model_filter, samples_filter
         )
         try:
             with self._pg.connect() as conn:
@@ -639,6 +835,16 @@ class JokesterCLI(Tool):
             # Table doesn't exist yet (empty schema)
             return []
 
+    def _build_samples_filter(
+        self, max_samples: int | None, params: dict[str, Any] | None = None
+    ) -> str:
+        """Build WHERE clause for limiting samples per adapter."""
+        if not max_samples:
+            return ""
+        if params is not None:
+            params["max_samples"] = max_samples
+        return "AND rn <= :max_samples"
+
     def _build_adapter_stats_sql(
         self,
         prefix: str,
@@ -646,22 +852,35 @@ class JokesterCLI(Tool):
         model_join: str,
         chars_filter: str,
         model_filter: str,
+        samples_filter: str = "",
     ) -> Any:
         """Build SQL for adapter stats aggregation."""
+        # Use CTE with ROW_NUMBER to support max_samples filtering
         return text(f"""
-            SELECT t.adapter_info->>'md5' as adapter_md5,
-                   t.base_model as model_name,
+            WITH ranked AS (
+                SELECT af.id as fact_id,
+                       t.adapter_info->>'md5' as adapter_md5,
+                       t.base_model as model_name,
+                       af.created_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY t.base_model, t.adapter_info->>'md5'
+                           ORDER BY af.created_at
+                       ) as rn
+                FROM {prefix}atomic_facts af
+                JOIN {prefix}agent_jokester_training t ON t.fact_id = af.id
+                {chars_join} {model_join}
+                WHERE af.context_key = :context_key AND af.type = 'solution'
+                  {chars_filter} {model_filter}
+            )
+            SELECT r.adapter_md5, r.model_name,
                    COUNT(*) as total, COUNT(afd.id) as rated,
                    AVG((afd.context->>'stars')::int) as avg_stars,
-                   MAX(af.created_at) as last_created
-            FROM {prefix}atomic_facts af
-            JOIN {prefix}agent_jokester_training t ON t.fact_id = af.id
-            {chars_join} {model_join}
-            LEFT JOIN {prefix}atomic_feedback_details afd ON af.id = afd.fact_id
-            WHERE af.context_key = :context_key AND af.type = 'solution'
-              {chars_filter} {model_filter}
-            GROUP BY t.base_model, t.adapter_info->>'md5'
-            ORDER BY MIN(af.id)
+                   MAX(r.created_at) as last_created
+            FROM ranked r
+            LEFT JOIN {prefix}atomic_feedback_details afd ON r.fact_id = afd.fact_id
+            WHERE 1=1 {samples_filter}
+            GROUP BY r.model_name, r.adapter_md5
+            ORDER BY MIN(r.fact_id)
         """)
 
     def _build_adapter_results(
@@ -750,54 +969,79 @@ class JokesterCLI(Tool):
             # Table doesn't exist yet (empty schema)
             return None
 
-    def _query_haiku_stats(self, max_chars: int | None = None) -> dict[str, Any]:
-        """Query stats for Haiku-generated jokes from reference schema."""
+    def _query_haiku_stats(
+        self, schema: str, max_chars: int | None = None, max_samples: int | None = None
+    ) -> dict[str, Any]:
+        """Query stats for Haiku-generated jokes from a reference schema."""
         assert self._pg is not None
-
-        # If no reference schema configured, return empty
-        if not self._reference_schema:
-            return {"total": 0, "rated": 0, "avg_stars": None, "dist": {}}
-
-        prefix = self._schema_prefix(self._reference_schema)
+        prefix = self._schema_prefix(schema)
         context_key = self._get_context_key()
         params: dict[str, Any] = {"context_key": context_key}
-        chars_join, chars_filter = self._build_chars_filter(max_chars, params, prefix)
+        sql = self._build_haiku_stats_sql(prefix, max_chars, max_samples, params)
 
-        sql = text(f"""
-            SELECT COUNT(*) as total, COUNT(afd.id) as rated,
-                   AVG((afd.context->>'stars')::int) as avg_stars
-            FROM {prefix}atomic_facts af
-            JOIN {prefix}agent_jokester_model_usage u ON u.fact_id = af.id
-            {chars_join}
-            LEFT JOIN {prefix}atomic_feedback_details afd ON af.id = afd.fact_id
-            WHERE af.context_key = :context_key AND af.type = 'solution'
-              AND u.model_name LIKE '%haiku%' {chars_filter}
-        """)
         with self._pg.connect() as conn:
             row = conn.execute(sql, params).fetchone()
             total, rated, avg_stars = row[0], row[1], row[2]
-            dist = self._query_haiku_distribution(conn, context_key, max_chars, prefix)
-
+            dist = self._query_haiku_distribution(conn, context_key, max_chars, max_samples, prefix)
         return {"total": total, "rated": rated, "avg_stars": avg_stars, "dist": dist}
+
+    def _build_haiku_stats_sql(
+        self, prefix: str, max_chars: int | None, max_samples: int | None, params: dict[str, Any]
+    ) -> Any:
+        """Build SQL for haiku stats aggregation with optional sample limiting."""
+        chars_join, chars_filter = self._build_chars_filter(max_chars, params, prefix)
+        samples_limit = ""
+        if max_samples:
+            params["max_samples"] = max_samples
+            samples_limit = "LIMIT :max_samples"
+
+        return text(f"""
+            WITH filtered AS (
+                SELECT af.id as fact_id
+                FROM {prefix}atomic_facts af
+                JOIN {prefix}agent_jokester_model_usage u ON u.fact_id = af.id
+                {chars_join}
+                WHERE af.context_key = :context_key AND af.type = 'solution'
+                  AND u.model_name LIKE '%haiku%' {chars_filter}
+                ORDER BY af.created_at
+                {samples_limit}
+            )
+            SELECT COUNT(*) as total, COUNT(afd.id) as rated,
+                   AVG((afd.context->>'stars')::int) as avg_stars
+            FROM filtered f
+            LEFT JOIN {prefix}atomic_feedback_details afd ON f.fact_id = afd.fact_id
+        """)
 
     def _query_haiku_distribution(
         self,
         conn: Any,
         context_key: str,
         max_chars: int | None,
+        max_samples: int | None,
         prefix: str,
     ) -> dict[int, int]:
         """Query star distribution for Haiku jokes from reference schema."""
         params: dict[str, Any] = {"context_key": context_key}
         chars_join, chars_filter = self._build_chars_filter(max_chars, params, prefix)
+        samples_limit = ""
+        if max_samples:
+            params["max_samples"] = max_samples
+            samples_limit = "LIMIT :max_samples"
+
         sql = text(f"""
+            WITH filtered AS (
+                SELECT af.id as fact_id
+                FROM {prefix}atomic_facts af
+                JOIN {prefix}agent_jokester_model_usage u ON u.fact_id = af.id
+                {chars_join}
+                WHERE af.context_key = :context_key AND af.type = 'solution'
+                  AND u.model_name LIKE '%haiku%' {chars_filter}
+                ORDER BY af.created_at
+                {samples_limit}
+            )
             SELECT (afd.context->>'stars')::int as stars, COUNT(*) as cnt
-            FROM {prefix}atomic_facts af
-            JOIN {prefix}agent_jokester_model_usage u ON u.fact_id = af.id
-            {chars_join}
-            JOIN {prefix}atomic_feedback_details afd ON af.id = afd.fact_id
-            WHERE af.context_key = :context_key AND af.type = 'solution'
-              AND u.model_name LIKE '%haiku%' {chars_filter}
+            FROM filtered f
+            JOIN {prefix}atomic_feedback_details afd ON f.fact_id = afd.fact_id
             GROUP BY (afd.context->>'stars')::int
         """)
         rows = conn.execute(sql, params).fetchall()

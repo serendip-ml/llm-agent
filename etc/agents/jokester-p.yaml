@@ -25,11 +25,11 @@ novelty:
     history: 100       # track last N collisions
   variety:
     ngram:
-      enabled: true    # reject jokes with same first N words as recent jokes
+      enabled: false   # reject jokes with same first N words as recent jokes
       n: 2             # number of words to check (e.g., "Why don't scientists")
-      history: 20      # remember last N openings
+      history: 10      # remember last N openings
     levenshtein:
-      enabled: true    # reject jokes too similar to recent (fuzzy match)
+      enabled: false   # reject jokes too similar to recent (fuzzy match)
       threshold: 0.7   # similarity threshold (0-1, higher = stricter)
       history: 10      # remember last N full jokes
 
@@ -53,11 +53,12 @@ kelt:
   identity:
     name: "jokester-p"
   schema:
-    #name: "playground"
-    name: "hn_exp"
-    enforce: true
+    name: "playground"
+    enforce: false
   reference:
-    schema: "haiku_ref"
+    schema:
+      - haiku_ref
+      - haiku_ref2
     model: "claude-haiku-4-5"  # Used when mode=reference to identify the reference model
 
 # Agent-specific LLM config (merged with global llm.yaml)
@@ -65,9 +66,9 @@ llm:
   default: local
   backends:
     local:
-      #adapter: jokester-p-sft
+      adapter: jokester-p-sft
       #adapter: jokester-p-dpo
-      adapter:
+      #adapter:
     anthropic:
       model: "claude-haiku-4-5"
       #model: "claude-sonnet-4-20250514"

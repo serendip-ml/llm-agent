@@ -29,7 +29,7 @@ class Joke(BaseModel):
     """Structured joke output."""
 
     text: str = Field(min_length=1, validation_alias=AliasChoices("text", "joke"))
-    style: str = Field(min_length=1)  # pun, one-liner, observational, absurdist, etc.
+    style: str = Field(default="unknown", min_length=1)  # pun, one-liner, etc.
 
 
 @dataclass
