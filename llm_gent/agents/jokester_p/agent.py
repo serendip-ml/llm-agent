@@ -259,7 +259,7 @@ class JokesterAgent(Agent):
                 if self._should_continue_parallel(continuous, saved_count):
                     pending.add(asyncio.create_task(self._generator.generate_async(context)))
 
-        return self._finalize_parallel_run(pending, saved_count, total_attempts, last_result)
+        return await self._finalize_parallel_run(pending, saved_count, total_attempts, last_result)
 
     def _spawn_initial_workers(self, context: list[str]) -> set[asyncio.Task[GenerationAttempt]]:
         """Spawn initial worker pool."""
@@ -287,7 +287,7 @@ class JokesterAgent(Agent):
             return None
         return self._try_save_candidate(attempt)
 
-    def _finalize_parallel_run(
+    async def _finalize_parallel_run(
         self,
         pending: set[asyncio.Task[GenerationAttempt]],
         saved_count: int,
@@ -297,6 +297,10 @@ class JokesterAgent(Agent):
         """Finalize parallel run: cancel remaining workers and return result."""
         for task in pending:
             task.cancel()
+
+        # Await cancelled tasks to ensure cleanup runs
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
         self._lg.debug(
             "worker pool stopped",

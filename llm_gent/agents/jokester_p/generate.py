@@ -282,7 +282,12 @@ class JokeGenerator:
     async def _try_single_attempt_async(
         self, context: list[str], attempt: int
     ) -> tuple[Joke, str, AdapterInfo | None, NoveltyCheck | None] | None:
-        """Try to generate a single novel joke (async version)."""
+        """Try to generate a single novel joke (async version).
+
+        Note: _cumulative_attempts is incremented without synchronization during
+        parallel execution. This is intentional - the counter is approximate and
+        used only for metrics/logging, not for correctness.
+        """
         self._cumulative_attempts += 1
         retry_feedback = "" if attempt == 1 else "Try a completely different style."
 
@@ -333,7 +338,13 @@ class JokeGenerator:
     def _validate(
         self, joke: Joke, model_name: str, adapter: AdapterInfo | None, attempt: int
     ) -> tuple[Joke, str, AdapterInfo | None, NoveltyCheck | None] | None:
-        """Validate joke against denylist, completeness, variety, and novelty checks."""
+        """Validate joke against denylist, completeness, variety, and novelty checks.
+
+        Note: During parallel generation, multiple coroutines may call this method
+        concurrently via asyncio.to_thread(). The _history and _variety checks are
+        best-effort during parallel execution - race conditions may allow briefly
+        duplicate openings. This is mitigated by the re-check in _try_save_candidate.
+        """
         if not self._passes_basic_checks(joke.text, attempt):
             return None
 

@@ -5,6 +5,7 @@ Handles joke persistence, model usage tracking, and training metadata.
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
@@ -13,6 +14,30 @@ from llm_infer.client.types import AdapterInfo
 from llm_kelt import Client as KeltClient
 
 from .schema import ModelUsage, TrainingMetadata
+
+
+# Pattern for valid PostgreSQL schema names (alphanumeric + underscore, starting with letter/underscore)
+_VALID_SCHEMA_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _validate_schema_name(schema: str) -> str:
+    """Validate and return schema name.
+
+    Args:
+        schema: Schema name to validate.
+
+    Returns:
+        The validated schema name.
+
+    Raises:
+        ValueError: If schema name contains invalid characters.
+    """
+    if not _VALID_SCHEMA_PATTERN.match(schema):
+        raise ValueError(
+            f"Invalid schema name '{schema}': must be alphanumeric with underscores, "
+            f"starting with a letter or underscore"
+        )
+    return schema
 
 
 if TYPE_CHECKING:
@@ -112,10 +137,14 @@ class Storage:
         return self._learn.get_client_for_schema(schema)
 
     def _resolve_schema(self, adapter: AdapterInfo | None) -> str:
-        """Resolve the schema for an adapter, or return default."""
+        """Resolve the schema for an adapter, or return default.
+
+        Validates schema name to prevent SQL injection.
+        """
         if adapter is None:
-            return self._default_schema
-        return self._learn.resolve_schema_for_adapter(adapter)
+            return _validate_schema_name(self._default_schema)
+        schema = self._learn.resolve_schema_for_adapter(adapter)
+        return _validate_schema_name(schema)
 
     def _ensure_tables_in_schema(self, schema: str) -> None:
         """Ensure agent tables exist in the given schema (lazy creation)."""

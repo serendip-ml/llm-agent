@@ -9,6 +9,7 @@ from llm_gent.agents.jokester_p.history import JokeHistory
 from llm_gent.agents.jokester_p.novelty import NoveltyCheck, NoveltyChecker
 from llm_gent.agents.jokester_p.variety import VarietyChecker
 from llm_gent.core.training import StarPreferencePair, StarRatedItem
+from llm_gent.core.training.pairing.stars import StarFilter, pair_by_margin
 
 
 pytestmark = pytest.mark.unit
@@ -263,3 +264,141 @@ class TestVarietyChecker:
         checker.record("Why did the chicken cross the road?")
         result = checker.check("I used to hate facial hair, but then it grew on me.")
         assert result.is_varied is True
+
+
+class TestStarsPairing:
+    """Tests for star-based preference pairing algorithm."""
+
+    def _make_items(self, scores: list[int]) -> list[StarRatedItem]:
+        """Create rated items from a list of scores."""
+        return [StarRatedItem(id=i, content=f"joke_{i}", score=s) for i, s in enumerate(scores)]
+
+    def test_pair_by_margin_empty_list(self):
+        """Empty list returns empty result."""
+        result = pair_by_margin([], margin=2)
+        assert result.pairs == []
+        assert result.total_rated == 0
+
+    def test_pair_by_margin_basic(self):
+        """Basic pairing with margin=2."""
+        items = self._make_items([5, 4, 3, 2, 1])
+        result = pair_by_margin(items, margin=2)
+
+        assert len(result.pairs) > 0
+        for pair in result.pairs:
+            assert pair.chosen.score - pair.rejected.score >= 2
+
+    def test_pair_by_margin_respects_margin(self):
+        """Pairs respect minimum margin requirement."""
+        items = self._make_items([5, 4, 3, 2, 1])
+        result = pair_by_margin(items, margin=3)
+
+        for pair in result.pairs:
+            assert pair.chosen.score - pair.rejected.score >= 3
+
+    def test_pair_by_margin_no_valid_pairs(self):
+        """Returns empty when no pairs meet margin."""
+        items = self._make_items([3, 3, 3])  # All same score
+        result = pair_by_margin(items, margin=2)
+
+        assert result.pairs == []
+        assert result.total_rated == 3
+
+    def test_pair_by_margin_no_reuse(self):
+        """Each chosen item used once with no_reuse=True."""
+        items = self._make_items([5, 5, 4, 1, 1, 1])
+        result = pair_by_margin(items, margin=3, no_reuse=True)
+
+        chosen_ids = [p.chosen.id for p in result.pairs]
+        assert len(chosen_ids) == len(set(chosen_ids))  # No duplicates
+
+    def test_pair_by_margin_with_reuse(self):
+        """Chosen items can be reused with no_reuse=False."""
+        items = self._make_items([5, 1, 1, 1, 1])
+        result = pair_by_margin(items, margin=3, min_pairs=4, no_reuse=False)
+
+        # The single 5-star item should be reused to pair with multiple 1-star items
+        assert len(result.pairs) >= 1
+
+    def test_pair_by_margin_max_pairs(self):
+        """Max pairs caps output."""
+        items = self._make_items([5, 5, 5, 1, 1, 1])
+        result = pair_by_margin(items, margin=3, max_pairs=2)
+
+        assert len(result.pairs) <= 2
+
+    def test_pair_by_margin_with_chosen_filter(self):
+        """Chosen filter restricts chosen pool."""
+        items = self._make_items([5, 4, 3, 2, 1])
+        result = pair_by_margin(items, margin=2, chosen_filter=StarFilter(5, "=="))
+
+        for pair in result.pairs:
+            assert pair.chosen.score == 5
+
+    def test_pair_by_margin_with_rejected_filter(self):
+        """Rejected filter restricts rejected pool."""
+        items = self._make_items([5, 4, 3, 2, 1])
+        result = pair_by_margin(items, margin=2, rejected_filter=StarFilter(2, "<="))
+
+        for pair in result.pairs:
+            assert pair.rejected.score <= 2
+
+    def test_pair_by_margin_each_rejected_used_once(self):
+        """Each rejected item is used at most once (O(n) algorithm)."""
+        items = self._make_items([5, 5, 5, 1, 1, 1])
+        result = pair_by_margin(items, margin=3)
+
+        rejected_ids = [p.rejected.id for p in result.pairs]
+        assert len(rejected_ids) == len(set(rejected_ids))  # No duplicates
+
+    def test_pair_by_margin_invalid_margin(self):
+        """Raises ValueError for invalid margin."""
+        items = self._make_items([5, 1])
+        with pytest.raises(ValueError, match="margin must be >= 1"):
+            pair_by_margin(items, margin=0)
+
+    def test_pair_by_margin_invalid_min_max(self):
+        """Raises ValueError when min_pairs > max_pairs."""
+        items = self._make_items([5, 1])
+        with pytest.raises(ValueError, match="min_pairs.*cannot be greater than max_pairs"):
+            pair_by_margin(items, margin=2, min_pairs=10, max_pairs=5)
+
+
+class TestStarFilter:
+    """Tests for StarFilter parsing and matching."""
+
+    def test_parse_exact(self):
+        """Parse exact match filter."""
+        f = StarFilter.parse("3")
+        assert f.value == 3
+        assert f.op == "=="
+        assert f.matches(3) is True
+        assert f.matches(4) is False
+
+    def test_parse_greater_equal(self):
+        """Parse >= filter."""
+        f = StarFilter.parse(">=3")
+        assert f.value == 3
+        assert f.op == ">="
+        assert f.matches(3) is True
+        assert f.matches(4) is True
+        assert f.matches(2) is False
+
+    def test_parse_less_equal(self):
+        """Parse <= filter."""
+        f = StarFilter.parse("<=2")
+        assert f.value == 2
+        assert f.op == "<="
+        assert f.matches(2) is True
+        assert f.matches(1) is True
+        assert f.matches(3) is False
+
+    def test_parse_none(self):
+        """Parse None returns None."""
+        assert StarFilter.parse(None) is None
+
+    def test_parse_int(self):
+        """Parse int returns exact match."""
+        f = StarFilter.parse(4)
+        assert f.value == 4
+        assert f.op == "=="

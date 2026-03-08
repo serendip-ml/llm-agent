@@ -190,8 +190,12 @@ class NoveltyChecker:
             return str(self._current_schema)
         try:
             return self._learn.resolve_schema_for_adapter(adapter)
-        except Exception:
+        except Exception as e:
             # Manifest lookup failed - fall back to current schema
+            self._lg.debug(
+                "schema resolution failed, using current schema",
+                extra={"adapter": adapter.actual if adapter else None, "error": str(e)},
+            )
             return str(self._current_schema)
 
     def _handle_search_error(self, e: Exception, joke_text: str) -> NoveltyCheck:
@@ -242,8 +246,6 @@ class NoveltyChecker:
         self, t: Any, where_clause: str, params: dict[str, Any]
     ) -> list[Any]:
         """Parse where clause string into SQLAlchemy conditions."""
-        import re
-
         conditions = []
         if "is_base_model = true" in where_clause.lower():
             conditions.append(t.c.is_base_model == True)  # noqa: E712
@@ -251,8 +253,9 @@ class NoveltyChecker:
             conditions.append(t.c.base_model == params.get("model"))
         if "adapter_version = :adapter" in where_clause:
             conditions.append(t.c.adapter_version == params.get("adapter"))
-        if match := re.search(r"ILIKE '([^']+)'", where_clause):
-            conditions.append(t.c.base_model.ilike(match.group(1)))
+        if "base_model ILIKE :ref_pattern" in where_clause:
+            # Use parameterized ILIKE pattern for SQL injection safety
+            conditions.append(t.c.base_model.ilike(params.get("ref_pattern")))
         return conditions
 
     def _build_filter(
@@ -288,7 +291,7 @@ class NoveltyChecker:
     def _filter_reference_model_jokes(self, schema: str) -> EmbeddingFilter:
         """Filter to only reference model jokes."""
         subquery = self._schema_fact_ids_query(
-            schema, f"base_model ILIKE '%{self._reference_model}%'"
+            schema, "base_model ILIKE :ref_pattern", ref_pattern=f"%{self._reference_model}%"
         )
         self._lg.debug("filtering to reference model jokes only", extra={"schema": schema})
         return EmbeddingFilter().where(Fact.id.in_(subquery))
@@ -296,7 +299,7 @@ class NoveltyChecker:
     def _filter_local_model_jokes(self, schema: str) -> EmbeddingFilter:
         """Filter to local model jokes (exclude reference, include orphaned facts)."""
         ref_subquery = self._schema_fact_ids_query(
-            schema, f"base_model ILIKE '%{self._reference_model}%'"
+            schema, "base_model ILIKE :ref_pattern", ref_pattern=f"%{self._reference_model}%"
         )
         all_subquery = self._schema_fact_ids_query(schema, "1=1")
         self._lg.debug("filtering to exclude reference model jokes", extra={"schema": schema})
