@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -438,8 +439,6 @@ class TrainTool(Tool):
 
     def _expand_adapter_md5(self, value: str, factory: TrainFactory) -> str:
         """Expand abbreviated md5 (XX..XXXX) to full md5."""
-        import re
-
         match = re.match(r"^([0-9a-f]{2})\.\.([0-9a-f]{4})$", value, re.IGNORECASE)
         if not match:
             return value  # Already full md5 or name

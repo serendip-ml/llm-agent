@@ -6,6 +6,7 @@ Uses core/training infrastructure for pairing algorithms.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
@@ -82,8 +83,6 @@ class PairingService:
         Returns:
             (pattern, is_adapter) tuple
         """
-        import re
-
         # Check for abbreviated md5 format: XX..XXXX
         abbrev_match = re.match(r"^([0-9a-f]{2})\.\.([0-9a-f]{4})$", model, re.IGNORECASE)
         if abbrev_match:

@@ -7,7 +7,6 @@ Uses direct SQL on atomic_facts tables.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Generator
 from dataclasses import dataclass
 
@@ -18,22 +17,9 @@ from sqlalchemy import text
 from llm_gent.core.llm import LLMCaller
 from llm_gent.core.training import StarRatedItem
 
+from ..schema import validate_schema_name
 from .models import BatchItem, BatchRequest, Result
 from .service import Service as CoreRatingService
-
-
-# Pattern for valid PostgreSQL schema names (alphanumeric + underscore, starting with letter/underscore)
-_VALID_SCHEMA_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-
-
-def _validate_schema_name(schema: str) -> str:
-    """Validate and return schema name to prevent SQL injection."""
-    if not _VALID_SCHEMA_PATTERN.match(schema):
-        raise ValueError(
-            f"Invalid schema name '{schema}': must be alphanumeric with underscores, "
-            f"starting with a letter or underscore"
-        )
-    return schema
 
 
 @dataclass
@@ -80,7 +66,7 @@ class BatchRatingService:
     def _schema_prefix(self) -> str:
         """Get schema prefix for table names."""
         if self._schema and self._schema != "public":
-            return f"{_validate_schema_name(self._schema)}."
+            return f"{validate_schema_name(self._schema)}."
         return ""
 
     def get_unrated(self, limit: int | None = None) -> list[UnratedItem]:

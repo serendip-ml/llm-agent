@@ -3,28 +3,14 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 from sqlalchemy import text
 
+from ..schema import validate_schema_name
 from .models import ProviderType, Result
-
-
-# Pattern for valid PostgreSQL schema names (alphanumeric + underscore, starting with letter/underscore)
-_VALID_SCHEMA_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-
-
-def _validate_schema_name(schema: str) -> str:
-    """Validate and return schema name to prevent SQL injection."""
-    if not _VALID_SCHEMA_PATTERN.match(schema):
-        raise ValueError(
-            f"Invalid schema name '{schema}': must be alphanumeric with underscores, "
-            f"starting with a letter or underscore"
-        )
-    return schema
 
 
 if TYPE_CHECKING:
@@ -59,7 +45,7 @@ class AtomicFactsBackend:
         """Get schema-qualified table name."""
         effective_schema = schema or self._schema
         if effective_schema and effective_schema != "public":
-            return f"{_validate_schema_name(effective_schema)}.{name}"
+            return f"{validate_schema_name(effective_schema)}.{name}"
         return name
 
     def save_rating(
