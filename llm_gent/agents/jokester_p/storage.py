@@ -5,7 +5,6 @@ Handles joke persistence, model usage tracking, and training metadata.
 
 from __future__ import annotations
 
-import re
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
@@ -13,31 +12,13 @@ from appinfra.log import Logger
 from llm_infer.client.types import AdapterInfo
 from llm_kelt.scoped_client import ScopedClient
 
+from llm_gent.core.memory.schema import validate_schema_name
+
 from .schema import ModelUsage, TrainingMetadata
 
 
-# Pattern for valid PostgreSQL schema names (alphanumeric + underscore, starting with letter/underscore)
-_VALID_SCHEMA_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-
-
-def _validate_schema_name(schema: str) -> str:
-    """Validate and return schema name.
-
-    Args:
-        schema: Schema name to validate.
-
-    Returns:
-        The validated schema name.
-
-    Raises:
-        ValueError: If schema name contains invalid characters.
-    """
-    if not _VALID_SCHEMA_PATTERN.match(schema):
-        raise ValueError(
-            f"Invalid schema name '{schema}': must be alphanumeric with underscores, "
-            f"starting with a letter or underscore"
-        )
-    return schema
+# Re-export for backward compatibility (cli.py and pairing.py import from here)
+_validate_schema_name = validate_schema_name
 
 
 if TYPE_CHECKING:

@@ -140,6 +140,18 @@ class JokeGenerator:
         """Record successful joke so future generations avoid it."""
         self._history.record(joke_text, fact_id)
 
+    def get_recent_jokes(self, limit: int) -> list[str]:
+        """Get recent jokes from in-memory history for style inspiration.
+
+        Args:
+            limit: Maximum number of jokes to return.
+
+        Returns:
+            List of recent joke texts.
+        """
+        recent = list(self._history._history)[-limit:]
+        return [r.joke for r in recent if r.joke]
+
     def check_novelty(
         self, joke: Joke, model_name: str, adapter: AdapterInfo | None
     ) -> GenerationAttempt:

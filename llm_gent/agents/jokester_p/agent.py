@@ -431,8 +431,7 @@ class JokesterAgent(Agent):
         """Get recent jokes from in-memory history for style inspiration."""
         if self._generator is None:
             return []
-        recent = list(self._generator._history._history)[-limit:]
-        return [r.joke for r in recent if r.joke]
+        return self._generator.get_recent_jokes(limit)
 
     def record_feedback(self, message: str) -> None:
         """Record feedback about a joke.
