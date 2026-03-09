@@ -92,6 +92,13 @@ class TrainTool(Tool):
         dpo_parser = subparsers.add_parser("dpo", help="Direct preference optimization")
         self._add_agent_subcommand(dpo_parser)
 
+        # Prompt tuning subcommand
+        prompt_parser = subparsers.add_parser(
+            "prompt", help="Prompt tuning (stable for large models)"
+        )
+        self._add_prompt_args(prompt_parser)
+        self._add_agent_subcommand(prompt_parser)
+
     def _add_common_args(self, parser: argparse.ArgumentParser) -> None:
         """Add common training arguments."""
         parser.add_argument(
@@ -142,6 +149,25 @@ class TrainTool(Tool):
         parser.add_argument("--epochs", type=int, help="Number of training epochs")
         parser.add_argument("--batch-size", type=int, help="Batch size")
 
+    def _add_prompt_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add prompt tuning specific arguments."""
+        parser.add_argument(
+            "--num-tokens",
+            type=int,
+            default=20,
+            help="Number of virtual tokens (default: 20, range: 8-50)",
+        )
+        parser.add_argument(
+            "--init-text",
+            type=str,
+            help="Text to initialize virtual tokens (e.g., 'You are a witty comedian.')",
+        )
+        parser.add_argument(
+            "--init-random",
+            action="store_true",
+            help="Use random initialization instead of text",
+        )
+
     def _add_agent_subcommand(self, parser: argparse.ArgumentParser) -> None:
         """Add 'agent' subcommand that takes agent name and args."""
         subparsers = parser.add_subparsers(dest="subcommand", help="Subcommand")
@@ -172,6 +198,8 @@ class TrainTool(Tool):
                 return self._run_sft(provider)
             elif method == "dpo":
                 return self._run_dpo(provider)
+            elif method == "prompt":
+                return self._run_prompt(provider)
             else:
                 print(f"Unknown method: {method}")
                 return 1
@@ -280,6 +308,26 @@ class TrainTool(Tool):
         factory = self._get_training_factory()
         return self._submit_manifest(factory, provider, "dpo", pairs)
 
+    def _run_prompt(self, provider: TrainingDataProvider) -> int:
+        """Run prompt tuning flow.
+
+        Prompt tuning uses same data format as SFT but trains only virtual tokens.
+        Stable for large models (32B+) where LoRA often fails with NaN gradients.
+        """
+        examples = provider.get_sft_examples(self.args)
+        if not examples:
+            print("\nNo examples available for prompt tuning.")
+            return 0
+
+        self._print_prompt_summary(examples, provider)
+
+        if self.args.dry_run:
+            print("\nDry run complete. Use without --dry-run to submit manifest.")
+            return 0
+
+        factory = self._get_training_factory()
+        return self._submit_manifest(factory, provider, "prompt", examples)
+
     def _get_training_factory(self) -> TrainFactory:
         """Get training factory - llm-kelt handles defaults."""
         path = self._get_registry_path()
@@ -333,7 +381,7 @@ class TrainTool(Tool):
         self,
         factory: TrainFactory,
         provider: TrainingDataProvider,
-        method: Literal["sft", "dpo"],
+        method: Literal["sft", "dpo", "prompt"],
         data: list[dict[str, Any]],
     ) -> int:
         """Create and submit training manifest."""
@@ -362,7 +410,7 @@ class TrainTool(Tool):
         factory: TrainFactory,
         provider: TrainingDataProvider,
         adapter_name: str,
-        method: Literal["sft", "dpo"],
+        method: Literal["sft", "dpo", "prompt"],
         data: list[dict[str, Any]],
     ) -> Any:
         """Create training manifest with all overrides."""
@@ -399,13 +447,37 @@ class TrainTool(Tool):
         return str(schema_name) if schema_name else None
 
     def _build_config_overrides(self) -> dict[str, Any] | None:
-        """Build config overrides from lora and training args."""
+        """Build config overrides from lora, prompt, and training args."""
         config: dict[str, Any] = {}
         if lora := self._get_lora_overrides():
             config["lora"] = lora
+        if prompt := self._get_prompt_overrides():
+            config.update(prompt)  # Prompt args go at top level
         if training := self._get_training_overrides():
             config.update(training)  # Training args go at top level of config
         return config if config else None
+
+    def _get_prompt_overrides(self) -> dict[str, Any] | None:
+        """Get prompt tuning config overrides from command line args."""
+        # Only relevant for prompt method
+        if getattr(self.args, "method", None) != "prompt":
+            return None
+
+        overrides: dict[str, Any] = {}
+        num_tokens = getattr(self.args, "num_tokens", None)
+        if num_tokens is not None:
+            overrides["num_virtual_tokens"] = num_tokens
+
+        init_random = getattr(self.args, "init_random", False)
+        if init_random:
+            overrides["prompt_tuning_init"] = "RANDOM"
+        else:
+            overrides["prompt_tuning_init"] = "TEXT"
+            init_text = getattr(self.args, "init_text", None)
+            if init_text:
+                overrides["prompt_tuning_init_text"] = init_text
+
+        return overrides if overrides else None
 
     def _confirm_replace(self, adapter_name: str) -> bool:
         """Confirm replacement of existing manifest."""
@@ -479,6 +551,28 @@ class TrainTool(Tool):
         """Print DPO training summary."""
         print(f"\n=== DPO Training: {provider.get_context_key()} ===")
         print(f"Pairs: {len(pairs)}")
+
+    def _print_prompt_summary(
+        self, examples: list[dict[str, str]], provider: TrainingDataProvider
+    ) -> None:
+        """Print prompt tuning summary."""
+        num_tokens = getattr(self.args, "num_tokens", 20)
+        init_text = getattr(self.args, "init_text", None)
+        init_mode = "RANDOM" if getattr(self.args, "init_random", False) else "TEXT"
+
+        print(f"\n=== Prompt Tuning: {provider.get_context_key()} ===")
+        print(f"Examples: {len(examples)}")
+        print(f"Virtual tokens: {num_tokens}")
+        print(f"Init mode: {init_mode}")
+        if init_text:
+            print(f"Init text: {init_text[:60]}{'...' if len(init_text) > 60 else ''}")
+        print("\nSample:")
+        for i, ex in enumerate(examples[:3], 1):
+            output = ex.get("output", "")[:60]
+            suffix = "..." if len(ex.get("output", "")) > 60 else ""
+            print(f"  {i}. {output}{suffix}")
+        if len(examples) > 3:
+            print(f"  ... and {len(examples) - 3} more")
 
     def _print_submit_result(
         self, manifest: Any, method: str, count: int, path: Path | None

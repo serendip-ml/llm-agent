@@ -29,6 +29,9 @@ class JokesterTrainingProvider:
             self._add_sft_args(parser)
         elif method == "dpo":
             self._add_dpo_args(parser)
+        elif method == "prompt":
+            # Prompt tuning uses same data as SFT
+            self._add_sft_args(parser)
 
     def _add_common_args(self, parser: argparse.ArgumentParser) -> None:
         """Add common training arguments (SFT and DPO)."""
@@ -157,8 +160,9 @@ class JokesterTrainingProvider:
 
     def get_description(self, method: str, count: int) -> str:
         """Get description for the training manifest."""
-        if method == "sft":
-            return f"SFT from {count} high-rated jokes"
-        elif method == "dpo":
-            return f"DPO from {count} preference pairs"
-        return f"{method.upper()} training with {count} examples"
+        descriptions = {
+            "sft": f"SFT from {count} high-rated jokes",
+            "dpo": f"DPO from {count} preference pairs",
+            "prompt": f"Prompt tuning from {count} high-rated jokes",
+        }
+        return descriptions.get(method, f"{method.upper()} training with {count} examples")
