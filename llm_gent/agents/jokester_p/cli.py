@@ -601,7 +601,10 @@ class JokesterCLI(Tool):
         by_schema = self._group_stats_by_schema_model(all_stats)
         if not by_schema:
             return
+        ref_set = set(self._reference_schemas)
         for schema, models in by_schema.items():
+            if schema in ref_set:
+                continue  # Reference schemas are shown separately
             print(schema)
             model_items = list(models.items())
             for i, (model_name, adapters) in enumerate(model_items):

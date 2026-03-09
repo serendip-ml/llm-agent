@@ -66,9 +66,7 @@ llm:
   default: local
   backends:
     local:
-      adapter: jokester-p-sft
-      #adapter: jokester-p-dpo
-      #adapter:
+      adapter: # jokester-p-sft, jokester-p-dpo, jokester-p-prompt
     anthropic:
       model: "claude-haiku-4-5"
       #model: "claude-sonnet-4-20250514"
