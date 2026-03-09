@@ -211,7 +211,7 @@ class TrainTool(Tool):
         """Validate method and subcommand args."""
         method = self.args.method
         if method is None:
-            print("Usage: train <sft|dpo> [options] agent <name> [agent-options]")
+            print("Usage: train <sft|dpo|prompt> [options] agent <name> [agent-options]")
             return None
 
         subcommand = getattr(self.args, "subcommand", None)
