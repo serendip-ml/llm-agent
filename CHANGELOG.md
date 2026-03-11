@@ -28,5 +28,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Migrated from llm-learn to llm-kelt for training
 - Refactored training infrastructure to core modules
 
-[Unreleased]: https://github.com/serendip-ml/llm-gent/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/serendip-ml/llm-gent/releases/tag/v0.1.0
+[Unreleased]: https://github.com/llm-works/llm-gent/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/llm-works/llm-gent/releases/tag/v0.1.0
