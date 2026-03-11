@@ -232,7 +232,7 @@ class JokeGenerator:
     ) -> tuple[Joke | None, str, AdapterInfo | None]:
         """Generate joke via LLM with structured output."""
         import appinfra.time
-        from llm_infer.client.exceptions import BackendRequestError, BackendTimeoutError
+        from llm_infer.client import BackendRequestError, BackendTimeoutError
 
         from ...core.llm.types import Message
 
@@ -317,7 +317,7 @@ class JokeGenerator:
     ) -> tuple[Joke | None, str, AdapterInfo | None]:
         """Generate joke via LLM with structured output (async version)."""
         import appinfra.time
-        from llm_infer.client.exceptions import BackendRequestError, BackendTimeoutError
+        from llm_infer.client import BackendRequestError, BackendTimeoutError
 
         from ...core.llm.types import Message
 

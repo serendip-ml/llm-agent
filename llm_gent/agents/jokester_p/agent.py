@@ -18,7 +18,7 @@ from typing import Any
 from appinfra import DotDict
 from appinfra.log import Logger
 from appinfra.time import Ticker, TickerMode, since
-from llm_infer.client.exceptions import BackendUnavailableError
+from llm_infer.client import BackendUnavailableError
 from llm_infer.client.types import AdapterInfo
 
 from ...core.agent import Agent, ExecutionResult
