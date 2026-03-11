@@ -31,10 +31,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # TODO: remove after these packages are released to PyPI
-          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@develop"
-          python -m pip install "git+https://github.com/serendip-ml/llm-infer.git@develop"
-          python -m pip install "git+https://github.com/serendip-ml/llm-kelt.git@develop"
-          python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@develop"
+          python -m pip install "git+https://github.com/llm-works/appinfra.git@develop"
+          python -m pip install "git+https://github.com/llm-works/llm-infer.git@develop"
+          python -m pip install "git+https://github.com/llm-works/llm-kelt.git@develop"
+          python -m pip install "git+https://github.com/llm-works/llm-saia.git@develop"
           python -m pip install -e ".[dev]"
 
       - name: Check formatting
@@ -66,10 +66,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # TODO: remove after these packages are released to PyPI
-          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@develop"
-          python -m pip install "git+https://github.com/serendip-ml/llm-infer.git@develop"
-          python -m pip install "git+https://github.com/serendip-ml/llm-kelt.git@develop"
-          python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@develop"
+          python -m pip install "git+https://github.com/llm-works/appinfra.git@develop"
+          python -m pip install "git+https://github.com/llm-works/llm-infer.git@develop"
+          python -m pip install "git+https://github.com/llm-works/llm-kelt.git@develop"
+          python -m pip install "git+https://github.com/llm-works/llm-saia.git@develop"
           python -m pip install -e ".[dev]"
 
       - name: Run tests
@@ -95,10 +95,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # TODO: remove after these packages are released to PyPI
-          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@develop"
-          python -m pip install "git+https://github.com/serendip-ml/llm-infer.git@develop"
-          python -m pip install "git+https://github.com/serendip-ml/llm-kelt.git@develop"
-          python -m pip install "git+https://github.com/serendip-ml/llm-saia.git@develop"
+          python -m pip install "git+https://github.com/llm-works/appinfra.git@develop"
+          python -m pip install "git+https://github.com/llm-works/llm-infer.git@develop"
+          python -m pip install "git+https://github.com/llm-works/llm-kelt.git@develop"
+          python -m pip install "git+https://github.com/llm-works/llm-saia.git@develop"
           python -m pip install -e ".[dev]"
 
       - name: Run tests with coverage
