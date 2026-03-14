@@ -136,7 +136,8 @@ class JokesterCLI(Tool):
         p.add_argument(
             "--model",
             type=str,
-            help="Filter by model (case-insensitive, supports * wildcard, e.g. 'qwen*14b')",
+            action="append",
+            help="Filter by model (repeatable, case-insensitive, supports * wildcard)",
         )
         p.add_argument(
             "--schema",
@@ -1070,24 +1071,35 @@ class JokesterCLI(Tool):
         return chars_join, chars_filter
 
     def _build_model_filter(
-        self, model: str | None, params: dict[str, Any] | None = None, prefix: str = ""
+        self,
+        model: list[str] | str | None,
+        params: dict[str, Any] | None = None,
+        prefix: str = "",
     ) -> tuple[str, str]:
         """Build JOIN and WHERE clause for model filtering.
 
         Supports glob-style patterns (e.g., "qwen*14b") with case-insensitive matching.
-        If params dict provided, adds model_pattern to it automatically.
+        Can accept a single model or list of models (OR logic).
+        If params dict provided, adds model_pattern_N to it automatically.
         """
         if not model:
             return "", ""
+
+        # Normalize to list
+        models = [model] if isinstance(model, str) else model
+
         if params is not None:
-            # Normalize to lowercase and convert glob * to SQL %
-            pattern = model.lower().replace("*", "%")
-            # Wrap with % if no wildcards present (substring match)
-            if "%" not in pattern:
-                pattern = f"%{pattern}%"
-            params["model_pattern"] = pattern
+            for i, m in enumerate(models):
+                # Normalize to lowercase and convert glob * to SQL %
+                pattern = m.lower().replace("*", "%")
+                # Wrap with % if no wildcards present (substring match)
+                if "%" not in pattern:
+                    pattern = f"%{pattern}%"
+                params[f"model_pattern_{i}"] = pattern
+
         model_join = f"JOIN {prefix}agent_jokester_model_usage mu ON mu.fact_id = af.id"
-        model_filter = "AND LOWER(mu.model_name) LIKE :model_pattern"
+        conditions = [f"LOWER(mu.model_name) LIKE :model_pattern_{i}" for i in range(len(models))]
+        model_filter = f"AND ({' OR '.join(conditions)})"
         return model_join, model_filter
 
     def _cmd_rate(self) -> int:
@@ -1098,7 +1110,7 @@ class JokesterCLI(Tool):
         if rate_config is None:
             return 1
 
-        prompt_template, batch_size, provider, model = rate_config
+        prompt_template, batch_size, provider, model, max_chars = rate_config
         schemas = self._get_schemas_to_query(getattr(self.args, "schema", None))
         if not schemas:
             print("No schemas found with joke data.")
@@ -1111,7 +1123,7 @@ class JokesterCLI(Tool):
 
         try:
             total = self._rate_all_schemas(
-                schemas, llm_caller, prompt_template, batch_size, provider, model
+                schemas, llm_caller, prompt_template, batch_size, provider, model, max_chars
             )
             if total == 0:
                 print("No unrated jokes found.")
@@ -1127,12 +1139,13 @@ class JokesterCLI(Tool):
         batch_size: int,
         provider: str,
         model: str,
+        max_chars: int | None,
     ) -> int:
         """Rate jokes across all schemas. Returns total count rated."""
         total = 0
         for schema in schemas:
             total += self._rate_schema(
-                schema, llm_caller, prompt_template, batch_size, provider, model
+                schema, llm_caller, prompt_template, batch_size, provider, model, max_chars
             )
         return total
 
@@ -1144,6 +1157,7 @@ class JokesterCLI(Tool):
         batch_size: int,
         provider: str,
         model: str,
+        max_chars: int | None,
     ) -> int:
         """Rate jokes in a specific schema. Returns count of rated jokes."""
         assert self._pg is not None
@@ -1157,6 +1171,7 @@ class JokesterCLI(Tool):
             provider=provider,
             model=model,
             schema=schema,
+            max_chars=max_chars,
         )
         unrated = service.get_unrated(self.args.limit)
         if not unrated:
@@ -1166,8 +1181,8 @@ class JokesterCLI(Tool):
         print(f"Unrated jokes: ~{len(unrated)}")
         return self._run_rating(service, batch_size)
 
-    def _load_rate_config(self) -> tuple[str, int, str, str] | None:
-        """Load rating config. Returns (prompt, batch_size, provider, model) or None."""
+    def _load_rate_config(self) -> tuple[str, int, str, str, int | None] | None:
+        """Load rating config. Returns (prompt, batch_size, provider, model, max_chars) or None."""
         agent_config = self._get_agent_config()
         if agent_config is None:
             print("Error: Could not load agent config")
@@ -1181,7 +1196,10 @@ class JokesterCLI(Tool):
         # Extract provider and model from first enabled provider
         provider, model = self._get_provider_settings(rating_config)
 
-        return (prompt_template, batch_size, provider, model)
+        # Get max_chars from target config
+        max_chars = agent_config.get("target", {}).get("max_chars")
+
+        return (prompt_template, batch_size, provider, model, max_chars)
 
     def _run_rating(self, service: BatchRatingService, batch_size: int) -> int:
         """Execute rating and print results. Returns count of rated jokes."""

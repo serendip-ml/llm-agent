@@ -69,35 +69,35 @@ class JokesterTrainingProvider:
 
     def _add_dpo_args(self, parser: argparse.ArgumentParser) -> None:
         """Add DPO-specific training arguments."""
+        self._add_dpo_pairing_args(parser)
+        self._add_dpo_star_filter_args(parser)
+        self._add_dpo_length_balance_args(parser)
+
+    def _add_dpo_pairing_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add DPO pairing count arguments."""
+        parser.add_argument("--margin", type=int, help="Minimum star difference (default: 2)")
+        parser.add_argument("--min-pairs", type=int, help="Minimum pairs to generate")
+        parser.add_argument("--max-pairs", type=int, help="Maximum pairs to include")
+        parser.add_argument("--no-reuse", action="store_true", help="1:1 pairing only")
+
+    def _add_dpo_star_filter_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add DPO star filter arguments."""
+        parser.add_argument("--chosen-stars", type=str, help="Stars for chosen (e.g., 4 or >=4)")
         parser.add_argument(
-            "--margin",
-            type=int,
-            help="Minimum star difference for DPO pairs (default: 2)",
+            "--rejected-stars", type=str, help="Stars for rejected (e.g., 2 or <=2)"
         )
+
+    def _add_dpo_length_balance_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add DPO length balancing arguments."""
         parser.add_argument(
-            "--min-pairs",
-            type=int,
-            help="Minimum pairs to generate",
-        )
-        parser.add_argument(
-            "--max-pairs",
-            type=int,
-            help="Maximum pairs to include",
-        )
-        parser.add_argument(
-            "--no-reuse",
+            "--length-balance",
             action="store_true",
-            help="1:1 pairing only (no reuse of chosen jokes)",
+            help="Enable multi-pass length-balanced pairing to prevent length reward hacking",
         )
         parser.add_argument(
-            "--chosen-stars",
+            "--length-epsilons",
             type=str,
-            help="Stars for chosen (e.g., 4 or >=4)",
-        )
-        parser.add_argument(
-            "--rejected-stars",
-            type=str,
-            help="Stars for rejected (e.g., 2 or <=2)",
+            help="Custom length epsilons (comma-separated, e.g., '5,15,30'). Implies --length-balance",
         )
 
     def get_sft_examples(self, args: argparse.Namespace) -> list[dict[str, str]]:
@@ -130,6 +130,9 @@ class JokesterTrainingProvider:
         filter_schema = getattr(args, "filter_schema", None)
         service = PairingService(self._lg, self._pg, self._context_key, schema=filter_schema)
 
+        # Parse length balancing options
+        length_epsilons = self._parse_length_epsilons(args)
+
         result = service.create_pairs(
             margin=getattr(args, "margin", None) or 2,
             max_chars=args.max_chars,
@@ -139,12 +142,40 @@ class JokesterTrainingProvider:
             no_reuse=getattr(args, "no_reuse", False),
             chosen_stars=StarFilter.parse(getattr(args, "chosen_stars", None)),
             rejected_stars=StarFilter.parse(getattr(args, "rejected_stars", None)),
+            length_epsilons=length_epsilons,
         )
 
         return self._format_dpo_pairs(result.pairs)
 
+    def _parse_length_epsilons(self, args: argparse.Namespace) -> list[int | None] | None:
+        """Parse length epsilon options from CLI args.
+
+        Returns:
+            List of epsilons for multi-pass pairing, or None if disabled.
+        """
+        # Check for custom epsilons first
+        custom = getattr(args, "length_epsilons", None)
+        if custom:
+            epsilons: list[int | None] = []
+            for part in custom.split(","):
+                part = part.strip()
+                if part.lower() in ("none", ""):
+                    epsilons.append(None)
+                else:
+                    epsilons.append(int(part))
+            return epsilons
+
+        # Check for default length balance flag
+        if getattr(args, "length_balance", False):
+            # Default schedule: tight -> medium -> loose -> unconstrained
+            return [5, 15, 30, None]
+
+        return None
+
     def _format_dpo_pairs(self, pairs: list[Any]) -> list[dict[str, Any]]:
         """Convert preference pairs to DPO format."""
+        # Compute summary before conversion (needs raw pair scores/lengths)
+        self._last_summary = self._compute_summary(pairs)
         return [
             {
                 "prompt": "Tell me a joke.",
@@ -153,6 +184,56 @@ class JokesterTrainingProvider:
             }
             for p in pairs
         ]
+
+    def _compute_summary(self, pairs: list[Any]) -> list[str]:
+        """Compute summary lines from raw pairs."""
+        if not pairs:
+            return []
+
+        pair_counts = self._collect_pair_counts(pairs)
+        chosen_lens = [len(p.chosen.content) for p in pairs]
+        rejected_lens = [len(p.rejected.content) for p in pairs]
+
+        lines = self._format_pair_dist(pair_counts, len(pairs))
+
+        # Weighted average margin
+        total_margin = sum((c - r) * cnt for (c, r), cnt in pair_counts.items())
+        avg_margin = total_margin / len(pairs)
+        lines.append(f"Avg margin: {avg_margin:.1f}★")
+
+        c_avg = sum(chosen_lens) / len(chosen_lens)
+        r_avg = sum(rejected_lens) / len(rejected_lens)
+        lines.append(
+            f"Avg len: chosen={c_avg:.1f}  rejected={r_avg:.1f}  diff={c_avg - r_avg:+.1f}"
+        )
+
+        return lines
+
+    def get_dpo_summary(self) -> list[str] | None:
+        """Get formatted summary lines for DPO pairs.
+
+        Returns pair distribution (e.g., 5★ - 2★: 100) and length stats.
+        Must be called after get_dpo_pairs().
+        """
+        return getattr(self, "_last_summary", None) or None
+
+    def _collect_pair_counts(self, pairs: list[Any]) -> dict[tuple[int, int], int]:
+        """Collect counts for each (chosen_stars, rejected_stars) combination."""
+        counts: dict[tuple[int, int], int] = {}
+        for p in pairs:
+            key = (p.chosen.score, p.rejected.score)
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    def _format_pair_dist(self, counts: dict[tuple[int, int], int], total: int) -> list[str]:
+        """Format pair distribution as lines."""
+        lines = []
+        # Sort by chosen desc, then rejected desc
+        for c, r in sorted(counts.keys(), key=lambda x: (-x[0], -x[1])):
+            count = counts[(c, r)]
+            pct = 100 * count / total if total else 0
+            lines.append(f"{c}★ - {r}★: {count}({pct:.0f}%)")
+        return lines
 
     def get_context_key(self) -> str:
         """Get context key for this agent."""

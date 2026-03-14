@@ -142,12 +142,22 @@ class TrainTool(Tool):
         parser.add_argument("--lora-r", type=int, help="LoRA rank (default: 16)")
         parser.add_argument("--lora-alpha", type=int, help="LoRA alpha (default: 2x rank)")
         parser.add_argument("--lora-dropout", type=float, help="LoRA dropout (default: 0.05)")
+        parser.add_argument(
+            "--rslora",
+            action="store_true",
+            help="Enable rsLoRA scaling (recommended for 32B+ models)",
+        )
 
     def _add_optimizer_args(self, parser: argparse.ArgumentParser) -> None:
         """Add optimizer/training arguments."""
         parser.add_argument("--lr", type=float, dest="learning_rate", help="Learning rate")
         parser.add_argument("--epochs", type=int, help="Number of training epochs")
         parser.add_argument("--batch-size", type=int, help="Batch size")
+        parser.add_argument(
+            "--neftune-alpha",
+            type=float,
+            help="NEFTune noise alpha (recommended: 5 for <5K samples)",
+        )
 
     def _add_prompt_args(self, parser: argparse.ArgumentParser) -> None:
         """Add prompt tuning specific arguments."""
@@ -364,6 +374,8 @@ class TrainTool(Tool):
             overrides["lora_alpha"] = self.args.lora_alpha
         if getattr(self.args, "lora_dropout", None) is not None:
             overrides["lora_dropout"] = self.args.lora_dropout
+        if getattr(self.args, "rslora", False):
+            overrides["use_rslora"] = True
         return overrides if overrides else None
 
     def _get_training_overrides(self) -> dict[str, Any] | None:
@@ -375,6 +387,8 @@ class TrainTool(Tool):
             overrides["num_epochs"] = self.args.epochs
         if getattr(self.args, "batch_size", None) is not None:
             overrides["batch_size"] = self.args.batch_size
+        if getattr(self.args, "neftune_alpha", None) is not None:
+            overrides["neftune_noise_alpha"] = self.args.neftune_alpha
         return overrides if overrides else None
 
     def _submit_manifest(
@@ -551,6 +565,10 @@ class TrainTool(Tool):
         """Print DPO training summary."""
         print(f"\n=== DPO Training: {provider.get_context_key()} ===")
         print(f"Pairs: {len(pairs)}")
+
+        if hasattr(provider, "get_dpo_summary"):
+            for line in provider.get_dpo_summary() or []:
+                print(f"  {line}")
 
     def _print_prompt_summary(
         self, examples: list[dict[str, str]], provider: TrainingDataProvider

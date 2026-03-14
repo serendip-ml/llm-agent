@@ -51,6 +51,7 @@ class BatchRatingService:
         model: str = "auto",
         fact_type: str = "solution",
         schema: str | None = None,
+        max_chars: int | None = None,
     ) -> None:
         self._lg = lg
         self._pg = pg
@@ -62,6 +63,7 @@ class BatchRatingService:
         self._model = model
         self._fact_type = fact_type
         self._schema = schema
+        self._max_chars = max_chars
 
     def _schema_prefix(self) -> str:
         """Get schema prefix for table names."""
@@ -70,9 +72,13 @@ class BatchRatingService:
         return ""
 
     def get_unrated(self, limit: int | None = None) -> list[UnratedItem]:
-        """Get unrated facts from the database."""
+        """Get unrated facts from the database.
+
+        Respects max_chars filter if configured.
+        """
         prefix = self._schema_prefix()
         limit_clause = "LIMIT :limit" if limit is not None else ""
+        max_chars_clause = "AND length(af.content) < :max_chars" if self._max_chars else ""
         sql = text(f"""
             SELECT af.id, af.content
             FROM {prefix}atomic_facts af
@@ -80,6 +86,7 @@ class BatchRatingService:
             WHERE af.context_key = :context_key
               AND af.type = :fact_type
               AND afd.id IS NULL
+              {max_chars_clause}
             ORDER BY af.created_at ASC
             {limit_clause}
         """)
@@ -89,6 +96,8 @@ class BatchRatingService:
         }
         if limit is not None:
             params["limit"] = limit
+        if self._max_chars is not None:
+            params["max_chars"] = self._max_chars
         with self._pg.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [UnratedItem(id=r[0], content=r[1]) for r in rows]
