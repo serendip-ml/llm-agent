@@ -66,15 +66,26 @@ class BatchRater:
         rating_trait: RatingTrait,
         batch_size: int,
         fact_type: str = "solution",
+        max_chars: int | None = None,
     ) -> None:
         self._lg = lg
         self._rating = rating_trait
         self._batch_size = batch_size
         self._fact_type = fact_type
+        self._max_chars = max_chars
         self._queue: list[tuple[int, str, str | None]] = []
 
     def queue(self, fact_id: int, content: str, schema: str | None = None) -> None:
-        """Queue a fact for rating. Flushes when batch is full."""
+        """Queue a fact for rating. Flushes when batch is full.
+
+        Skips items that exceed max_chars limit (if configured).
+        """
+        if self._max_chars is not None and len(content) >= self._max_chars:
+            self._lg.debug(
+                "skipped rating: exceeds max_chars",
+                extra={"fact_id": fact_id, "length": len(content), "max_chars": self._max_chars},
+            )
+            return
         self._queue.append((fact_id, content, schema))
         self._lg.debug(
             "queued for batch rating",

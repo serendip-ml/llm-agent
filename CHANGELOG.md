@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Length-balanced DPO pairing with `--length-balance` and `--length-epsilons` to prevent length
+  reward hacking via multi-pass pairing with progressively looser constraints
+- rsLoRA scaling with `--rslora` flag (recommended for 32B+ models)
+- NEFTune noise injection with `--neftune-alpha` for better generalization on small datasets
+- DPO summary statistics showing pair distribution (e.g., 5★-2★: 100) and length metrics
+
 ## [0.1.0] - 2026-02-26
 
 ### Added

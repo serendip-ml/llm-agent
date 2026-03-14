@@ -167,4 +167,5 @@ class Factory(BaseFactory):
         if not rating_trait:
             return None
         batch_size = rating_config.get("batch_size", 5)
-        return BatchRater(lg, rating_trait, batch_size)
+        max_chars = config.get("target", {}).get("max_chars")
+        return BatchRater(lg, rating_trait, batch_size, max_chars=max_chars)
