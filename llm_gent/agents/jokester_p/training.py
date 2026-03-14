@@ -174,8 +174,8 @@ class JokesterTrainingProvider:
 
     def _format_dpo_pairs(self, pairs: list[Any]) -> list[dict[str, Any]]:
         """Convert preference pairs to DPO format."""
-        # Store pairs for stats (used by get_dpo_stats)
-        self._last_pairs = pairs
+        # Compute summary before conversion (needs raw pair scores/lengths)
+        self._last_summary = self._compute_summary(pairs)
         return [
             {
                 "prompt": "Tell me a joke.",
@@ -185,14 +185,10 @@ class JokesterTrainingProvider:
             for p in pairs
         ]
 
-    def get_dpo_summary(self) -> list[str] | None:
-        """Get formatted summary lines for DPO pairs.
-
-        Returns pair distribution (e.g., 5★ - 2★: 100) and length stats.
-        """
-        pairs = getattr(self, "_last_pairs", None)
+    def _compute_summary(self, pairs: list[Any]) -> list[str]:
+        """Compute summary lines from raw pairs."""
         if not pairs:
-            return None
+            return []
 
         pair_counts = self._collect_pair_counts(pairs)
         chosen_lens = [len(p.chosen.content) for p in pairs]
@@ -202,16 +198,24 @@ class JokesterTrainingProvider:
 
         # Weighted average margin
         total_margin = sum((c - r) * cnt for (c, r), cnt in pair_counts.items())
-        avg_margin = total_margin / len(pairs) if pairs else 0
+        avg_margin = total_margin / len(pairs)
         lines.append(f"Avg margin: {avg_margin:.1f}★")
 
-        c_avg = sum(chosen_lens) / len(chosen_lens) if chosen_lens else 0
-        r_avg = sum(rejected_lens) / len(rejected_lens) if rejected_lens else 0
+        c_avg = sum(chosen_lens) / len(chosen_lens)
+        r_avg = sum(rejected_lens) / len(rejected_lens)
         lines.append(
             f"Avg len: chosen={c_avg:.1f}  rejected={r_avg:.1f}  diff={c_avg - r_avg:+.1f}"
         )
 
         return lines
+
+    def get_dpo_summary(self) -> list[str] | None:
+        """Get formatted summary lines for DPO pairs.
+
+        Returns pair distribution (e.g., 5★ - 2★: 100) and length stats.
+        Must be called after get_dpo_pairs().
+        """
+        return getattr(self, "_last_summary", None) or None
 
     def _collect_pair_counts(self, pairs: list[Any]) -> dict[tuple[int, int], int]:
         """Collect counts for each (chosen_stars, rejected_stars) combination."""
